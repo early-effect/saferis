@@ -90,7 +90,7 @@ lazy val core = project
       "dev.zio"           %% "zio-test-sbt"              % zioVersion % Test,
       "dev.zio"           %% "zio-test-magnolia"         % zioVersion % Test,
       "org.testcontainers" % "postgresql"                % "1.21.4"   % Test,
-      "org.postgresql"     % "postgresql"                % "42.7.11"  % Test,
+      "org.postgresql"     % "postgresql"                % "42.7.13"  % Test,
     ),
   )
 
@@ -105,7 +105,7 @@ lazy val docs = project
       "dev.zio"           %% "zio"        % zioVersion,
       "dev.zio"           %% "zio-json"   % "0.9.0",
       "org.testcontainers" % "postgresql" % "1.21.4",
-      "org.postgresql"     % "postgresql" % "42.7.11",
+      "org.postgresql"     % "postgresql" % "42.7.13",
       "org.slf4j"          % "slf4j-nop"  % "2.0.18",
     ),
     marklitTargetDirectory  := (ThisBuild / baseDirectory).value / "docs",
