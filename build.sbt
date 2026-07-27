@@ -1,10 +1,10 @@
 val scala3Version = "3.3.8"
 val zioVersion    = "2.1.26"
 
-// Global settings using ThisBuild scope
+// Global settings. Iterable/saferis overrides group via PUBLISH_ORG from ZipxGitHubPackages.
 ThisBuild / scalaVersion         := scala3Version
-ThisBuild / organization         := "rocks.earlyeffect"
-ThisBuild / organizationName     := "Early Effect"
+ThisBuild / organization         := sys.env.getOrElse("PUBLISH_ORG", "rocks.earlyeffect")
+ThisBuild / organizationName     := sys.env.getOrElse("PUBLISH_ORG_NAME", "Early Effect")
 ThisBuild / organizationHomepage := Some(url("https://www.earlyeffect.rocks"))
 ThisBuild / licenses             := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt"))
 ThisBuild / homepage             := Some(url("https://github.com/early-effect/saferis"))
@@ -24,32 +24,55 @@ ThisBuild / developers := List(
 )
 ThisBuild / versionScheme := Some("early-semver")
 
-// Publishing to Sonatype's Central Portal. sbt 1.11+ has built-in support via
-// `localStaging` / `publishSigned` / `sonaRelease` — no sbt-sonatype plugin needed.
-ThisBuild / publishTo := {
+// Dual publish: Central by default; GitHub Packages when CI sets PUBLISH_PACKAGES_REPO.
+val githubPackagesRepo: Option[MavenRepository] =
+  sys.env.get("PUBLISH_PACKAGES_REPO").map("GitHub Package Registry" at _)
+
+ThisBuild / credentials ++= sys.env
+  .get("GITHUB_TOKEN")
+  .map { token =>
+    Credentials("GitHub Package Registry", "maven.pkg.github.com", "_", token)
+  }
+  .toSeq
+
+ThisBuild / resolvers ++= githubPackagesRepo.toSeq
+
+ThisBuild / publishTo := githubPackagesRepo.orElse {
   val centralSnapshots =
     "https://central.sonatype.com/repository/maven-snapshots/"
   if (isSnapshot.value) Some("central-snapshots" at centralSnapshots)
   else localStaging.value
 }
 
-// CI-only publishing: the signing key hex comes from the PGP_KEY_HEX env var, set by
-// the shared early-effect org secret in the release workflow. There is no real key in
-// this file — the "MISSING_KEY_HEX" sentinel keeps the build loadable for local
-// compile/test but makes signing fail loudly if anyone tries to publish off-CI.
-usePgpKeyHex(sys.env.getOrElse("PGP_KEY_HEX", "MISSING_KEY_HEX"))
+// CI-only Central signing. Fork Packages publishes are unsigned (token auth).
+githubPackagesRepo match {
+  case None    => usePgpKeyHex(sys.env.getOrElse("PGP_KEY_HEX", "MISSING_KEY_HEX"))
+  case Some(_) => Seq.empty
+}
 
-// zipx: Aggregate verify (tests + marklit docs) + Central publish + Scala Steward.
+// zipx: Aggregate verify (tests + marklit on all repos) + dual publish by repo + Steward.
 zipxJavaVersion  := "25"
 zipxScalaSteward := true
-zipxCapabilities += Capability.once("fmt", "scalafmtCheckAll")
-zipxCapabilities += Capability.once(
-  name = "test",
-  command = "test; docs/marklitCompile",
-  needsCapabilities = List("fmt"),
-)
-zipxCapabilities += ZipxCentral.release.copy(command = _ => "+publishSigned; sonaRelease")
-
+zipxCapabilities ++= {
+  val upstream = JobCondition.repositoryIs("early-effect/saferis")
+  Seq(
+    Capability.once("fmt", "scalafmtCheckAll"),
+    Capability.once(
+      name = "test",
+      command = "test; docs/marklitCompile",
+      needsCapabilities = List("fmt"),
+    ),
+    ZipxCentral.release
+      .copy(command = _ => "core/publishSigned; sonaRelease")
+      .withCondition(upstream),
+    ZipxGitHubPackages.sharedRegistry(
+      repository = Some("Iterable/saferis"),
+      packagesRepo = Some("https://maven.pkg.github.com/iterable/maven-packages"),
+      publishOrg = Some("com.iterable"),
+      publishOrgName = Some("Iterable"),
+    ).copy(command = _ => "core/publish"),
+  )
+}
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
     "-deprecation",
@@ -99,8 +122,10 @@ lazy val docs = project
   .dependsOn(core)
   .settings(commonSettings)
   .settings(
-    name           := "saferis-docs",
-    publish / skip := true,
+    name            := "saferis-docs",
+    publish / skip  := true,
+    publishArtifact := false,
+    zipxPublish     := Some(false), // never join Central / Packages publish jobs
     libraryDependencies ++= Seq(
       "dev.zio"           %% "zio"        % zioVersion,
       "dev.zio"           %% "zio-json"   % "0.9.0",
