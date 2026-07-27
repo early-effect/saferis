@@ -61,6 +61,30 @@ zipxCapabilities ++= {
       name = "test",
       command = "test; docs/marklitCompile",
       needsCapabilities = List("fmt"),
+      // GHA VMs are disposable; skip Ryuk so Hub flakes on testcontainers/ryuk cannot fail CI.
+      env = Map("TESTCONTAINERS_RYUK_DISABLED" -> EnvValue.plain("true")),
+      extraSteps = _ =>
+        List(
+          Step(
+            name = Some("Pre-pull Postgres image"),
+            run = Some(
+              """|set -euo pipefail
+                 |image=postgres:latest
+                 |max=5
+                 |for attempt in $(seq 1 "$max"); do
+                 |  if docker pull "$image"; then
+                 |    exit 0
+                 |  fi
+                 |  if [ "$attempt" -eq "$max" ]; then
+                 |    echo "Failed to pull $image after $max attempts" >&2
+                 |    exit 1
+                 |  fi
+                 |  sleep $((attempt * 10))
+                 |done
+                 |""".stripMargin
+            ),
+          )
+        ),
     ),
     ZipxCentral.release
       .copy(command = _ => "core/publishSigned; sonaRelease")
