@@ -7,6 +7,7 @@ name: CI
     tags:
       - v[0-9]+.[0-9]+.[0-9]+
   pull_request: null
+  workflow_dispatch: null
 concurrency:
   group: CI-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -317,3 +318,13 @@ jobs:
             ubuntu-latest-jdk25-sbt-
       - name: github-packages
         run: sbt 'core/publish'
+  docs:
+    name: docs
+    if: ((startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch')) && (github.repository == 'early-effect/saferis')
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: early-effect/.github/.github/workflows/specular-docs.yml@main
+    with:
+      sbt-project: docs
