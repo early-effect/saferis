@@ -1,0 +1,21 @@
+name: Docs
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    uses: early-effect/.github/.github/workflows/specular-docs.yml@main
+    with:
+      sbt-project: docs

@@ -50,7 +50,7 @@ githubPackagesRepo match {
   case Some(_) => Seq.empty
 }
 
-// zipx: Aggregate verify (tests + marklit on all repos) + dual publish by repo + Steward.
+// zipx: Aggregate verify (tests + Specular docs site) + dual publish by repo + Steward.
 zipxJavaVersion  := "25"
 zipxScalaSteward := true
 zipxCapabilities ++= {
@@ -59,7 +59,7 @@ zipxCapabilities ++= {
     Capability.once("fmt", "scalafmtCheckAll"),
     Capability.once(
       name = "test",
-      command = "test; docs/marklitCompile",
+      command = "test; docs/specularSite",
       needsCapabilities = List("fmt"),
       // GHA VMs are disposable; skip Ryuk so Hub flakes on testcontainers/ryuk cannot fail CI.
       env = Map("TESTCONTAINERS_RYUK_DISABLED" -> EnvValue.plain("true")),
@@ -89,12 +89,14 @@ zipxCapabilities ++= {
     ZipxCentral.release
       .copy(command = _ => "core/publishSigned; sonaRelease")
       .withCondition(upstream),
-    ZipxGitHubPackages.sharedRegistry(
-      repository = Some("Iterable/saferis"),
-      packagesRepo = Some("https://maven.pkg.github.com/iterable/maven-packages"),
-      publishOrg = Some("com.iterable"),
-      publishOrgName = Some("Iterable"),
-    ).copy(command = _ => "core/publish"),
+    ZipxGitHubPackages
+      .sharedRegistry(
+        repository = Some("Iterable/saferis"),
+        packagesRepo = Some("https://maven.pkg.github.com/iterable/maven-packages"),
+        publishOrg = Some("com.iterable"),
+        publishOrgName = Some("Iterable"),
+      )
+      .copy(command = _ => "core/publish"),
   )
 }
 lazy val commonSettings = Seq(
@@ -141,24 +143,37 @@ lazy val core = project
     ),
   )
 
+val specularVersion = "0.11.0"
+
 lazy val docs = project
   .in(file("saferis-docs"))
   .dependsOn(core)
+  .enablePlugins(SpecularPlugin)
   .settings(commonSettings)
   .settings(
-    name            := "saferis-docs",
+    name := "saferis-docs",
+    // Specular 0.11.0 is built on 3.8.x; keep published core on ThisBuild LTS (3.3.8).
+    scalaVersion    := "3.8.4",
     publish / skip  := true,
     publishArtifact := false,
     zipxPublish     := Some(false), // never join Central / Packages publish jobs
     libraryDependencies ++= Seq(
-      "dev.zio"           %% "zio"        % zioVersion,
-      "dev.zio"           %% "zio-json"   % "0.9.0",
-      "org.testcontainers" % "postgresql" % "1.21.4",
-      "org.postgresql"     % "postgresql" % "42.7.13",
-      "org.slf4j"          % "slf4j-nop"  % "2.0.18",
+      "dev.zio"           %% "zio"                     % zioVersion,
+      "dev.zio"           %% "zio-streams"             % zioVersion,
+      "dev.zio"           %% "zio-json"                % "0.9.0",
+      "dev.zio"           %% "zio-test"                % zioVersion      % Test,
+      "dev.zio"           %% "zio-test-sbt"            % zioVersion      % Test,
+      "rocks.earlyeffect" %% "specular-core"           % specularVersion % Test,
+      "rocks.earlyeffect" %% "specular-zio-test"       % specularVersion % Test,
+      "rocks.earlyeffect" %% "specular-site"           % specularVersion % Test,
+      "rocks.earlyeffect" %% "early-effect-docs-theme" % specularVersion % Test,
+      "org.testcontainers" % "postgresql"              % "1.21.4"        % Test,
+      "org.postgresql"     % "postgresql"              % "42.7.13"       % Test,
+      "org.slf4j"          % "slf4j-nop"               % "2.0.18"        % Test,
     ),
-    marklitTargetDirectory  := (ThisBuild / baseDirectory).value / "docs",
-    marklitRunResourceClass := Some("saferis.docs.DocsTransactor"),
-    marklitShowWarnings     := false,
+    specularBuildMain     := "saferis.docs.BuildSite",
+    specularMetaProject   := Some(LocalProject("core")),
+    specularArtifactKind  := "library",
+    specularSiteDirectory := (ThisBuild / baseDirectory).value / "target" / "site",
     scalacOptions ~= (_.filterNot(_ == "-Wunused:all")),
   )
