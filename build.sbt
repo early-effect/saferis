@@ -50,9 +50,10 @@ githubPackagesRepo match {
   case Some(_) => Seq.empty
 }
 
-// zipx: Aggregate verify (tests + Specular docs site) + dual publish by repo + Steward.
-zipxJavaVersion  := "25"
-zipxScalaSteward := true
+// zipx: Aggregate verify (tests + Specular docs site) + dual publish by repo + Steward + Pages.
+zipxJavaVersion      := "25"
+zipxScalaSteward     := true
+zipxWorkflowDispatch := true
 zipxCapabilities ++= {
   val upstream = JobCondition.repositoryIs("early-effect/saferis")
   Seq(
@@ -97,6 +98,8 @@ zipxCapabilities ++= {
         publishOrgName = Some("Iterable"),
       )
       .copy(command = _ => "core/publish"),
+    // Same org reusable workflow as peers; generated into ci.yml (no hand-rolled docs.yml).
+    ZipxDocs.pages().andCondition(upstream),
   )
 }
 lazy val commonSettings = Seq(
