@@ -114,7 +114,7 @@ jobs:
           done
 
       - name: test
-        run: sbt 'test; docs/marklitCompile'
+        run: sbt 'test; docs/specularSite'
   fmt:
     name: fmt
     runs-on: ubuntu-latest
