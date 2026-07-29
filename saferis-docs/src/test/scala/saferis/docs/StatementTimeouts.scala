@@ -34,17 +34,17 @@ When both apply, the aspect wins (per-scope ad-hoc overrides beat the Transactor
         // Every statement run through this Transactor is bounded by 30 seconds, unless overridden by the aspect.
         val xaLayer = Transactor.layer(defaultTimeout = Some(30.seconds))
         xaLayer
-      }.assert(_ => assertTrue(true)),
+      }.assert(_ => assertTrue(true))
     ),
     section("Resolution order")(
       md"""When a statement is about to execute, Saferis picks the timeout in this priority order:
 
 1. The value installed by `Saferis.queryTimeout(d)` for the current fiber, if any.
 2. The Transactor's `defaultTimeout`, if set.
-3. No timeout (current default behavior).""",
+3. No timeout (current default behavior)."""
     ),
     section("Granularity")(
-      md"""JDBC's `setQueryTimeout` accepts whole seconds. Saferis accepts a `zio.Duration` and rounds **up** to the nearest second, with a minimum of 1 second. This is intentional: `setQueryTimeout(0)` means *no limit* in JDBC, so a sub-second duration must not silently disable the cap.""",
+      md"""JDBC's `setQueryTimeout` accepts whole seconds. Saferis accepts a `zio.Duration` and rounds **up** to the nearest second, with a minimum of 1 second. This is intentional: `setQueryTimeout(0)` means *no limit* in JDBC, so a sub-second duration must not silently disable the cap."""
     ),
     section("Handling timeout errors")(
       md"""A timed-out statement surfaces as `SaferisError.Timeout`. This applies to both client-side timeouts triggered by `setQueryTimeout` and server-side cancellations (SQLState `57014`):""",
@@ -54,7 +54,7 @@ When both apply, the aspect wins (per-scope ad-hoc overrides beat the Transactor
             .catchSome:
               case _: SaferisError.Timeout =>
                 ZIO.logWarning("Report query timed out, returning empty result").as(Chunk.empty)
-            @@ Saferis.queryTimeout(5.seconds)
+          @@ Saferis.queryTimeout(5.seconds)
         safeReport
       }.assert(_ => assertTrue(true)),
     ),

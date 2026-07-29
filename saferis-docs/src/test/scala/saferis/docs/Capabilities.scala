@@ -46,7 +46,8 @@ The `SpecializedDML` object provides type-safe operations that only compile when
         inserted <- dml.insertReturning(SpecializedItem(-1, "Widget", "hardware"))
         _        <- dml.insert(SpecializedItem(-1, "Gadget", "electronics"))
         all      <- sql"SELECT * FROM ${Table[SpecializedItem]}".query[SpecializedItem]
-      yield (inserted, all)).either
+      yield (inserted, all))
+        .either
     }.assert {
       case Right((inserted, all)) => assertTrue(inserted.name == "Widget" && all.size >= 2)
       case Left(err)              => assertTrue(false).label(err.message)
@@ -88,7 +89,8 @@ Write functions that require specific capabilities via `using` constraints. The 
       xa.run(for
         _        <- ddl.createTable[SpecializedItem](ifNotExists = true)
         returned <- dml.insertReturning(SpecializedItem(-1, "Capability Demo", "demo"))
-      yield returned).either
+      yield returned)
+        .either
     }.assert {
       case Right(returned) => assertTrue(returned.name == "Capability Demo")
       case Left(err)       => assertTrue(false).label(err.message)

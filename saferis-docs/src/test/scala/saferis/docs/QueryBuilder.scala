@@ -54,8 +54,8 @@ object QueryBuilder extends SaferisDocSpecSuite:
       exampleValue {
         // These compile - they have safety constraints:
         val withWhere = Query[SafetyUser].where(_.name).eq("Alice").build.sql // Has WHERE
-        val withLimit = Query[SafetyUser].limit(100).build.sql // Has LIMIT
-        val withAll   = Query[SafetyUser].all.build.sql // Explicit opt-in
+        val withLimit = Query[SafetyUser].limit(100).build.sql                // Has LIMIT
+        val withAll   = Query[SafetyUser].all.build.sql                       // Explicit opt-in
         (withWhere, withLimit, withAll)
       }.assert { case (w, l, a) =>
         assertTrue(w.toLowerCase.contains("where"), l.toLowerCase.contains("limit"), a.toLowerCase.contains("select"))
@@ -96,7 +96,9 @@ Query[SafetyUser].build
           .build
           .sql
       }.assert(sql =>
-        assertTrue(sql.toLowerCase.contains("order") && sql.toLowerCase.contains("limit") && sql.toLowerCase.contains("offset")),
+        assertTrue(
+          sql.toLowerCase.contains("order") && sql.toLowerCase.contains("limit") && sql.toLowerCase.contains("offset")
+        )
       ),
     ),
     section("Type-Safe WHERE Clauses")(
@@ -248,7 +250,7 @@ Query[SafetyUser].build
 | `gte()` | `>=` | Greater than or equal |
 | `isNull()` | `is null` | Null check |
 | `isNotNull()` | `is not null` | Non-null check |
-| `op(Operator.X)` | Custom | Any operator |""",
+| `op(Operator.X)` | Custom | Any operator |"""
     ),
     section("Pagination")(
       section("Offset-Based Pagination")(
@@ -311,22 +313,24 @@ Query[SafetyUser].build
     section("Executing Queries")(
       md"""Use `.query[R]` to execute and decode results:""",
       exampleZIO {
-        xa.run(for
-          _ <- ddl.createTable[ExecUser](ifNotExists = true)
-          _ <- ddl.createTable[ExecOrder](ifNotExists = true)
-          _ <- dml.insert(ExecUser(-1, "Alice"))
-          _ <- dml.insert(ExecUser(-1, "Bob"))
-          _ <- dml.insert(ExecOrder(-1, 1, BigDecimal(100)))
-          _ <- dml.insert(ExecOrder(-1, 1, BigDecimal(200)))
-          result <- Query[ExecUser]
-            .innerJoin[ExecOrder]
-            .on(_.id)
-            .eq(_.userId)
-            .where(_.name)
-            .eq("Alice")
-            .limit(10)
-            .query[ExecUser]
-        yield result).either
+        xa.run(
+          for
+            _      <- ddl.createTable[ExecUser](ifNotExists = true)
+            _      <- ddl.createTable[ExecOrder](ifNotExists = true)
+            _      <- dml.insert(ExecUser(-1, "Alice"))
+            _      <- dml.insert(ExecUser(-1, "Bob"))
+            _      <- dml.insert(ExecOrder(-1, 1, BigDecimal(100)))
+            _      <- dml.insert(ExecOrder(-1, 1, BigDecimal(200)))
+            result <- Query[ExecUser]
+              .innerJoin[ExecOrder]
+              .on(_.id)
+              .eq(_.userId)
+              .where(_.name)
+              .eq("Alice")
+              .limit(10)
+              .query[ExecUser]
+          yield result
+        ).either
       }.assert {
         case Right(result) => assertTrue(result.exists(_.name == "Alice"))
         case Left(err)     => assertTrue(false).label(err.message)

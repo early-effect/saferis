@@ -21,10 +21,10 @@ object SchemaValidation extends SaferisDocSpecSuite:
 
   @tableName("verify_orders")
   case class VerifyOrder(
-    @generated @key id: Int,
-    userId: Int,
-    amount: BigDecimal,
-    status: String,
+      @generated @key id: Int,
+      userId: Int,
+      amount: BigDecimal,
+      status: String,
   ) derives Table
 
   @tableName("verify_customers")
@@ -46,7 +46,8 @@ object SchemaValidation extends SaferisDocSpecSuite:
           _ <- ddl.createTable(schema)
           // Verify succeeds when schema matches
           _ <- Schema(schema).verify
-        yield "Schema verification passed").either
+        yield "Schema verification passed")
+          .either
       }.assert {
         case Right(msg) => assertTrue(msg.contains("passed"))
         case Left(err)  => assertTrue(false).label(err.message)
@@ -56,15 +57,15 @@ object SchemaValidation extends SaferisDocSpecSuite:
         val schema = Schema[VerifyUserIndexed].withIndex(_.email).named("idx_verify_email").build
         xa.run(for
           // Create table without the index
-          _      <- ddl.createTable[VerifyUserIndexed](ifNotExists = true)
+          _ <- ddl.createTable[VerifyUserIndexed](ifNotExists = true)
           // Verification will find the missing index
           result <- Schema(schema).verify.either
         yield result match
           case Left(SaferisError.SchemaValidation(issues)) =>
             issues.map(_.description).mkString("\n")
           case Left(e)  => s"Unexpected error: ${e.message}"
-          case Right(_) => "Verification passed"
-        ).either
+          case Right(_) => "Verification passed")
+          .either
       }.assert {
         case Right(msg) => assertTrue(msg.nonEmpty && !msg.startsWith("Unexpected"))
         case Left(err)  => assertTrue(false).label(err.message)
@@ -95,20 +96,22 @@ object SchemaValidation extends SaferisDocSpecSuite:
 | `VerifyOptions.strict` | Check everything including exact names |""",
       exampleZIO {
         val schema = Schema[OptionsUser].build
-        xa.run(for
-          _ <- ddl.createTable[OptionsUser](ifNotExists = true)
-          // Add an extra column to the database
-          _ <- sql"ALTER TABLE options_users ADD COLUMN IF NOT EXISTS extra VARCHAR(100)".execute
+        xa.run(
+          for
+            _ <- ddl.createTable[OptionsUser](ifNotExists = true)
+            // Add an extra column to the database
+            _ <- sql"ALTER TABLE options_users ADD COLUMN IF NOT EXISTS extra VARCHAR(100)".execute
 
-          // Default verification fails due to extra column
-          defaultResult <- Schema(schema).verify.either
+            // Default verification fails due to extra column
+            defaultResult <- Schema(schema).verify.either
 
-          // Minimal verification ignores extra columns
-          minimalResult <- Schema(schema).verifyWith(VerifyOptions.minimal).either
-        yield (
-          defaultResult.fold(e => s"Default failed: ${e.message.take(60)}...", _ => "passed"),
-          minimalResult.fold(_.message, _ => "Minimal passed"),
-        )).either
+            // Minimal verification ignores extra columns
+            minimalResult <- Schema(schema).verifyWith(VerifyOptions.minimal).either
+          yield (
+            defaultResult.fold(e => s"Default failed: ${e.message.take(60)}...", _ => "passed"),
+            minimalResult.fold(_.message, _ => "Minimal passed"),
+          )
+        ).either
       }.assert {
         case Right((defaultMsg, minimalMsg)) =>
           assertTrue(defaultMsg.contains("Default failed") && minimalMsg.contains("Minimal passed"))
@@ -138,7 +141,7 @@ object SchemaValidation extends SaferisDocSpecSuite:
 | `MissingUniqueConstraint` | Expected unique constraint not found |
 | `UniqueConstraintNameMismatch` | Constraint exists but with different name |
 | `MissingForeignKey` | Expected foreign key not found |
-| `ForeignKeyNameMismatch` | Foreign key exists but with different name |""",
+| `ForeignKeyNameMismatch` | Foreign key exists but with different name |"""
     ),
     section("Verifying Complex Schemas")(
       md"""Verify schemas with indexes, unique constraints, and foreign keys:""",
@@ -157,7 +160,8 @@ object SchemaValidation extends SaferisDocSpecSuite:
           _ <- ddl.createTable(ordersSchema)
           // Full verification including FK
           _ <- Schema(ordersSchema).verify
-        yield "All constraints verified").either
+        yield "All constraints verified")
+          .either
       }.assert {
         case Right(msg) => assertTrue(msg.contains("verified"))
         case Left(err)  => assertTrue(false).label(err.message)
@@ -175,7 +179,7 @@ object SchemaValidation extends SaferisDocSpecSuite:
 | Timestamp | `timestamp`, `timestamptz`, `timestamp with time zone` |
 | JSON | `json`, `jsonb` |
 
-Use `strictTypeMatching = true` to require exact type matches.""",
+Use `strictTypeMatching = true` to require exact type matches."""
     ),
     section("Application Startup Validation")(
       md"""A common pattern is to verify schemas at application startup. The program below is

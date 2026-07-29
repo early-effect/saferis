@@ -22,7 +22,7 @@ object RetryableErrors extends SaferisDocSpecSuite:
 - `40001`: serialization failure
 - `40P01`: deadlock detected
 
-If a thrown `SQLException` matches one of these, Saferis emits `SaferisError.Retryable` instead of the usual SQLState-based variant.""",
+If a thrown `SQLException` matches one of these, Saferis emits `SaferisError.Retryable` instead of the usual SQLState-based variant."""
     ),
     section("Driving retries with ZIO")(
       exampleValue {
@@ -34,7 +34,7 @@ If a thrown `SQLException` matches one of these, Saferis emits `SaferisError.Ret
                 case _                         => false
             )
         reportWithRetry
-      }.assert(_ => assertTrue(true)),
+      }.assert(_ => assertTrue(true))
     ),
     section("Supplying a custom classifier")(
       md"""Drivers that tunnel over HTTP (Databricks, Snowflake) can surface transport errors as vendor-specific codes that the standards-based default does not catch. Provide your own classifier on the Transactor; it replaces the dialect default:""",
@@ -47,8 +47,8 @@ If a thrown `SQLException` matches one of these, Saferis emits `SaferisError.Ret
 
         val xaLayer = Transactor.layer(retryClassifier = Some(databricksClassifier))
         (databricksClassifier(new SQLException("http blip", "08000", 8000)), xaLayer)
-      }.assert {
-        case (classified, _) => assertTrue(classified)
+      }.assert { case (classified, _) =>
+        assertTrue(classified)
       },
       md"""Composing with the default (as shown above) keeps the standard SQLState rules and adds your driver-specific quirks on top.""",
     ),
@@ -57,7 +57,7 @@ If a thrown `SQLException` matches one of these, Saferis emits `SaferisError.Ret
 
 - For **read-only queries**, retrying is generally safe.
 - For **writes**, retry only if the operation is idempotent (e.g., upsert by primary key, set-to-fixed-value updates) or if the failure happened before any partial state could be observed.
-- For **transactions**, the whole transaction must be re-attempted; a single statement retry inside a failed transaction is meaningless.""",
+- For **transactions**, the whole transaction must be re-attempted; a single statement retry inside a failed transaction is meaningless."""
     ),
   )
 end RetryableErrors

@@ -35,7 +35,7 @@ object ErrorHandling extends SaferisDocSpecSuite:
 | `EncodingError` | Cannot encode a parameter value for the prepared statement |
 | `ReturningOperationFailed` | INSERT/UPDATE/DELETE RETURNING returned no rows |
 | `SchemaValidation` | Schema verification found mismatches (see [Schema Validation](schema-validation.html)) |
-| `Unexpected` | Non-SQL errors (wrapped in Unexpected) |""",
+| `Unexpected` | Non-SQL errors (wrapped in Unexpected) |"""
     ),
     section("SQL Error Classification")(
       md"""SQL errors are automatically categorized based on SQLState codes:
@@ -45,7 +45,7 @@ object ErrorHandling extends SaferisDocSpecSuite:
 | `23` | `ConstraintViolation` | Integrity constraint violations |
 | `42` | `SyntaxError` | Syntax errors or access violations |
 | `22` | `DataError` | Data exceptions |
-| Other | `QueryError` | General query errors |""",
+| Other | `QueryError` | General query errors |"""
     ),
     section("Pattern Matching on Errors")(
       md"""Use pattern matching for type-safe error handling:""",
@@ -55,16 +55,16 @@ object ErrorHandling extends SaferisDocSpecSuite:
           _      <- dml.insert(ErrorUser(-1, "alice@example.com", "Alice"))
           _      <- dml.insert(ErrorUser(-1, "bob@example.com", "Bob"))
           result <- sql"SELECT * FROM ${Table[ErrorUser]} WHERE ${Table[ErrorUser].email} = ${"alice@example.com"}"
-                     .queryOne[ErrorUser]
-                     .either
+            .queryOne[ErrorUser]
+            .either
         yield result match
           case Left(SaferisError.DecodingError(col, expected, _)) =>
             s"Failed to decode column '$col' as $expected"
           case Left(error) =>
             s"Other error: ${error.message}"
           case Right(user) =>
-            s"Found user: ${user.map(_.name).getOrElse("none")}"
-        ).either
+            s"Found user: ${user.map(_.name).getOrElse("none")}")
+          .either
       }.assert {
         case Right(msg) => assertTrue(msg.contains("Alice"))
         case Left(err)  => assertTrue(false).label(err.message)
@@ -74,8 +74,8 @@ object ErrorHandling extends SaferisDocSpecSuite:
       exampleZIO {
         val schema = Schema[UniqueEmail].withUniqueConstraint(_.email).build
         xa.run(for
-          _      <- ddl.createTable(schema)
-          _      <- dml.insert(UniqueEmail(-1, "alice@example.com"))
+          _ <- ddl.createTable(schema)
+          _ <- dml.insert(UniqueEmail(-1, "alice@example.com"))
           // Try to insert duplicate email
           result <- dml.insert(UniqueEmail(-1, "alice@example.com")).either
         yield result match
@@ -84,8 +84,8 @@ object ErrorHandling extends SaferisDocSpecSuite:
           case Left(error) =>
             s"Other error: ${error.message}"
           case Right(_) =>
-            "Insert succeeded"
-        ).either
+            "Insert succeeded")
+          .either
       }.assert {
         case Right(msg) => assertTrue(msg.contains("Constraint violation"))
         case Left(err)  => assertTrue(false).label(err.message)

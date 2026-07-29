@@ -11,26 +11,26 @@ object UpsertDocs extends SaferisDocSpecSuite:
 
   @tableName("upsert_locks")
   case class UpsertLock(
-    @key instanceId: String,
-    nodeId: String,
-    acquiredAt: java.time.Instant,
-    expiresAt: java.time.Instant,
+      @key instanceId: String,
+      nodeId: String,
+      acquiredAt: java.time.Instant,
+      expiresAt: java.time.Instant,
   ) derives Table
 
   @tableName("upsert_items")
   case class UpsertItem(
-    @key tenantId: String,
-    @key sku: String,
-    name: String,
-    quantity: Int,
+      @key tenantId: String,
+      @key sku: String,
+      name: String,
+      quantity: Int,
   ) derives Table
 
   @tableName("upsert_atomic_locks")
   case class AtomicLock(
-    @key instanceId: String,
-    nodeId: String,
-    acquiredAt: java.time.Instant,
-    expiresAt: java.time.Instant,
+      @key instanceId: String,
+      nodeId: String,
+      acquiredAt: java.time.Instant,
+      expiresAt: java.time.Instant,
   ) derives Table
 
   def doc = page("Conditional Upsert DSL")(
@@ -41,15 +41,20 @@ object UpsertDocs extends SaferisDocSpecSuite:
         val now  = java.time.Instant.now()
         val lock = UpsertLock("instance-1", "node-1", now, now.plusSeconds(60))
 
-        saferis.Upsert[UpsertLock]
+        saferis
+          .Upsert[UpsertLock]
           .values(lock)
           .onConflict(_.instanceId)
           .doUpdateAll
           .build
           .sql
       }.assert(sql =>
-        assertTrue(sql.toLowerCase.contains("insert") && sql.toLowerCase.contains("on conflict") && sql.toLowerCase.contains("do update")),
-      ),
+        assertTrue(
+          sql.toLowerCase.contains("insert") && sql.toLowerCase.contains("on conflict") && sql.toLowerCase.contains(
+            "do update"
+          )
+        )
+      )
     ),
     section("Conditional Upsert with WHERE")(
       md"""Add conditions to control when the update happens:""",
@@ -58,7 +63,8 @@ object UpsertDocs extends SaferisDocSpecSuite:
         val lock = UpsertLock("instance-1", "node-1", now, now.plusSeconds(60))
 
         // Only update if the existing row has expired
-        saferis.Upsert[UpsertLock]
+        saferis
+          .Upsert[UpsertLock]
           .values(lock)
           .onConflict(_.instanceId)
           .doUpdateAll
@@ -76,7 +82,8 @@ object UpsertDocs extends SaferisDocSpecSuite:
         val lock = UpsertLock("instance-1", "node-1", now, now.plusSeconds(60))
 
         // Update only if we own the lock (same nodeId) OR it has expired
-        saferis.Upsert[UpsertLock]
+        saferis
+          .Upsert[UpsertLock]
           .values(lock)
           .onConflict(_.instanceId)
           .doUpdateAll
@@ -96,7 +103,8 @@ object UpsertDocs extends SaferisDocSpecSuite:
         val lock = UpsertLock("instance-1", "node-1", now, now.plusSeconds(60))
 
         // Insert only if no conflict
-        saferis.Upsert[UpsertLock]
+        saferis
+          .Upsert[UpsertLock]
           .values(lock)
           .onConflict(_.instanceId)
           .doNothing
@@ -111,7 +119,8 @@ object UpsertDocs extends SaferisDocSpecSuite:
         val lock = UpsertLock("instance-1", "node-1", now, now.plusSeconds(60))
 
         // Upsert with RETURNING - returns ReturningQuery which wraps SqlFragment
-        saferis.Upsert[UpsertLock]
+        saferis
+          .Upsert[UpsertLock]
           .values(lock)
           .onConflict(_.instanceId)
           .doUpdateAll
@@ -124,7 +133,8 @@ object UpsertDocs extends SaferisDocSpecSuite:
         val lock = UpsertLock("instance-1", "node-1", now, now.plusSeconds(60))
 
         // Type-safe returning with WHERE clause
-        saferis.Upsert[UpsertLock]
+        saferis
+          .Upsert[UpsertLock]
           .values(lock)
           .onConflict(_.instanceId)
           .doUpdateAll
@@ -141,7 +151,8 @@ object UpsertDocs extends SaferisDocSpecSuite:
         // Conflict on compound key
         val item = UpsertItem("tenant-1", "SKU-001", "Widget", 10)
 
-        saferis.Upsert[UpsertItem]
+        saferis
+          .Upsert[UpsertItem]
           .values(item)
           .onConflict(_.tenantId)
           .and(_.sku)
@@ -153,36 +164,40 @@ object UpsertDocs extends SaferisDocSpecSuite:
     section("Full Atomic Lock Acquisition Example")(
       md"""Here's a complete example of atomic lock acquisition, run against the database:""",
       exampleZIO {
-        xa.run(for
-          _    <- ddl.createTable[AtomicLock](ifNotExists = true)
-          now  = java.time.Instant.now()
-          lock = AtomicLock("lock-1", "node-A", now, now.plusSeconds(60))
+        xa.run(
+          for
+            _ <- ddl.createTable[AtomicLock](ifNotExists = true)
+            now  = java.time.Instant.now()
+            lock = AtomicLock("lock-1", "node-A", now, now.plusSeconds(60))
 
-          // First acquisition - should succeed
-          result1 <- saferis.Upsert[AtomicLock]
-            .values(lock)
-            .onConflict(_.instanceId)
-            .doUpdateAll
-            .where(_.expiresAt)
-            .lt(now) // Only if expired
-            .or(_.nodeId)
-            .eqExcluded // Or we own it
-            .returning
-            .queryOne
+            // First acquisition - should succeed
+            result1 <- saferis
+              .Upsert[AtomicLock]
+              .values(lock)
+              .onConflict(_.instanceId)
+              .doUpdateAll
+              .where(_.expiresAt)
+              .lt(now) // Only if expired
+              .or(_.nodeId)
+              .eqExcluded // Or we own it
+              .returning
+              .queryOne
 
-          // Second acquisition by same node - should succeed (we own it)
-          result2 <- saferis.Upsert[AtomicLock]
-            .values(lock.copy(expiresAt = now.plusSeconds(120)))
-            .onConflict(_.instanceId)
-            .doUpdateAll
-            .where(_.expiresAt)
-            .lt(now)
-            .or(_.nodeId)
-            .eqExcluded
-            .returning
-            .queryOne
+            // Second acquisition by same node - should succeed (we own it)
+            result2 <- saferis
+              .Upsert[AtomicLock]
+              .values(lock.copy(expiresAt = now.plusSeconds(120)))
+              .onConflict(_.instanceId)
+              .doUpdateAll
+              .where(_.expiresAt)
+              .lt(now)
+              .or(_.nodeId)
+              .eqExcluded
+              .returning
+              .queryOne
 
-        yield (result1, result2)).either
+          yield (result1, result2)
+        ).either
       }.assert {
         case Right((result1, result2)) =>
           assertTrue(result1.exists(_.nodeId == "node-A") && result2.exists(_.nodeId == "node-A"))
@@ -200,7 +215,7 @@ For `returningAs`, also requires `ReturningSupport`:
 - SQLite: Supported
 - MySQL: Not supported
 
-See [Type-Safe Capabilities](capabilities.html) for how these constraints are enforced at compile time.""",
+See [Type-Safe Capabilities](capabilities.html) for how these constraints are enforced at compile time."""
     ),
   )
 end UpsertDocs

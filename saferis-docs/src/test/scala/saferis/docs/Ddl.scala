@@ -12,19 +12,19 @@ object Ddl extends SaferisDocSpecSuite:
 
   @tableName("ddl_customers")
   case class Customer(
-    @generated @key id: Long,
-    name: String,
-    email: String,
-    status: String = "active",
-    notes: Option[String],
+      @generated @key id: Long,
+      name: String,
+      email: String,
+      status: String = "active",
+      notes: Option[String],
   ) derives Table
 
   @tableName("ddl_schema_users")
   case class SchemaUser(
-    @generated @key id: Int,
-    name: String,
-    email: String,
-    status: String,
+      @generated @key id: Int,
+      name: String,
+      email: String,
+      status: String,
   ) derives Table
 
   @tableName("ddl_jobs")
@@ -38,7 +38,7 @@ object Ddl extends SaferisDocSpecSuite:
       }.assert {
         case Right(_)  => assertTrue(true)
         case Left(err) => assertTrue(false).label(err.message)
-      },
+      }
     ),
     section("Other DDL Operations")(
       md"""```scala
@@ -67,7 +67,7 @@ ddl.dropColumn[Customer]("old_column")
 
 // Drop index
 ddl.dropIndex("idx_name", ifExists = true)
-```""",
+```"""
     ),
     section("createTable Options")(
       md"""The `createTable` function accepts optional parameters:
@@ -86,7 +86,7 @@ ddl.createTable[MyTable](ifNotExists = true)
 
 // Create table without indexes (create them separately later)
 ddl.createTable[MyTable](createIndexes = false)
-```""",
+```"""
     ),
     section("Schema DSL for Indexes and Constraints")(
       md"""Use the `Schema` DSL to define indexes, unique constraints, and foreign keys with full DDL generation:""",
@@ -170,14 +170,15 @@ ddl.createTable[MyTable](createIndexes = false)
           _ <- ddl.createTable[Job](createIndexes = false)
           // Create a partial index for pending jobs with retry times
           _ <- ddl.createIndex[Job](
-                 "idx_pending_retry",
-                 Seq("retryat"),
-                 where = Some("status = 'pending'"),
-               )
+            "idx_pending_retry",
+            Seq("retryat"),
+            where = Some("status = 'pending'"),
+          )
           _    <- dml.insert(Job(-1, "pending", Some(java.time.Instant.now())))
           _    <- dml.insert(Job(-1, "completed", None))
           jobs <- sql"SELECT * FROM ${Table[Job]}".query[Job]
-        yield jobs).either
+        yield jobs)
+          .either
       }.assert {
         case Right(jobs) => assertTrue(jobs.exists(_.status == "pending") && jobs.exists(_.status == "completed"))
         case Left(err)   => assertTrue(false).label(err.message)

@@ -46,7 +46,7 @@ Table aliases appear directly in SQL, not as parameters, so they could be inject
     exampleValue {
       val u1 = Table[User]("u")
       val u2 = Table[User] as "users"
-      val a = Alias("my_alias")
+      val a  = Alias("my_alias")
       s"${u1.tableName}, ${u2.tableName}, ${a.value}"
     }.assert(result => assertTrue(result.nonEmpty)),
     md"""Try to build an alias from a *variable* and the code does not compile. The **actual compiler error** is shown below the snippet, proving the guard is real and not just documentation:""",

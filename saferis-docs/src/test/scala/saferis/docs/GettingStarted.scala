@@ -24,7 +24,7 @@ Saferis requires ZIO as a provided dependency:
 
 ```scala
 libraryDependencies += "dev.zio" %% "zio" % "2.1.24"
-```""",
+```"""
     ),
     section("Quick Example")(
       md"""Saferis operations are plain ZIO effects. Throughout these docs the examples are
@@ -80,7 +80,7 @@ object MyApp extends ZIOAppDefault:
 ```
 
 Next, read [Core Concepts](core-concepts.html) to understand table definitions, the
-`sql"..."` interpolator, and the `Transactor`.""",
+`sql"..."` interpolator, and the `Transactor`."""
     ),
   )
 end GettingStarted

@@ -37,10 +37,10 @@ object ForeignKeys extends SaferisDocSpecSuite:
   // Child referencing the compound key
   @tableName("compound_inventory")
   case class CompoundInventory(
-    @generated @key id: Int,
-    tenantId: String,
-    productSku: String,
-    quantity: Int,
+      @generated @key id: Int,
+      tenantId: String,
+      productSku: String,
+      quantity: Int,
   ) derives Table
 
   @tableName("multi_users")
@@ -51,10 +51,10 @@ object ForeignKeys extends SaferisDocSpecSuite:
 
   @tableName("multi_order_items")
   case class MultiOrderItem(
-    @generated @key id: Int,
-    userId: Int,
-    productId: Int,
-    quantity: Int,
+      @generated @key id: Int,
+      userId: Int,
+      productId: Int,
+      quantity: Int,
   ) derives Table
 
   @tableName("type_users")
@@ -89,7 +89,8 @@ object ForeignKeys extends SaferisDocSpecSuite:
           _      <- dml.insert(FkUser(-1, "Alice"))
           _      <- dml.insert(FkOrder(-1, 1, BigDecimal(99.99)))
           result <- sql"SELECT * FROM ${Table[FkOrder]}".query[FkOrder]
-        yield result).either
+        yield result)
+          .either
       }.assert {
         case Right(orders) => assertTrue(orders.exists(_.amount == BigDecimal(99.99)))
         case Left(err)     => assertTrue(false).label(err.message)
@@ -152,8 +153,8 @@ object ForeignKeys extends SaferisDocSpecSuite:
           .sql
       }.assert(sql =>
         assertTrue(
-          sql.contains("tenantId") && sql.contains("productSku") && sql.toLowerCase.contains("cascade"),
-        ),
+          sql.contains("tenantId") && sql.contains("productSku") && sql.toLowerCase.contains("cascade")
+        )
       ),
       exampleZIO {
         // Build and create tables with compound FK
@@ -171,7 +172,8 @@ object ForeignKeys extends SaferisDocSpecSuite:
           _      <- dml.insert(CompoundProduct("tenant1", "SKU-001", "Widget"))
           _      <- dml.insert(CompoundInventory(-1, "tenant1", "SKU-001", 100))
           result <- sql"SELECT * FROM ${Table[CompoundInventory]}".query[CompoundInventory]
-        yield result).either
+        yield result)
+          .either
       }.assert {
         case Right(rows) => assertTrue(rows.exists(r => r.productSku == "SKU-001" && r.quantity == 100))
         case Left(err)   => assertTrue(false).label(err.message)

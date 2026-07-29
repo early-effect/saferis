@@ -12,28 +12,28 @@ object CoreConcepts extends SaferisDocSpecSuite:
 
   @tableName("core_concepts_products")
   case class Product(
-    @generated @key id: Long,
-    name: String,
-    sku: String,
-    price: Double,
-    inStock: Boolean = true,
-    description: Option[String],
+      @generated @key id: Long,
+      name: String,
+      sku: String,
+      price: Double,
+      inStock: Boolean = true,
+      description: Option[String],
   ) derives Table
 
   @tableName("core_concepts_property_products")
   case class PropertyProduct(
-    @generated @key id: Long,
-    @label("product_name") name: String,
-    quantity: Int = 0,
-    price: Double,
-    notes: Option[String],
+      @generated @key id: Long,
+      @label("product_name") name: String,
+      quantity: Int = 0,
+      price: Double,
+      notes: Option[String],
   ) derives Table
 
   @tableName("core_concepts_order_items")
   case class OrderItem(
-    @key orderId: Long,
-    @key productId: Long,
-    quantity: Int,
+      @key orderId: Long,
+      @key productId: Long,
+      quantity: Int,
   ) derives Table
 
   val products = Table[Product]
@@ -166,7 +166,7 @@ val limitedLayer = Transactor.layer(maxConcurrency = 1L)
 - When you need concurrency limits below pool size for backpressure
 
 **When NOT to use `maxConcurrency`:**
-- With HikariCP or similar connection pools. The pool handles queuing more efficiently and HikariCP specifically recommends letting threads wait on the pool rather than limiting concurrency externally. Using a semaphore with a pool creates double-queuing and adds overhead in high-contention scenarios.""",
+- With HikariCP or similar connection pools. The pool handles queuing more efficiently and HikariCP specifically recommends letting threads wait on the pool rather than limiting concurrency externally. Using a semaphore with a pool creates double-queuing and adds overhead in high-contention scenarios."""
     ),
   )
 end CoreConcepts

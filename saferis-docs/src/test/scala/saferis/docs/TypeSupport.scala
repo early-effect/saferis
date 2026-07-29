@@ -15,11 +15,11 @@ object TypeSupport extends SaferisDocSpecSuite:
 
   @tableName("type_support_events")
   case class Event(
-    @generated @key id: Int,
-    name: String,
-    occurredAt: Instant,
-    scheduledFor: Option[LocalDateTime],
-    eventDate: LocalDate,
+      @generated @key id: Int,
+      name: String,
+      occurredAt: Instant,
+      scheduledFor: Option[LocalDateTime],
+      eventDate: LocalDate,
   ) derives Table
 
   val events = Table[Event]
@@ -33,9 +33,9 @@ object TypeSupport extends SaferisDocSpecSuite:
 
   @tableName("type_support_json_events")
   case class JsonEvent(
-    @generated @key id: Int,
-    name: String,
-    metadata: Json[Metadata],
+      @generated @key id: Int,
+      name: String,
+      metadata: Json[Metadata],
   ) derives Table
 
   val jsonEvents = Table[JsonEvent]
@@ -56,8 +56,10 @@ object TypeSupport extends SaferisDocSpecSuite:
       exampleZIO {
         xa
           .run(for
-            _   <- ddl.createTable[Event](ifNotExists = true)
-            _   <- dml.insert(Event(-1, "Conference", Instant.now(), Some(LocalDateTime.now().plusDays(7)), LocalDate.now()))
+            _ <- ddl.createTable[Event](ifNotExists = true)
+            _ <- dml.insert(
+              Event(-1, "Conference", Instant.now(), Some(LocalDateTime.now().plusDays(7)), LocalDate.now())
+            )
             _   <- dml.insert(Event(-1, "Meeting", Instant.now(), None, LocalDate.now().plusDays(1)))
             all <- sql"SELECT * FROM $events ORDER BY ${events.name}".query[Event]
             names = all.map(_.name) // project to names: stable output across runs
@@ -73,7 +75,7 @@ object TypeSupport extends SaferisDocSpecSuite:
       exampleZIO {
         xa
           .run(for
-            _   <- ddl.createTable[Entity](ifNotExists = true)
+            _ <- ddl.createTable[Entity](ifNotExists = true)
             id1 = UUID.randomUUID()
             id2 = UUID.randomUUID()
             _     <- dml.insert(Entity(id1, "First Entity"))
@@ -96,7 +98,7 @@ object TypeSupport extends SaferisDocSpecSuite:
 | `Float` | `real` |
 | `Boolean` | `boolean` |
 | `BigDecimal` | `numeric` |
-| `Option[T]` | Same as `T`, nullable |""",
+| `Option[T]` | Same as `T`, nullable |"""
     ),
     section("JSON/JSONB Support")(
       md"""Saferis provides `Json[A]` for storing arbitrary types as JSON in the database. This maps to `JSONB` in PostgreSQL and `JSON` in MySQL.

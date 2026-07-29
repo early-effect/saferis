@@ -37,10 +37,10 @@ object Subqueries extends SaferisDocSpecSuite:
 
   @tableName("sub_timeout_rows")
   case class TimeoutRow(
-    @generated @key id: Int,
-    deadline: java.time.Instant,
-    claimedBy: Option[String],
-    claimedUntil: Option[java.time.Instant],
+      @generated @key id: Int,
+      deadline: java.time.Instant,
+      claimedBy: Option[String],
+      claimedUntil: Option[java.time.Instant],
   ) derives Table
 
   def doc = page("Subqueries")(
@@ -129,7 +129,7 @@ Saferis does **not** throw at the call site — instead the resulting fragment c
 The recommended recovery pattern catches `InvalidStatement` and substitutes an empty result — no DB round-trip:""",
         exampleZIO {
           // Recovery pattern for possibly-empty collections — no DB round-trip on failure:
-          val ids2 = List.empty[Int]
+          val ids2      = List.empty[Int]
           val recovered =
             xa.run(Query[SubUser].where(_.id).inList(ids2).query[SubUser])
               .catchSome { case _: SaferisError.InvalidStatement => ZIO.succeed(Chunk.empty[SubUser]) }
@@ -180,7 +180,7 @@ in a single statement accumulate into the same `InvalidStatement`, so you fix th
         // Correlated EXISTS - find users who have at least one order
         Query[SubUser]
           .whereExists(
-            Query[SubOrder].where(sql"userId = ${users.id}"),
+            Query[SubOrder].where(sql"userId = ${users.id}")
           )
           .build
           .sql
@@ -258,7 +258,7 @@ in a single statement accumulate into the same `InvalidStatement`, so you fix th
 | `RegexMatch` | `~` | Regex match (PostgreSQL) |
 | `RegexMatchCI` | `~*` | Case-insensitive regex (PostgreSQL) |
 | `IsNull` | `is null` | Null check |
-| `IsNotNull` | `is not null` | Non-null check |""",
+| `IsNotNull` | `is not null` | Non-null check |"""
     ),
     section("Complex WHERE with OR and Grouping")(
       md"""For queries with complex OR logic, use `andWhere` with a lambda:""",
@@ -288,7 +288,7 @@ The parentheses are automatically added around the grouped conditions.""",
                 .or(_.claimedUntil)
                 .lt(Some(now))
                 .or(_.deadline)
-                .gt(now),
+                .gt(now)
             )
             .build
             .sql
@@ -302,7 +302,7 @@ The parentheses are automatically added around the grouped conditions.""",
             .andWhere(w =>
               w(_.claimedBy).isNotNull
                 .and(_.claimedUntil)
-                .gt(Some(now)),
+                .gt(Some(now))
             )
             .build
             .sql

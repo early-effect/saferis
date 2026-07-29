@@ -12,10 +12,10 @@ object AggregateFunctions extends SaferisDocSpecSuite:
 
   @tableName("aggregate_event_rows")
   case class EventRow(
-    @generated @key id: Int,
-    instanceId: String,
-    sequenceNr: Long,
-    amount: BigDecimal,
+      @generated @key id: Int,
+      instanceId: String,
+      sequenceNr: Long,
+      amount: BigDecimal,
   ) derives Table
 
   def doc = page("Aggregate Functions")(
@@ -91,27 +91,29 @@ object AggregateFunctions extends SaferisDocSpecSuite:
     section("Executing Aggregate Queries")(
       md"""Use `queryValue[T]` to get the aggregate result:""",
       exampleZIO {
-        xa.run(for
-          _      <- ddl.createTable[EventRow](ifNotExists = true)
-          _      <- dml.insert(EventRow(-1, "test", 1L, BigDecimal(100)))
-          _      <- dml.insert(EventRow(-1, "test", 5L, BigDecimal(200)))
-          _      <- dml.insert(EventRow(-1, "test", 3L, BigDecimal(150)))
-          maxSeq <- Query[EventRow]
-                      .where(_.instanceId)
-                      .eq("test")
-                      .selectAggregate(_.sequenceNr)(_.max.coalesce(0L))
-                      .queryValue[Long]
-          total <- Query[EventRow]
-                     .where(_.instanceId)
-                     .eq("test")
-                     .selectAggregate(_.amount)(_.sum)
-                     .queryValue[BigDecimal]
-          count <- Query[EventRow]
-                     .where(_.instanceId)
-                     .eq("test")
-                     .selectAggregate(countAll)
-                     .queryValue[Long]
-        yield (maxSeq, total, count)).either
+        xa.run(
+          for
+            _      <- ddl.createTable[EventRow](ifNotExists = true)
+            _      <- dml.insert(EventRow(-1, "test", 1L, BigDecimal(100)))
+            _      <- dml.insert(EventRow(-1, "test", 5L, BigDecimal(200)))
+            _      <- dml.insert(EventRow(-1, "test", 3L, BigDecimal(150)))
+            maxSeq <- Query[EventRow]
+              .where(_.instanceId)
+              .eq("test")
+              .selectAggregate(_.sequenceNr)(_.max.coalesce(0L))
+              .queryValue[Long]
+            total <- Query[EventRow]
+              .where(_.instanceId)
+              .eq("test")
+              .selectAggregate(_.amount)(_.sum)
+              .queryValue[BigDecimal]
+            count <- Query[EventRow]
+              .where(_.instanceId)
+              .eq("test")
+              .selectAggregate(countAll)
+              .queryValue[Long]
+          yield (maxSeq, total, count)
+        ).either
       }.assert {
         case Right((maxSeq, total, count)) =>
           assertTrue(
@@ -131,7 +133,7 @@ object AggregateFunctions extends SaferisDocSpecSuite:
 | `_.count` | Count of non-null values |
 | `_.avg` | Average value |
 | `countAll` | Count all rows (`COUNT(*)`) |
-| `.coalesce(default)` | Return default if NULL |""",
+| `.coalesce(default)` | Return default if NULL |"""
     ),
   )
 end AggregateFunctions

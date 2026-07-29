@@ -36,7 +36,7 @@ val pg = summon[Dialect]
 | UPSERT | Yes | No | No | No |
 | IF NOT EXISTS (indexes) | Yes | No | Yes | Yes |
 | Window functions | Yes | Yes | Yes | Yes |
-| CTEs | Yes | Yes | Yes | Yes |""",
+| CTEs | Yes | Yes | Yes | Yes |"""
     ),
     section("Type Mappings")(
       md"""| JDBC Type | PostgreSQL | MySQL | SQLite |
@@ -46,7 +46,7 @@ val pg = summon[Dialect]
 | BIGINT | bigint | bigint | integer |
 | DOUBLE | double precision | double | real |
 | BOOLEAN | boolean | boolean | integer |
-| TIMESTAMP | timestamp | timestamp | text |""",
+| TIMESTAMP | timestamp | timestamp | text |"""
     ),
     section("Auto-Increment Syntax")(
       md"""| Database | Syntax |
@@ -56,7 +56,7 @@ val pg = summon[Dialect]
 | SQLite | `AUTOINCREMENT` |
 
 For a deeper look at how capabilities are enforced at compile time, see
-[Type-Safe Capabilities](capabilities.html).""",
+[Type-Safe Capabilities](capabilities.html)."""
     ),
   )
 end DialectSystem

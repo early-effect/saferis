@@ -29,17 +29,17 @@ object Dml extends SaferisDocSpecSuite:
 
   @tableName("dml_claim_tasks")
   case class ClaimTask(
-    @generated @key id: Int,
-    deadline: java.time.Instant,
-    claimedBy: Option[String],
-    claimedUntil: Option[java.time.Instant],
+      @generated @key id: Int,
+      deadline: java.time.Instant,
+      claimedBy: Option[String],
+      claimedUntil: Option[java.time.Instant],
   ) derives Table
 
   @tableName("dml_lock_rows")
   case class LockRow(
-    @key instanceId: String,
-    nodeId: String,
-    expiresAt: java.time.Instant,
+      @key instanceId: String,
+      nodeId: String,
+      expiresAt: java.time.Instant,
   ) derives Table
 
   def doc = page("Data Manipulation Layer (DML)")(
@@ -64,11 +64,12 @@ object Dml extends SaferisDocSpecSuite:
           _    <- dml.insert(Task(-1, "Task 3", true))
           all  <- sql"SELECT * FROM $tasks".query[Task]
           done <- sql"SELECT * FROM $tasks WHERE ${tasks.done} = ${true}".query[Task]
-        yield (all, done)).either
+        yield (all, done))
+          .either
       }.assert {
         case Right((all, done)) => assertTrue(all.size >= 3 && done.exists(_.done))
         case Left(err)          => assertTrue(false).label(err.message)
-      },
+      }
     ),
     section("Insert with RETURNING")(
       md"""For databases that support it (PostgreSQL, SQLite), get the inserted row back:""",
@@ -76,7 +77,8 @@ object Dml extends SaferisDocSpecSuite:
         xa.run(for
           _      <- ddl.createTable[Task](ifNotExists = true)
           result <- dml.insertReturning(Task(-1, "New Task", false))
-        yield result).either
+        yield result)
+          .either
       }.assert {
         case Right(result) => assertTrue(result.title == "New Task" && !result.done)
         case Left(err)     => assertTrue(false).label(err.message)
@@ -91,7 +93,8 @@ object Dml extends SaferisDocSpecSuite:
           _      <- dml.insert(Task(-1, "Alpha", false))
           _      <- dml.insert(Task(-1, "Beta", true))
           sorted <- sql"SELECT * FROM $tasks ORDER BY ${tasks.title}".query[Task]
-        yield sorted).either
+        yield sorted)
+          .either
       }.assert {
         case Right(sorted) => assertTrue(sorted.nonEmpty)
         case Left(err)     => assertTrue(false).label(err.message)
@@ -100,19 +103,21 @@ object Dml extends SaferisDocSpecSuite:
     section("Update Operations")(
       md"""Update records by primary key or with custom conditions:""",
       exampleZIO {
-        xa.run(for
-          _        <- ddl.createTable[Item](ifNotExists = true)
-          inserted <- dml.insertReturning(Item(-1, "Widget", 10))
+        xa.run(
+          for
+            _        <- ddl.createTable[Item](ifNotExists = true)
+            inserted <- dml.insertReturning(Item(-1, "Widget", 10))
 
-          // Update by primary key
-          _ <- dml.update(inserted.copy(quantity = 15))
+            // Update by primary key
+            _ <- dml.update(inserted.copy(quantity = 15))
 
-          // Update with RETURNING (get the updated row back)
-          updated <- dml.updateReturning(inserted.copy(name = "Super Widget", quantity = 20))
+            // Update with RETURNING (get the updated row back)
+            updated <- dml.updateReturning(inserted.copy(name = "Super Widget", quantity = 20))
 
-          // Verify the update
-          result <- sql"SELECT * FROM $items WHERE ${items.id} = ${inserted.id}".queryOne[Item]
-        yield (updated, result)).either
+            // Verify the update
+            result <- sql"SELECT * FROM $items WHERE ${items.id} = ${inserted.id}".queryOne[Item]
+          yield (updated, result)
+        ).either
       }.assert {
         case Right((updated, result)) =>
           assertTrue(updated.name == "Super Widget" && updated.quantity == 20 && result.exists(_.quantity == 20))
@@ -132,7 +137,8 @@ object Dml extends SaferisDocSpecSuite:
           )
 
           all <- sql"SELECT * FROM $items".query[Item]
-        yield (rowsUpdated, all)).either
+        yield (rowsUpdated, all))
+          .either
       }.assert {
         case Right((rowsUpdated, all)) => assertTrue(rowsUpdated >= 2 && all.exists(_.name == "Low Stock Item"))
         case Left(err)                 => assertTrue(false).label(err.message)
@@ -141,20 +147,22 @@ object Dml extends SaferisDocSpecSuite:
     section("Delete Operations")(
       md"""Delete records by primary key or with custom conditions:""",
       exampleZIO {
-        xa.run(for
-          _      <- ddl.createTable[LogEntry](ifNotExists = true)
-          entry1 <- dml.insertReturning(LogEntry(-1, "INFO", "Application started"))
-          entry2 <- dml.insertReturning(LogEntry(-1, "DEBUG", "Processing request"))
-          _      <- dml.insertReturning(LogEntry(-1, "ERROR", "Something failed"))
+        xa.run(
+          for
+            _      <- ddl.createTable[LogEntry](ifNotExists = true)
+            entry1 <- dml.insertReturning(LogEntry(-1, "INFO", "Application started"))
+            entry2 <- dml.insertReturning(LogEntry(-1, "DEBUG", "Processing request"))
+            _      <- dml.insertReturning(LogEntry(-1, "ERROR", "Something failed"))
 
-          // Delete by primary key
-          _ <- dml.delete(entry2)
+            // Delete by primary key
+            _ <- dml.delete(entry2)
 
-          // Delete with RETURNING (get the deleted row back)
-          deleted <- dml.deleteReturning(entry1)
+            // Delete with RETURNING (get the deleted row back)
+            deleted <- dml.deleteReturning(entry1)
 
-          remaining <- sql"SELECT * FROM $logs".query[LogEntry]
-        yield (deleted, remaining)).either
+            remaining <- sql"SELECT * FROM $logs".query[LogEntry]
+          yield (deleted, remaining)
+        ).either
       }.assert {
         case Right((deleted, remaining)) =>
           assertTrue(deleted.message == "Application started" && !remaining.exists(_.id == deleted.id))
@@ -162,20 +170,22 @@ object Dml extends SaferisDocSpecSuite:
       },
       md"""Delete multiple rows with a WHERE clause:""",
       exampleZIO {
-        xa.run(for
-          _ <- ddl.createTable[LogEntry](ifNotExists = true)
-          _ <- dml.insert(LogEntry(-1, "DEBUG", "Debug 1"))
-          _ <- dml.insert(LogEntry(-1, "DEBUG", "Debug 2"))
-          _ <- dml.insert(LogEntry(-1, "INFO", "Important info"))
+        xa.run(
+          for
+            _ <- ddl.createTable[LogEntry](ifNotExists = true)
+            _ <- dml.insert(LogEntry(-1, "DEBUG", "Debug 1"))
+            _ <- dml.insert(LogEntry(-1, "DEBUG", "Debug 2"))
+            _ <- dml.insert(LogEntry(-1, "INFO", "Important info"))
 
-          // Delete all DEBUG entries
-          rowsDeleted <- dml.deleteWhere[LogEntry](sql"${logs.level} = ${"DEBUG"}")
+            // Delete all DEBUG entries
+            rowsDeleted <- dml.deleteWhere[LogEntry](sql"${logs.level} = ${"DEBUG"}")
 
-          // Delete with WHERE and RETURNING (get all deleted rows)
-          deletedEntries <- dml.deleteWhereReturning[LogEntry](sql"${logs.level} = ${"ERROR"}")
+            // Delete with WHERE and RETURNING (get all deleted rows)
+            deletedEntries <- dml.deleteWhereReturning[LogEntry](sql"${logs.level} = ${"ERROR"}")
 
-          remaining <- sql"SELECT * FROM $logs".query[LogEntry]
-        yield (rowsDeleted, deletedEntries, remaining)).either
+            remaining <- sql"SELECT * FROM $logs".query[LogEntry]
+          yield (rowsDeleted, deletedEntries, remaining)
+        ).either
       }.assert {
         case Right((rowsDeleted, deletedEntries, remaining)) =>
           assertTrue(rowsDeleted >= 2 && remaining.exists(_.level == "INFO") && !remaining.exists(_.level == "DEBUG"))
@@ -215,7 +225,8 @@ object Dml extends SaferisDocSpecSuite:
             _     <- dml.insert(BuilderUser(-1, "Alice", "alice@example.com", 30))
             _     <- dml.insert(BuilderUser(-1, "Bob", "bob@example.com", 25))
             users <- sql"SELECT * FROM ${Table[BuilderUser]}".query[BuilderUser]
-          yield users).either
+          yield users)
+            .either
         }.assert {
           case Right(users) => assertTrue(users.size >= 2)
           case Left(err)    => assertTrue(false).label(err.message)
@@ -289,10 +300,8 @@ object Dml extends SaferisDocSpecSuite:
         }.assert(sql => assertTrue(sql.toLowerCase.contains("returning"))),
         exampleValue {
           // Explicitly delete all rows (requires .all)
-          Delete[BuilderUser]
-            .all // Required - prevents accidental "DELETE FROM ..."
-            .build
-            .sql
+          Delete[BuilderUser].all // Required - prevents accidental "DELETE FROM ..."
+            .build.sql
         }.assert(sql => assertTrue(sql.toLowerCase.contains("delete"))),
       ),
       section("Available WHERE Operators")(

@@ -37,7 +37,8 @@ object Streaming extends SaferisDocSpecSuite:
           _ <- dml.insert(StreamEvent(-1, "event3", "data3"))
           // Stream returns a ZStream, use runCollect to materialize
           result <- Query[StreamEvent].all.queryStream[StreamEvent].runCollect
-        yield result).either
+        yield result)
+          .either
       }.assert {
         case Right(result) => assertTrue(result.size == 3 && result.exists(_.name == "event1"))
         case Left(err)     => assertTrue(false).label(err.message)
@@ -49,20 +50,22 @@ object Streaming extends SaferisDocSpecSuite:
 | Method | Return Type | Memory Usage | Best For |
 |--------|-------------|--------------|----------|
 | `.query[T]` | `Chunk[T]` | All rows loaded at once | Small to medium result sets |
-| `.queryStream[T]` | `ZStream[..., T]` | One row at a time | Large result sets, real-time processing |""",
+| `.queryStream[T]` | `ZStream[..., T]` | One row at a time | Large result sets, real-time processing |"""
     ),
     section("Lazy Evaluation")(
       md"""Streams are evaluated lazily - rows are only fetched as they're consumed:""",
       exampleZIO {
-        xa.run(for
-          _ <- ddl.createTable[StreamEvent](ifNotExists = true)
-          _ <- ddl.truncateTable[StreamEvent]()
-          _ <- dml.insert(StreamEvent(-1, "lazy1", "data"))
-          _ <- dml.insert(StreamEvent(-1, "lazy2", "data"))
-          _ <- dml.insert(StreamEvent(-1, "lazy3", "data"))
-          // Only fetches 2 rows from the database, even though more exist
-          first2 <- Query[StreamEvent].all.queryStream[StreamEvent].take(2).runCollect
-        yield first2).either
+        xa.run(
+          for
+            _ <- ddl.createTable[StreamEvent](ifNotExists = true)
+            _ <- ddl.truncateTable[StreamEvent]()
+            _ <- dml.insert(StreamEvent(-1, "lazy1", "data"))
+            _ <- dml.insert(StreamEvent(-1, "lazy2", "data"))
+            _ <- dml.insert(StreamEvent(-1, "lazy3", "data"))
+            // Only fetches 2 rows from the database, even though more exist
+            first2 <- Query[StreamEvent].all.queryStream[StreamEvent].take(2).runCollect
+          yield first2
+        ).either
       }.assert {
         case Right(first2) => assertTrue(first2.size == 2)
         case Left(err)     => assertTrue(false).label(err.message)
@@ -71,25 +74,27 @@ object Streaming extends SaferisDocSpecSuite:
     section("Stream Composition")(
       md"""ZStream provides powerful composition operators:""",
       exampleZIO {
-        xa.run(for
-          _ <- ddl.createTable[StreamEvent](ifNotExists = true)
-          _ <- ddl.truncateTable[StreamEvent]()
-          _ <- dml.insert(StreamEvent(-1, "event1", "data1"))
-          _ <- dml.insert(StreamEvent(-1, "event2", "data2"))
-          _ <- dml.insert(StreamEvent(-1, "other", "data3"))
-          // Map, filter, and transform streams
-          names <- Query[StreamEvent].all
-            .queryStream[StreamEvent]
-            .map(_.name)
-            .filter(_.startsWith("event"))
-            .runCollect
+        xa.run(
+          for
+            _ <- ddl.createTable[StreamEvent](ifNotExists = true)
+            _ <- ddl.truncateTable[StreamEvent]()
+            _ <- dml.insert(StreamEvent(-1, "event1", "data1"))
+            _ <- dml.insert(StreamEvent(-1, "event2", "data2"))
+            _ <- dml.insert(StreamEvent(-1, "other", "data3"))
+            // Map, filter, and transform streams
+            names <- Query[StreamEvent].all
+              .queryStream[StreamEvent]
+              .map(_.name)
+              .filter(_.startsWith("event"))
+              .runCollect
 
-          // Batch processing with grouped
-          batches <- Query[StreamEvent].all
-            .queryStream[StreamEvent]
-            .grouped(2)
-            .runCollect
-        yield (names, batches.map(_.size))).either
+            // Batch processing with grouped
+            batches <- Query[StreamEvent].all
+              .queryStream[StreamEvent]
+              .grouped(2)
+              .runCollect
+          yield (names, batches.map(_.size))
+        ).either
       }.assert {
         case Right((names, batchSizes)) =>
           assertTrue(
@@ -123,22 +128,24 @@ val fiber = Query[ResourceEvent].all
   .runDrain
   .fork
 // fiber.interrupt releases the connection
-```""",
+```"""
     ),
     section("Streaming with Query Builder")(
       md"""All query builder methods support streaming:""",
       exampleZIO {
         xa.run(for
-          _ <- ddl.createTable[StreamEvent](ifNotExists = true)
-          _ <- ddl.truncateTable[StreamEvent]()
-          _ <- dml.insert(StreamEvent(-1, "event1", "data1"))
-          _ <- dml.insert(StreamEvent(-1, "event2", "data2"))
+          _      <- ddl.createTable[StreamEvent](ifNotExists = true)
+          _      <- ddl.truncateTable[StreamEvent]()
+          _      <- dml.insert(StreamEvent(-1, "event1", "data1"))
+          _      <- dml.insert(StreamEvent(-1, "event2", "data2"))
           result <- Query[StreamEvent]
-            .where(_.name).eq("event1")
+            .where(_.name)
+            .eq("event1")
             .orderBy(events.id.asc)
             .queryStream[StreamEvent]
             .runCollect
-        yield result).either
+        yield result)
+          .either
       }.assert {
         case Right(result) => assertTrue(result.size == 1 && result.head.name == "event1")
         case Left(err)     => assertTrue(false).label(err.message)
@@ -148,16 +155,18 @@ val fiber = Query[ResourceEvent].all
       md"""For dialects that support RETURNING (PostgreSQL, SQLite), you can stream returned rows:""",
       exampleZIO {
         xa.run(for
-          _ <- ddl.createTable[StreamEvent](ifNotExists = true)
-          _ <- ddl.truncateTable[StreamEvent]()
-          _ <- dml.insert(StreamEvent(-1, "event1", "data1"))
-          _ <- dml.insert(StreamEvent(-1, "keep", "data2"))
+          _       <- ddl.createTable[StreamEvent](ifNotExists = true)
+          _       <- ddl.truncateTable[StreamEvent]()
+          _       <- dml.insert(StreamEvent(-1, "event1", "data1"))
+          _       <- dml.insert(StreamEvent(-1, "keep", "data2"))
           deleted <- Delete[StreamEvent]
-            .where(_.name).eq("event1")
+            .where(_.name)
+            .eq("event1")
             .returningAs
             .queryStream
             .runCollect
-        yield deleted).either
+        yield deleted)
+          .either
       }.assert {
         case Right(deleted) => assertTrue(deleted.size == 1 && deleted.head.name == "event1")
         case Left(err)      => assertTrue(false).label(err.message)
@@ -166,22 +175,23 @@ val fiber = Query[ResourceEvent].all
     section("Combining Streams")(
       md"""You can compose streams from different queries:""",
       exampleZIO {
-        xa.run(for
-          _ <- ddl.createTable[ZipUser](ifNotExists = true)
-          _ <- ddl.createTable[ZipItem](ifNotExists = true)
-          _ <- ddl.truncateTable[ZipUser]()
-          _ <- ddl.truncateTable[ZipItem]()
-          _ <- dml.insert(ZipUser(-1, "Alice"))
-          _ <- dml.insert(ZipUser(-1, "Bob"))
-          _ <- dml.insert(ZipItem(-1, "Item A"))
-          _ <- dml.insert(ZipItem(-1, "Item B"))
-          // Zip two streams together
-          zipped <- {
-            val userStream = Query[ZipUser].all.orderBy(users.name.asc).queryStream[ZipUser]
-            val itemStream = Query[ZipItem].all.orderBy(items.value.asc).queryStream[ZipItem]
-            userStream.zip(itemStream).runCollect
-          }
-        yield zipped.map((u, i) => s"${u.name} -> ${i.value}")).either
+        xa.run(
+          for
+            _ <- ddl.createTable[ZipUser](ifNotExists = true)
+            _ <- ddl.createTable[ZipItem](ifNotExists = true)
+            _ <- ddl.truncateTable[ZipUser]()
+            _ <- ddl.truncateTable[ZipItem]()
+            _ <- dml.insert(ZipUser(-1, "Alice"))
+            _ <- dml.insert(ZipUser(-1, "Bob"))
+            _ <- dml.insert(ZipItem(-1, "Item A"))
+            _ <- dml.insert(ZipItem(-1, "Item B"))
+            // Zip two streams together
+            zipped <-
+              val userStream = Query[ZipUser].all.orderBy(users.name.asc).queryStream[ZipUser]
+              val itemStream = Query[ZipItem].all.orderBy(items.value.asc).queryStream[ZipItem]
+              userStream.zip(itemStream).runCollect
+          yield zipped.map((u, i) => s"${u.name} -> ${i.value}")
+        ).either
       }.assert {
         case Right(zipped) =>
           assertTrue(
