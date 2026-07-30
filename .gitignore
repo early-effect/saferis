@@ -19,8 +19,9 @@ build.sbt.semanticdb
 # Bloop
 .bsp
 
-# VS Code
+# VS Code / Cursor
 .vscode/
+.cursor/
 .scala-build/
 
 # Metals
