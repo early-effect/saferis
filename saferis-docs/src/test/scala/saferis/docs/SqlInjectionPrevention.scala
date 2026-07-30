@@ -28,7 +28,22 @@ object SqlInjectionPrevention extends SaferisDocSpecSuite:
 
 ## How the `sql"..."` Interpolator Works
 
-The interpolator analyzes each interpolated expression at compile time and routes it appropriately:""",
+The interpolator analyzes each interpolated expression at compile time and routes it appropriately:
+
+```mermaid
+flowchart LR
+  splice[sql splice] --> values[Scala values]
+  splice --> tables[Table or columns]
+  splice --> alias[Alias]
+  splice --> ident[Placeholder.identifier]
+  splice --> raw[Placeholder.raw]
+  values --> binds[param binds]
+  tables --> sqlText[SQL text]
+  alias --> literal[compile-time literal]
+  ident --> escaped[escaped identifier]
+  raw --> hatch[escape hatch]
+```
+""",
     exampleValue {
       val userName = "Alice"
       sql"SELECT * FROM $users WHERE ${users.name} = $userName".sql
