@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Install repo git hooks (sets core.hooksPath to .githooks for this clone only).
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+git config --local core.hooksPath .githooks
+chmod +x .githooks/pre-commit
+
+echo "Installed git hooks from .githooks (core.hooksPath=.githooks)"
+echo "pre-commit will run: sbt scalafmtCheckAll"

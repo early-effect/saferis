@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Reject commits that would fail CI's scalafmtCheckAll.
+set -euo pipefail
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+# Cursor agent seatbelt blocks sbt's client socket / ~/.sbt; CI still runs scalafmtCheckAll.
+if [ "${CURSOR_SANDBOX:-}" = "seatbelt" ]; then
+  echo "pre-commit: skipping scalafmtCheckAll under Cursor agent sandbox (CI enforces it)."
+  exit 0
+fi
+
+if ! command -v sbt >/dev/null 2>&1; then
+  echo "pre-commit: sbt not found on PATH; cannot run scalafmtCheckAll" >&2
+  exit 1
+fi
+
+echo "pre-commit: running sbt scalafmtCheckAll (same gate as CI)…"
+if ! sbt -batch -no-colors scalafmtCheckAll; then
+  echo >&2
+  echo "pre-commit: BLOCKED; scalafmtCheckAll failed." >&2
+  echo "  Fix with:  sbt scalafmtAll && git add -u" >&2
+  echo "  Then commit again." >&2
+  exit 1
+fi
+
+echo "pre-commit: OK; scalafmtCheckAll passed."
