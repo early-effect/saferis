@@ -52,6 +52,13 @@ it, all type-safe, all against a real database:""",
 `ZIOAppDefault` run the program: `xa.run(...)` turns a database program into an
 ordinary `ZIO` effect:
 
+```mermaid
+flowchart TB
+  ds[DataSource] --> cp[ConnectionProvider]
+  cp --> xa[Transactor.layer]
+  xa --> prog[xa.run ZIO program]
+```
+
 ```scala
 import saferis.*
 import zio.*

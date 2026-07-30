@@ -37,6 +37,17 @@ object PagedStreaming extends SaferisDocSpecSuite:
   def doc = page("Paged Streaming")(
     md"""Paged streaming provides **cursor-based pagination with automatic connection release between pages**. Unlike `queryStream` which holds a single connection open for the entire stream, paged streaming fetches data in batches and releases the connection after each batch. This makes it ideal for:
 
+```mermaid
+flowchart TB
+  qs[queryStream] --> qa[acquire]
+  qa --> qh[hold open]
+  qh --> qr[release at end]
+  ps[pagedStream] --> pf[fetch page]
+  pf --> pr[release]
+  pr --> pc[checkpoint]
+  pc --> pre[resume]
+```
+
 - **Long-running processing** - Process millions of rows without holding database connections
 - **Resumable operations** - Checkpoint your position and resume after failures
 - **Resource efficiency** - Free connections for other operations between page fetches

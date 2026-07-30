@@ -37,7 +37,17 @@ object SchemaValidation extends SaferisDocSpecSuite:
   case class StartupOrder(@generated @key id: Int, customerId: Int, amount: BigDecimal) derives Table
 
   def doc = page("Schema Validation")(
-    md"""Saferis provides runtime schema validation to verify that your table definitions match the actual database schema. This is useful for detecting schema drift, validating migrations, and ensuring consistency between code and database.""",
+    md"""Saferis provides runtime schema validation to verify that your table definitions match the actual database schema. This is useful for detecting schema drift, validating migrations, and ensuring consistency between code and database.
+
+```mermaid
+flowchart TB
+  schema[Scala Schema] --> ddl[ddl.createTable]
+  ddl --> db[(live DB)]
+  db --> verify[Schema.verify]
+  verify --> pass[pass]
+  verify --> issues[SchemaIssues]
+```
+""",
     section("Basic Verification")(
       md"""Use `Schema(instance).verify` to validate a schema against the database:""",
       exampleZIO {

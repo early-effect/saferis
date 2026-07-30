@@ -29,6 +29,15 @@ object Capabilities extends SaferisDocSpecSuite:
 
 Each dialect mixes in capability traits that enable specific operations:
 
+```mermaid
+flowchart LR
+  dialect[Dialect] --> ret[ReturningSupport]
+  dialect --> json[JsonSupport]
+  dialect --> arr[ArraySupport]
+  dialect --> upsert[UpsertSupport]
+  dialect --> idx[IndexIfNotExists]
+```
+
 | Trait | Operations Enabled |
 |-------|-------------------|
 | `ReturningSupport` | `insertReturning`, `updateReturning`, `deleteReturning` |

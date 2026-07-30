@@ -45,6 +45,16 @@ object QueryBuilder extends SaferisDocSpecSuite:
     section("Query Safety (Builder/Ready Pattern)")(
       md"""To prevent accidental unbounded queries that could fetch millions of rows, Saferis uses a **Builder/Ready pattern**. A query must have at least one safety constraint before it can be executed:
 
+```mermaid
+stateDiagram-v2
+  [*] --> Builder
+  Builder --> Ready: where
+  Builder --> Ready: limit
+  Builder --> Ready: seek
+  Builder --> Ready: all
+  Ready --> [*]: execute
+```
+
 | Safety Constraint | Description |
 |------------------|-------------|
 | `.where(...)` | Filter results with a WHERE clause |
