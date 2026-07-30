@@ -57,3 +57,9 @@ The documentation is built with [Specular](https://github.com/early-effect/specu
 ## License
 
 [Apache 2.0](LICENSE)
+
+## Development
+
+```bash
+./scripts/install-git-hooks  # once per clone: pre-commit runs scalafmtCheckAll
+```
