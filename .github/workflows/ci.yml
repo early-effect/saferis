@@ -52,7 +52,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
+      - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
         with:
           disk-cache: "false"
       - name: Resolve cache epoch
@@ -116,7 +116,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
+      - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
         with:
           disk-cache: "false"
       - name: Resolve cache epoch
@@ -200,7 +200,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
+      - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
         with:
           disk-cache: "false"
       - name: Resolve cache epoch
@@ -271,7 +271,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
+      - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
         with:
           disk-cache: "false"
       - name: Resolve cache epoch
@@ -348,7 +348,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "25"
-      - uses: sbt/setup-sbt@d059c39de700f4cc5cb64f9f56577315e44a984e # v1.5.5
+      - uses: sbt/setup-sbt@bfea3c5f48abd221b04a6df4798aa5eb8b6a2baf # v1.5.6
         with:
           disk-cache: "false"
       - name: Resolve cache epoch
