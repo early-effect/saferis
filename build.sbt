@@ -51,53 +51,61 @@ githubPackagesRepo match {
 }
 
 // zipx: Aggregate verify (tests + Specular docs site) + dual publish by repo + Steward + Pages.
-zipxJavaVersion      := "25"
+val Fmt = CapabilityName("fmt")
+
+/** Pre-pull with retries. Verbatim shell, so runRaw declares the escape hatch and earns a
+  * generate-time warning naming the step, rather than hiding it in a bare `run =`.
+  */
+val prePullPostgres = Steps.built("pre-pull-postgres")(
+  Step
+    .runRaw(
+      """|set -euo pipefail
+         |image=postgres:latest
+         |max=5
+         |for attempt in $(seq 1 "$max"); do
+         |  if docker pull "$image"; then
+         |    exit 0
+         |  fi
+         |  if [ "$attempt" -eq "$max" ]; then
+         |    echo "Failed to pull $image after $max attempts" >&2
+         |    exit 1
+         |  fi
+         |  sleep $((attempt * 10))
+         |done
+         |""".stripMargin
+    )
+    .named("Pre-pull Postgres image")
+)
+
+zipxJavaVersion      := JdkVersion("25")
 zipxScalaSteward     := true
 zipxWorkflowDispatch := true
 zipxCapabilities ++= {
   val upstream = JobCondition.repositoryIs("early-effect/saferis")
   Seq(
-    Capability.once("fmt", "scalafmtCheckAll"),
+    zipxTasks.once(Fmt, scalafmtCheckAll),
     Capability.once(
-      name = "test",
-      command = "test; docs/specularSite",
-      needsCapabilities = List("fmt"),
+      name = Capability.TestName,
+      // Compound, so a literal SbtCommand rather than a spliced task key.
+      command = SbtCommand("test; docs/specularSite"),
+      needsCapabilities = List(Fmt),
       // GHA VMs are disposable; skip Ryuk so Hub flakes on testcontainers/ryuk cannot fail CI.
       env = Map("TESTCONTAINERS_RYUK_DISABLED" -> EnvValue.plain("true")),
-      extraSteps = _ =>
-        List(
-          Step(
-            name = Some("Pre-pull Postgres image"),
-            run = Some(
-              """|set -euo pipefail
-                 |image=postgres:latest
-                 |max=5
-                 |for attempt in $(seq 1 "$max"); do
-                 |  if docker pull "$image"; then
-                 |    exit 0
-                 |  fi
-                 |  if [ "$attempt" -eq "$max" ]; then
-                 |    echo "Failed to pull $image after $max attempts" >&2
-                 |    exit 1
-                 |  fi
-                 |  sleep $((attempt * 10))
-                 |done
-                 |""".stripMargin
-            ),
-          )
-        ),
+      extraSteps = prePullPostgres,
     ),
     ZipxCentral.release
-      .copy(command = _ => "core/publishSigned; sonaRelease")
+      .copy(command = _ => SbtCommand("core/publishSigned; sonaRelease"))
       .withCondition(upstream),
     ZipxGitHubPackages
       .sharedRegistry(
-        repository = Some("Iterable/saferis"),
+        // 0.1.6 dropped the `repository` param, which used to become this fork gate implicitly.
+        // Stated explicitly so the Packages publish still cannot run outside Iterable/saferis.
+        condition = Some(JobCondition.repositoryIs("Iterable/saferis")),
         packagesRepo = Some("https://maven.pkg.github.com/iterable/maven-packages"),
         publishOrg = Some("com.iterable"),
         publishOrgName = Some("Iterable"),
       )
-      .copy(command = _ => "core/publish"),
+      .copy(command = _ => SbtCommand("core/publish")),
     // Same org reusable workflow as peers; generated into ci.yml (no hand-rolled docs.yml).
     ZipxDocs.pages().andCondition(upstream),
   )
