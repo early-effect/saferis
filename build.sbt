@@ -154,7 +154,7 @@ lazy val core = project
     ),
   )
 
-val specularVersion = "0.11.0"
+val specularVersion = "0.12.0"
 
 lazy val docs = project
   .in(file("saferis-docs"))
@@ -163,7 +163,7 @@ lazy val docs = project
   .settings(commonSettings)
   .settings(
     name := "saferis-docs",
-    // Specular 0.11.0 is built on 3.8.x; keep published core on ThisBuild LTS (3.3.8).
+    // Specular 0.12.0 is built on 3.8.x; keep published core on ThisBuild LTS (3.3.8).
     scalaVersion    := "3.8.4",
     publish / skip  := true,
     publishArtifact := false,
@@ -171,7 +171,7 @@ lazy val docs = project
     libraryDependencies ++= Seq(
       "dev.zio"           %% "zio"                     % zioVersion,
       "dev.zio"           %% "zio-streams"             % zioVersion,
-      "dev.zio"           %% "zio-json"                % "0.9.0",
+      "dev.zio"           %% "zio-json"                % "0.9.2",
       "dev.zio"           %% "zio-test"                % zioVersion      % Test,
       "dev.zio"           %% "zio-test-sbt"            % zioVersion      % Test,
       "rocks.earlyeffect" %% "specular-core"           % specularVersion % Test,
