@@ -154,7 +154,7 @@ lazy val core = project
     ),
   )
 
-val specularVersion = "0.11.0"
+val specularVersion = "0.12.0"
 
 lazy val docs = project
   .in(file("saferis-docs"))
