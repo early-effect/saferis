@@ -171,7 +171,7 @@ lazy val docs = project
     libraryDependencies ++= Seq(
       "dev.zio"           %% "zio"                     % zioVersion,
       "dev.zio"           %% "zio-streams"             % zioVersion,
-      "dev.zio"           %% "zio-json"                % "0.9.0",
+      "dev.zio"           %% "zio-json"                % "0.9.2",
       "dev.zio"           %% "zio-test"                % zioVersion      % Test,
       "dev.zio"           %% "zio-test-sbt"            % zioVersion      % Test,
       "rocks.earlyeffect" %% "specular-core"           % specularVersion % Test,
