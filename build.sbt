@@ -163,7 +163,7 @@ lazy val docs = project
   .settings(commonSettings)
   .settings(
     name := "saferis-docs",
-    // Specular 0.11.0 is built on 3.8.x; keep published core on ThisBuild LTS (3.3.8).
+    // Specular 0.12.0 is built on 3.8.x; keep published core on ThisBuild LTS (3.3.8).
     scalaVersion    := "3.8.4",
     publish / skip  := true,
     publishArtifact := false,
