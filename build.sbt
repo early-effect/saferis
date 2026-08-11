@@ -94,7 +94,7 @@ zipxCapabilities ++= {
       extraSteps = prePullPostgres,
     ),
     ZipxCentral.release
-      .copy(command = _ => SbtCommand("core/publishSigned; sonaRelease"))
+      .copy(command = _ => Some(SbtCommand("core/publishSigned; sonaRelease")))
       .withCondition(upstream),
     ZipxGitHubPackages
       .sharedRegistry(
@@ -105,7 +105,7 @@ zipxCapabilities ++= {
         publishOrg = Some("com.iterable"),
         publishOrgName = Some("Iterable"),
       )
-      .copy(command = _ => SbtCommand("core/publish")),
+      .copy(command = _ => Some(SbtCommand("core/publish"))),
     // Same org reusable workflow as peers; generated into ci.yml (no hand-rolled docs.yml).
     ZipxDocs.pages().andCondition(upstream),
   )
