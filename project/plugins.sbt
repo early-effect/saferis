@@ -1,5 +1,5 @@
 addSbtPlugin("org.scalameta"     % "sbt-scalafmt"  % "2.6.2")
-addSbtPlugin("rocks.earlyeffect" % "sbt-specular"  % "0.12.0")
+addSbtPlugin("rocks.earlyeffect" % "sbt-specular"  % "0.12.1")
 addSbtPlugin("ch.epfl.scala"     % "sbt-scalafix"  % "0.14.7")
 addSbtPlugin("rocks.earlyeffect" % "sbt-dynver-ci" % "0.2.2")
 addSbtPlugin("com.github.sbt"    % "sbt-pgp"       % "2.3.1")
