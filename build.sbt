@@ -1,8 +1,9 @@
-val scala3Version = "3.3.8"
-val zioVersion    = "2.1.26"
+MyVersions.settings
 
 // Global settings. Iterable/saferis overrides group via PUBLISH_ORG from ZipxGitHubPackages.
-ThisBuild / scalaVersion         := scala3Version
+// Explicit ThisBuild pin: sbt 2's default ThisBuild scalaVersion is the meta Scala (3.8.4), and
+// zipxCheckDeps compares that to zipxScala. Core stays on catalog LTS; docs overrides below.
+ThisBuild / scalaVersion         := (MyVersions.scala: String)
 ThisBuild / organization         := sys.env.getOrElse("PUBLISH_ORG", "rocks.earlyeffect")
 ThisBuild / organizationName     := sys.env.getOrElse("PUBLISH_ORG_NAME", "Early Effect")
 ThisBuild / organizationHomepage := Some(url("https://www.earlyeffect.rocks"))
@@ -50,8 +51,7 @@ githubPackagesRepo match {
   case Some(_) => Seq.empty
 }
 
-// zipx: Aggregate verify (tests + Specular docs site) + dual publish by repo + Steward + Pages.
-val Fmt = CapabilityName("fmt")
+// zipx: Aggregate verify (tests + Specular docs site) + dual publish by repo + Pages + catalog PRs.
 
 /** Pre-pull with retries. Verbatim shell, so runRaw declares the escape hatch and earns a
   * generate-time warning naming the step, rather than hiding it in a bare `run =`.
@@ -78,23 +78,21 @@ val prePullPostgres = Steps.built("pre-pull-postgres")(
 )
 
 zipxJavaVersion      := JdkVersion("25")
-zipxScalaSteward     := true
 zipxWorkflowDispatch := true
 zipxCapabilities ++= {
   val upstream = JobCondition.repositoryIs("early-effect/saferis")
   Seq(
-    zipxTasks.once(Fmt, scalafmtCheckAll),
     Capability.once(
       name = Capability.TestName,
-      // Compound, so a literal SbtCommand rather than a spliced task key.
-      command = SbtCommand("test; docs/specularSite"),
-      needsCapabilities = List(Fmt),
+      command = zipxTasks.session(testFull, LocalProject("docs") / specularSite),
       // GHA VMs are disposable; skip Ryuk so Hub flakes on testcontainers/ryuk cannot fail CI.
       env = Map("TESTCONTAINERS_RYUK_DISABLED" -> EnvValue.plain("true")),
       extraSteps = prePullPostgres,
     ),
+    // Same core-only command as before; sessionTail cleared so sonaRelease is not appended twice.
     ZipxCentral.release
-      .copy(command = _ => Some(SbtCommand("core/publishSigned; sonaRelease")))
+      .runningPerModule(cmd"core/publishSigned; sonaRelease")
+      .copy(sessionTail = None)
       .withCondition(upstream),
     ZipxGitHubPackages
       .sharedRegistry(
@@ -105,7 +103,7 @@ zipxCapabilities ++= {
         publishOrg = Some("com.iterable"),
         publishOrgName = Some("Iterable"),
       )
-      .copy(command = _ => Some(SbtCommand("core/publish"))),
+      .runningPerModule(cmd"core/publish"),
     // Same org reusable workflow as peers; generated into ci.yml (no hand-rolled docs.yml).
     ZipxDocs.pages().andCondition(upstream),
   )
@@ -116,7 +114,7 @@ lazy val commonSettings = Seq(
     "-Wunused:all",
     "-feature",
   ),
-  scalafixDependencies += "com.github.vovapolu" %% "scaluzzi" % "0.1.23",
+  scalafixDependencies += MyVersions.moduleID(MyVersions.scaluzzi),
 )
 
 lazy val publishSettings = Seq(
@@ -141,20 +139,9 @@ lazy val core = project
   .settings(
     name        := "saferis",
     description := "Saferis mitigates the discord of unsafe SQL. It is a resource safe SQL client library.",
-    libraryDependencies ++= Seq(
-      "dev.zio"           %% "zio"                       % zioVersion % "provided",
-      "dev.zio"           %% "zio-streams"               % zioVersion % "provided",
-      "dev.zio"           %% "zio-json"                  % "0.10.0"    % "provided",
-      "dev.zio"           %% "zio-logging-slf4j2-bridge" % "2.5.3"    % Test,
-      "dev.zio"           %% "zio-test"                  % zioVersion % Test,
-      "dev.zio"           %% "zio-test-sbt"              % zioVersion % Test,
-      "dev.zio"           %% "zio-test-magnolia"         % zioVersion % Test,
-      "org.testcontainers" % "postgresql"                % "1.21.4"   % Test,
-      "org.postgresql"     % "postgresql"                % "42.7.13"  % Test,
-    ),
+    MyVersions.coreLib,
+    MyVersions.coreTest,
   )
-
-val specularVersion = "0.12.0"
 
 lazy val docs = project
   .in(file("saferis-docs"))
@@ -163,25 +150,13 @@ lazy val docs = project
   .settings(commonSettings)
   .settings(
     name := "saferis-docs",
-    // Specular 0.12.0 is built on 3.8.x; keep published core on ThisBuild LTS (3.3.8).
+    // Specular 0.12.0 is built on 3.8.x; keep published core on catalog LTS (3.3.8).
     scalaVersion    := "3.8.4",
     publish / skip  := true,
     publishArtifact := false,
     zipxPublish     := Some(false), // never join Central / Packages publish jobs
-    libraryDependencies ++= Seq(
-      "dev.zio"           %% "zio"                     % zioVersion,
-      "dev.zio"           %% "zio-streams"             % zioVersion,
-      "dev.zio"           %% "zio-json"                % "0.9.2",
-      "dev.zio"           %% "zio-test"                % zioVersion      % Test,
-      "dev.zio"           %% "zio-test-sbt"            % zioVersion      % Test,
-      "rocks.earlyeffect" %% "specular-core"           % specularVersion % Test,
-      "rocks.earlyeffect" %% "specular-zio-test"       % specularVersion % Test,
-      "rocks.earlyeffect" %% "specular-site"           % specularVersion % Test,
-      "rocks.earlyeffect" %% "early-effect-docs-theme" % specularVersion % Test,
-      "org.testcontainers" % "postgresql"              % "1.21.4"        % Test,
-      "org.postgresql"     % "postgresql"              % "42.7.13"       % Test,
-      "org.slf4j"          % "slf4j-nop"               % "2.0.18"        % Test,
-    ),
+    MyVersions.docsLib,
+    MyVersions.docsTest,
     specularBuildMain     := "saferis.docs.BuildSite",
     specularMetaProject   := Some(LocalProject("core")),
     specularArtifactKind  := "library",
