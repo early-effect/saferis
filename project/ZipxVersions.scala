@@ -6,7 +6,7 @@ import zipx.*
   *
   * Parent `Lib` vals used only for `.mod` are catalog rows; they are not `library()`-selected when another selected
   * module already pulls them (specular-core / specular-site via the docs theme). Core selects zio directly, so zio stays
-  * a selected row. Docs keep their own zio-json pin (0.9.2) next to core's 0.10.0.
+  * a selected row. Docs share the zio-json row; the docs theme pulls it transitively at that version.
   */
 object MyVersions extends ZipxVersions:
   val sbt: SbtVersion     = SbtVersion("2.0.6")
@@ -15,7 +15,6 @@ object MyVersions extends ZipxVersions:
   val zio             = Lib("dev.zio", "zio", "2.1.26")
   val zioStreams      = zio.mod("zio-streams")
   val zioJson         = Lib("dev.zio", "zio-json", "0.10.0")
-  val zioJsonDocs     = Lib("dev.zio", "zio-json", "0.9.2")
   val zioTest         = zio.mod("zio-test")
   val zioTestSbt      = zio.mod("zio-test-sbt")
   val zioTestMagnolia = zio.mod("zio-test-magnolia")
@@ -26,14 +25,14 @@ object MyVersions extends ZipxVersions:
   val slf4jNop     = Lib("org.slf4j", "slf4j-nop", "2.0.18").java
   val scaluzzi     = Lib("com.github.vovapolu", "scaluzzi", "0.1.23")
 
-  val specular        = Lib("rocks.earlyeffect", "specular-core", "0.12.0")
+  val specular        = Lib("rocks.earlyeffect", "specular-core", "0.14.1")
   val specularZioTest = specular.mod("specular-zio-test").test
   val specularTheme   = specular.mod("early-effect-docs-theme").test
 
   val scalafmt       = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
-  val specularPlugin = Plugin("rocks.earlyeffect", "sbt-specular", "0.12.0")
+  val specularPlugin = Plugin("rocks.earlyeffect", "sbt-specular", "0.14.1")
   val scalafix       = Plugin("ch.epfl.scala", "sbt-scalafix", "0.14.7")
-  val dynverCi       = Plugin("rocks.earlyeffect", "sbt-dynver-ci", "0.2.2")
+  val dynverCi       = Plugin("rocks.earlyeffect", "sbt-dynver-ci", "0.2.3")
   val scoverage      = Plugin("org.scoverage", "sbt-scoverage", "2.4.4")
 
   private def provided(lib: Lib): Lib = lib.copy(config = Some("provided"))
@@ -47,6 +46,6 @@ object MyVersions extends ZipxVersions:
     postgresqlTc.test,
     postgresql.test,
   )
-  def docsLib  = library(zio, zioStreams, zioJsonDocs)
+  def docsLib  = library(zio, zioStreams, zioJson)
   def docsTest = library(specularZioTest, specularTheme, postgresqlTc.test, postgresql.test, slf4jNop.test)
 end MyVersions
