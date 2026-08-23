@@ -161,13 +161,7 @@ lazy val docs = project
     specularMetaProject   := Some(LocalProject("core")),
     specularArtifactKind  := "library",
     specularSiteDirectory := (ThisBuild / baseDirectory).value / "target" / "site",
-    // Docs-only (workflow_dispatch) builds are dynver `-ci`; don't advertise that as a Central coord.
-    // Empty string → Specular uses build version (clean v* tags).
-    specularDisplayVersion := {
-      val v = (ThisBuild / version).value
-      if v.endsWith("-ci") || v.endsWith("-SNAPSHOT") then
-        previousStableVersion.value.getOrElse("<version>")
-      else ""
-    },
+    // CI docs builds are dynver `-ci`; stripCi drops the suffix so install snippets show the last published tag.
+    specularDisplayVersion := stripCi,
     scalacOptions ~= (_.filterNot(_ == "-Wunused:all")),
   )
