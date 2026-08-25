@@ -35,11 +35,17 @@ jobs:
           cache-key-suffix: version-updates
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "false"
+          local-cache: "true"
+          coursier: "true"
       - name: Apply catalog updates
         run: |
-          sbt "zipxDepUpdate yes"
-          sbt "zipxActionUpdate yes"
+          set -euo pipefail
+          . project/zipx-ci.env
+          if [ -z "${ZIPX_CLI_VERSION:-}" ]; then
+            echo "zipx: ZIPX_CLI_VERSION is unset. A release writes it to project/zipx-ci.env; dogfood sets it from zipxVersionUpdatesPreSteps."
+            exit 1
+          fi
+          cs launch --ttl Inf "rocks.earlyeffect:zipx-cli_3:$ZIPX_CLI_VERSION" -- catalog update --yes --verify-load
           sbt "zipxPinUpdate yes"
           sbt zipxCatalogGenerate
 
@@ -61,7 +67,7 @@ jobs:
           git push -u origin HEAD
           gh label create clean --force --description "zipx: Verify runs cleanFull" || true
           cat > /tmp/zipx-pr-body.md <<EOF
-          Applied zipxDepUpdate, zipxActionUpdate, and zipxPinUpdate.
+          Applied zipx-cli catalog update and zipxPinUpdate.
 
           ## Repo-root workflow YAML is not in this PR
 
