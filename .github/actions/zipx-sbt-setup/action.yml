@@ -27,6 +27,10 @@ inputs:
     description: Fixed cache epoch; when non-empty skips git-tag resolve and keys the cache with this value
     required: "false"
     default: ""
+  coursier:
+    description: When true, install cs via coursier/setup-action so the job can launch zipx-cli
+    required: "false"
+    default: "false"
 runs:
   using: composite
   steps:
@@ -35,9 +39,14 @@ runs:
       with:
         distribution: temurin
         java-version: ${{ inputs.java-version }}
-    - uses: sbt/setup-sbt@8feba82adc7f01ddcf8165b86f778bdb5b82cebc # v1.5.7
+    - uses: sbt/setup-sbt@c7d2d6258b4bd0d3ec5129e6b3453199d3c79729 # v1.5.8
       with:
         disk-cache: ${{ inputs.sbt-disk-cache }}
+    - name: Setup Coursier
+      if: inputs.coursier == 'true'
+      uses: coursier/setup-action@9b7939bf01fd1185ce2babe16135168361bf2c62 # v3.0.2
+      with:
+        apps: cs
     - name: Setup Node
       if: inputs.node-version != ''
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
