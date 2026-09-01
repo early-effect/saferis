@@ -15,9 +15,39 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Detect GitHub App credentials
+        id: zipx-app
+        run: |
+          set -euo pipefail
+          if [ -n "$ZIPX_APP_ID" ] && [ -n "$ZIPX_APP_PRIVATE_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          elif [ -n "$ZIPX_APP_ID" ] || [ -n "$ZIPX_APP_PRIVATE_KEY" ]; then
+            echo "zipx: ZIPX_APP_ID and ZIPX_APP_PRIVATE_KEY must both be set, or neither."
+            exit 1
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          ZIPX_APP_ID: ${{ secrets.ZIPX_APP_ID }}
+          ZIPX_APP_PRIVATE_KEY: ${{ secrets.ZIPX_APP_PRIVATE_KEY }}
+      - name: Mint GitHub App token
+        id: zipx-app-token
+        if: steps.zipx-app.outputs.present == 'true'
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.ZIPX_APP_ID }}
+          private-key: ${{ secrets.ZIPX_APP_PRIVATE_KEY }}
+      - name: Export GitHub App token
+        if: steps.zipx-app.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          echo "GITHUB_TOKEN=$APP_TOKEN" >> "$GITHUB_ENV"
+          echo "GH_TOKEN=$APP_TOKEN" >> "$GITHUB_ENV"
+        env:
+          APP_TOKEN: ${{ steps.zipx-app-token.outputs.token }}
       - uses: actions/checkout@v7
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.zipx-app-token.outputs.token || secrets.GITHUB_TOKEN }}
           persist-credentials: "true"
       - name: Load zipx CI params
         id: zipx-ci
@@ -45,7 +75,7 @@ jobs:
             echo "zipx: ZIPX_CLI_VERSION is unset. A release writes it to project/zipx-ci.env; dogfood sets it from zipxVersionUpdatesPreSteps."
             exit 1
           fi
-          cs launch --ttl Inf "rocks.earlyeffect:zipx-cli_3:$ZIPX_CLI_VERSION" -- catalog update --yes --verify-load
+          cs launch --ttl Inf --repository m2Local --repository ivy2Local --repository central "rocks.earlyeffect:zipx-cli_3:$ZIPX_CLI_VERSION" -- catalog update --yes --verify-load
           sbt "zipxPinUpdate yes"
           sbt zipxCatalogGenerate
 
