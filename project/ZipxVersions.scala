@@ -6,7 +6,8 @@ import zipx.*
   *
   * Parent `Lib` vals used only for `.mod` are catalog rows; they are not `library()`-selected when another selected
   * module already pulls them (specular-core / specular-site via the docs theme). Core selects zio directly, so zio stays
-  * a selected row. Docs share the zio-json row; the docs theme pulls it transitively at that version.
+  * a selected row. Core selects zio-json as provided (JSONB helpers). Docs do not: the docs theme already pulls it
+  * (zio-schema-json still pins 0.10.0; a docs-selected 1.0.0 row fails early-semver eviction).
   */
 object MyVersions extends ZipxVersions:
   val sbt: SbtVersion     = SbtVersion("2.0.7")
@@ -46,6 +47,6 @@ object MyVersions extends ZipxVersions:
     postgresqlTc.test,
     postgresql.test,
   )
-  def docsLib  = library(zio, zioStreams, zioJson)
+  def docsLib  = library(zio, zioStreams)
   def docsTest = library(specularZioTest, specularTheme, postgresqlTc.test, postgresql.test, slf4jNop.test)
 end MyVersions
