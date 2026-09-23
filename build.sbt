@@ -1,8 +1,8 @@
 MyVersions.settings
 
 // Global settings. Iterable/saferis overrides group via PUBLISH_ORG from ZipxGitHubPackages.
-// Explicit ThisBuild pin: sbt 2's default ThisBuild scalaVersion is the meta Scala (3.8.4), and
-// zipxCheckDeps compares that to zipxScala. Core stays on catalog LTS; docs overrides below.
+// Explicit ThisBuild pin: sbt's default ThisBuild scalaVersion is the metabuild Scala, and
+// zipxCheckDeps compares that to zipxScala. The catalog scala is the project scala.
 ThisBuild / scalaVersion         := (MyVersions.scala: String)
 ThisBuild / organization         := sys.env.getOrElse("PUBLISH_ORG", "rocks.earlyeffect")
 ThisBuild / organizationName     := sys.env.getOrElse("PUBLISH_ORG_NAME", "Early Effect")
@@ -149,9 +149,7 @@ lazy val docs = project
   .enablePlugins(SpecularPlugin)
   .settings(commonSettings)
   .settings(
-    name := "saferis-docs",
-    // Specular 0.12.0 is built on 3.8.x; keep published core on catalog LTS (3.3.8).
-    scalaVersion    := "3.8.4",
+    name            := "saferis-docs",
     publish / skip  := true,
     publishArtifact := false,
     zipxPublish     := Some(false), // never join Central / Packages publish jobs

@@ -5,14 +5,14 @@ import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.test.*
 
-/** Smoke page: prove 3.8 docs can `derives Table` against 3.3-built core macros. */
+/** Smoke page: `derives Table` and the SQL interpolator. */
 object MacroSmoke extends SaferisDocSpecSuite:
 
   @tableName("macro_smoke_users")
   case class SmokeUser(@generated @key id: Int, name: String) derives Table
 
   def doc = page("Macro smoke")(
-    md"""Docs-only Scala **3.8.4** against LTS **3.3.8** core: table derivation and SQL interpolator.""",
+    md"""Table derivation and the SQL interpolator.""",
     exampleValue {
       val t = Table[SmokeUser]
       sql"SELECT * FROM $t WHERE ${t.name} = ${"Alice"}".sql
