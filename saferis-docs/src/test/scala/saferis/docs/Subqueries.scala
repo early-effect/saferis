@@ -1,7 +1,6 @@
 package saferis.docs
 
 import saferis.*
-import saferis.docs.DocsTransactor.xa
 import saferis.postgres.given
 import specular.*
 import specular.ziotest.DocSpecSuite
@@ -131,9 +130,13 @@ The recommended recovery pattern catches `InvalidStatement` and substitutes an e
           // Recovery pattern for possibly-empty collections — no DB round-trip on failure:
           val ids2      = List.empty[Int]
           val recovered =
-            xa.run(Query[SubUser].where(_.id).inList(ids2).query[SubUser])
+            (Query[SubUser]
+              .where(_.id)
+              .inList(ids2)
+              .query[SubUser])
               .catchSome { case _: SaferisError.InvalidStatement => ZIO.succeed(Chunk.empty[SubUser]) }
           recovered.either
+            .provideLayer(DocsTransactor.layer)
         }.assert {
           case Right(rows) => assertTrue(rows.isEmpty)
           case Left(err)   => assertTrue(false).label(err.toString)
@@ -144,11 +147,17 @@ The example below inspects the failure to confirm both facts (the output is show
 beneath it):""",
         exampleZIO {
           // Empty collection → IN () would be invalid SQL → InvalidStatement at run time.
-          xa.run(Query[SubUser].where(_.id).inList(List.empty[Int]).query[SubUser]).either.map {
-            case Left(_: SaferisError.InvalidStatement) => "Failed with InvalidStatement (no JDBC call made)"
-            case Left(other)                            => s"Failed with ${other.getClass.getSimpleName}"
-            case Right(rows)                            => s"Unexpectedly succeeded with ${rows.size} rows"
-          }
+          (Query[SubUser]
+            .where(_.id)
+            .inList(List.empty[Int])
+            .query[SubUser])
+            .either
+            .map {
+              case Left(_: SaferisError.InvalidStatement) => "Failed with InvalidStatement (no JDBC call made)"
+              case Left(other)                            => s"Failed with ${other.getClass.getSimpleName}"
+              case Right(rows)                            => s"Unexpectedly succeeded with ${rows.size} rows"
+            }
+            .provideLayer(DocsTransactor.layer)
         }.assert(msg => assertTrue(msg.contains("InvalidStatement"))),
         md"""If you want to surface issues independently of execution, call `fragment.validate` on any `SqlFragment` — it succeeds
 with the fragment if there are no issues, fails with `InvalidStatement(issues)` otherwise. Multiple offending splices

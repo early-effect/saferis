@@ -10,7 +10,7 @@ import zio.test.*
 
 /** Integration tests for Schema validation feature. */
 object SchemaValidationSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default >>> Transactor.default
+  val xaLayer = DataSourceProvider.default
 
   given Dialect = PostgresDialect
 
@@ -32,42 +32,42 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
   ) derives Table
 
   // Helper to extract validation issues from SaferisError.SchemaValidation
-  extension (zio: IO[SaferisError, Unit])
-    def schemaValidationIssues: IO[Unit, List[SchemaIssue]] =
-      zio.flip.map {
-        case SaferisError.SchemaValidation(issues) => issues
-        case other                                 => throw new AssertionError(s"Expected SchemaValidation, got $other")
-      }
+  extension [R](zio: ZIO[R, SaferisError, Unit])
+    def schemaValidationIssues: ZIO[R, Nothing, List[SchemaIssue]] =
+      zio.exit.flatMap:
+        case Exit.Failure(cause) =>
+          cause.failureOption match
+            case Some(SaferisError.SchemaValidation(issues)) => ZIO.succeed(issues)
+            case other => ZIO.die(new IllegalStateException(s"Expected SchemaValidation, got $other"))
+        case Exit.Success(_) =>
+          ZIO.die(new IllegalStateException("verify succeeded"))
 
   val spec = suite("Schema Validation")(
     suite("Basic verification")(
       test("verify succeeds when schema matches") {
         val schema = Schema[User].build
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[User](ifExists = true))
-          _  <- xa.run(createTable(schema))
-          _  <- xa.run(Schema(schema).verify)
+          _ <- (dropTable[User](ifExists = true))
+          _ <- (createTable(schema))
+          _ <- (Schema(schema).verify)
         yield assertCompletes
       },
       test("verify fails with TableNotFound when table missing") {
         val schema = Schema[User].build
         for
-          xa     <- ZIO.service[Transactor]
-          _      <- xa.run(dropTable[User](ifExists = true))
-          issues <- xa.run(Schema(schema).verify).schemaValidationIssues
+          _      <- (dropTable[User](ifExists = true))
+          issues <- (Schema(schema).verify).schemaValidationIssues
         yield assertTrue(issues.exists { case _: SchemaIssue.TableNotFound => true; case _ => false })
       },
       test("verify fails with MissingColumn when column missing") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(sql"DROP TABLE IF EXISTS validation_users".execute)
+          _ <- (sql"DROP TABLE IF EXISTS validation_users".execute)
           // Create table missing the 'age' column
-          _ <- xa.run(
+          _ <- (
             sql"CREATE TABLE validation_users (id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL, email VARCHAR(255) NOT NULL)".execute
           )
           schema = Schema[User].build
-          issues <- xa.run(Schema(schema).verify).schemaValidationIssues
+          issues <- (Schema(schema).verify).schemaValidationIssues
         yield assertTrue(issues.exists {
           case SchemaIssue.MissingColumn(_, "age", _) => true
           case _                                      => false
@@ -76,11 +76,10 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
       test("verify fails with ExtraColumn when DB has extra columns") {
         val schema = Schema[User].build
         for
-          xa     <- ZIO.service[Transactor]
-          _      <- xa.run(dropTable[User](ifExists = true))
-          _      <- xa.run(createTable(schema))
-          _      <- xa.run(sql"ALTER TABLE validation_users ADD COLUMN extra_col VARCHAR(100)".execute)
-          issues <- xa.run(Schema(schema).verify).schemaValidationIssues
+          _      <- (dropTable[User](ifExists = true))
+          _      <- (createTable(schema))
+          _      <- (sql"ALTER TABLE validation_users ADD COLUMN extra_col VARCHAR(100)".execute)
+          issues <- (Schema(schema).verify).schemaValidationIssues
         yield assertTrue(issues.exists {
           case SchemaIssue.ExtraColumn(_, "extra_col", _) => true
           case _                                          => false
@@ -91,23 +90,21 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
         val schema  = Schema[User].build
         val options = VerifyOptions(checkExtraColumns = false)
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[User](ifExists = true))
-          _  <- xa.run(createTable(schema))
-          _  <- xa.run(sql"ALTER TABLE validation_users ADD COLUMN extra_col VARCHAR(100)".execute)
-          _  <- xa.run(Schema(schema).verifyWith(options))
+          _ <- (dropTable[User](ifExists = true))
+          _ <- (createTable(schema))
+          _ <- (sql"ALTER TABLE validation_users ADD COLUMN extra_col VARCHAR(100)".execute)
+          _ <- (Schema(schema).verifyWith(options))
         yield assertCompletes
       },
       test("verify fails with NullabilityMismatch when nullability differs") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(sql"DROP TABLE IF EXISTS validation_users".execute)
+          _ <- (sql"DROP TABLE IF EXISTS validation_users".execute)
           // Create table with age as NOT NULL instead of nullable
-          _ <- xa.run(
+          _ <- (
             sql"CREATE TABLE validation_users (id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL, email VARCHAR(255) NOT NULL, age INT NOT NULL)".execute
           )
           schema = Schema[User].build
-          issues <- xa.run(Schema(schema).verify).schemaValidationIssues
+          issues <- (Schema(schema).verify).schemaValidationIssues
         yield assertTrue(issues.exists {
           case SchemaIssue.NullabilityMismatch(_, "age", true, false) => true
           case _                                                      => false
@@ -121,10 +118,9 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
           .named("idx_users_email")
           .build
         for
-          xa     <- ZIO.service[Transactor]
-          _      <- xa.run(dropTable[User](ifExists = true))
-          _      <- xa.run(createTable[User]())
-          issues <- xa.run(Schema(schema).verify).schemaValidationIssues
+          _      <- (dropTable[User](ifExists = true))
+          _      <- (createTable[User]())
+          issues <- (Schema(schema).verify).schemaValidationIssues
         yield assertTrue(issues.exists { case _: SchemaIssue.MissingIndex => true; case _ => false })
       },
       test("verify succeeds when index exists") {
@@ -133,10 +129,9 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
           .named("idx_users_email")
           .build
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[User](ifExists = true))
-          _  <- xa.run(createTable(schema))
-          _  <- xa.run(Schema(schema).verify)
+          _ <- (dropTable[User](ifExists = true))
+          _ <- (createTable(schema))
+          _ <- (Schema(schema).verify)
         yield assertCompletes
       },
       test("verify succeeds with checkIndexes = false even if index missing") {
@@ -146,10 +141,9 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
           .build
         val options = VerifyOptions(checkIndexes = false)
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[User](ifExists = true))
-          _  <- xa.run(createTable[User]())
-          _  <- xa.run(Schema(schema).verifyWith(options))
+          _ <- (dropTable[User](ifExists = true))
+          _ <- (createTable[User]())
+          _ <- (Schema(schema).verifyWith(options))
         yield assertCompletes
       },
     ),
@@ -161,12 +155,11 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
           .onDelete(Cascade)
           .build
         for
-          xa     <- ZIO.service[Transactor]
-          _      <- xa.run(dropTable[Order](ifExists = true))
-          _      <- xa.run(dropTable[User](ifExists = true))
-          _      <- xa.run(createTable[User]())
-          _      <- xa.run(createTable[Order]())
-          issues <- xa.run(Schema(ordersSchema).verify).schemaValidationIssues
+          _      <- (dropTable[Order](ifExists = true))
+          _      <- (dropTable[User](ifExists = true))
+          _      <- (createTable[User]())
+          _      <- (createTable[Order]())
+          issues <- (Schema(ordersSchema).verify).schemaValidationIssues
         yield assertTrue(issues.exists { case _: SchemaIssue.MissingForeignKey => true; case _ => false })
       },
       test("verify succeeds when FK exists") {
@@ -176,12 +169,11 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
           .onDelete(Cascade)
           .build
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Order](ifExists = true))
-          _  <- xa.run(dropTable[User](ifExists = true))
-          _  <- xa.run(createTable[User]())
-          _  <- xa.run(createTable(ordersSchema))
-          _  <- xa.run(Schema(ordersSchema).verify)
+          _ <- (dropTable[Order](ifExists = true))
+          _ <- (dropTable[User](ifExists = true))
+          _ <- (createTable[User]())
+          _ <- (createTable(ordersSchema))
+          _ <- (Schema(ordersSchema).verify)
         yield assertCompletes
       },
     ),
@@ -192,11 +184,10 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
           .named("uq_users_email")
           .build
         for
-          xa     <- ZIO.service[Transactor]
-          _      <- xa.run(dropTable[Order](ifExists = true))
-          _      <- xa.run(dropTable[User](ifExists = true))
-          _      <- xa.run(createTable[User]())
-          issues <- xa.run(Schema(schema).verify).schemaValidationIssues
+          _      <- (dropTable[Order](ifExists = true))
+          _      <- (dropTable[User](ifExists = true))
+          _      <- (createTable[User]())
+          issues <- (Schema(schema).verify).schemaValidationIssues
         yield assertTrue(issues.exists { case _: SchemaIssue.MissingUniqueConstraint => true; case _ => false })
       },
       test("verify succeeds when unique constraint exists") {
@@ -205,11 +196,10 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
           .named("uq_users_email")
           .build
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Order](ifExists = true))
-          _  <- xa.run(dropTable[User](ifExists = true))
-          _  <- xa.run(createTable(schema))
-          _  <- xa.run(Schema(schema).verify)
+          _ <- (dropTable[Order](ifExists = true))
+          _ <- (dropTable[User](ifExists = true))
+          _ <- (createTable(schema))
+          _ <- (Schema(schema).verify)
         yield assertCompletes
       },
     ),
@@ -219,14 +209,13 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
         val withIndex = Schema[User].withIndex(_.email).build
         val schema    = Schema(withIndex).withUniqueConstraint(_.name).build
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Order](ifExists = true))
-          _  <- xa.run(dropTable[User](ifExists = true))
+          _ <- (dropTable[Order](ifExists = true))
+          _ <- (dropTable[User](ifExists = true))
           // Create table without index or unique constraint
-          _ <- xa.run(createTable[User]())
-          _ <- xa.run(sql"ALTER TABLE validation_users ADD COLUMN extra_col VARCHAR(100)".execute)
+          _ <- (createTable[User]())
+          _ <- (sql"ALTER TABLE validation_users ADD COLUMN extra_col VARCHAR(100)".execute)
           // Minimal should pass despite missing index/constraint and extra column
-          _ <- xa.run(Schema(schema).verifyWith(VerifyOptions.minimal))
+          _ <- (Schema(schema).verifyWith(VerifyOptions.minimal))
         yield assertCompletes
         end for
       }

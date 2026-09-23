@@ -13,7 +13,7 @@ export Interpolator.in
 
 object Interpolator:
 
-  /** Splice a collection of values as `(?, ?, ?, ...)` for an IN clause:
+  /** Splice a collection of values as `($1, $2, ...)` for an IN clause:
     *
     * {{{
     *   sql"select * from $table where ${table.id} in ${in(ids)}"
@@ -98,13 +98,7 @@ object Interpolator:
 
     val holder     = '{ (Vector.newBuilder[Placeholder]) }
     val placeExprs = getPlaceHoldersExpr(allArgsExprs, holder)
-    val writeExprs = '{ Placeholder.allWrites($placeExprs) }
-    val issueExprs = '{ Placeholder.allIssues($placeExprs) }
-    val query      = '{ $sc.s($placeExprs.map(_.sql)*) }
-    val res        = '{
-      SqlFragment($query, $writeExprs, $issueExprs)
-    }
-    res
+    '{ SqlFragment.interpolate($sc.parts, $placeExprs) }
 
   end sqlImpl
 

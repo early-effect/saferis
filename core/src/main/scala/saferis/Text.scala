@@ -1,10 +1,5 @@
 package saferis
 
-import zio.*
-
-import java.sql.PreparedStatement
-import java.sql.ResultSet
-
 /** An opaque type for unbounded text columns (maps to TEXT in PostgreSQL, LONGTEXT in MySQL, etc.)
   *
   * Use this instead of String when you need TEXT column type rather than VARCHAR(255).
@@ -21,35 +16,26 @@ import java.sql.ResultSet
 opaque type Text = String
 
 object Text:
-  /** Create a Text value from a String */
   def apply(value: String): Text = value
 
-  /** Extension method to get the underlying String value */
   extension (t: Text) def value: String = t
 
-  /** Encoder for Text type - uses LONGVARCHAR which maps to TEXT */
   given encoder: Encoder[Text] with
-    def encode(a: Text, stmt: PreparedStatement, idx: Int)(using Trace): Task[Unit] =
-      ZIO.attempt(stmt.setString(idx, a))
-    override val jdbcType: Int = java.sql.Types.LONGVARCHAR
+    def pgType: PgType            = PgType.Text
+    def encode(a: Text): SqlValue = SqlValue.Text(a)
 
-  /** Decoder for Text type */
   given decoder: Decoder[Text] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[Text] =
-      ZIO.attempt(rs.getString(name))
+    def decode(value: SqlValue): Either[DecodeError, Text] = value match
+      case SqlValue.VarChar(v) => Right(v)
+      case SqlValue.Text(v)    => Right(v)
+      case SqlValue.Null(_)    => Left(DecodeError("null value"))
+      case other               => Left(DecodeError(s"expected text, found ${other.productPrefix}"))
 
-  /** Codec for Text type */
   given codec: Codec[Text] = new Codec[Text]:
     val encoder: Encoder[Text] = Text.encoder
     val decoder: Decoder[Text] = Text.decoder
-    override val jdbcType: Int = Text.encoder.jdbcType
 
-  /** Option encoder for Text */
   given optionEncoder: Encoder[Option[Text]] = Encoder.option[Text]
-
-  /** Option decoder for Text */
   given optionDecoder: Decoder[Option[Text]] = Decoder.option[Text]
-
-  /** Option codec for Text */
-  given optionCodec: Codec[Option[Text]] = Codec.option[Text]
+  given optionCodec: Codec[Option[Text]]     = Codec.option[Text]
 end Text

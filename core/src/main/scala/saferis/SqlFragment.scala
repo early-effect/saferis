@@ -1,271 +1,188 @@
 package saferis
 
-import zio.*
+import zio.Chunk
+import zio.Duration
+import zio.IO
+import zio.Trace
+import zio.ZIO
 import zio.stream.ZStream
 
-import java.sql.PreparedStatement
-import java.sql.ResultSet
-
-type ScopedQuery[E] = ZIO[ConnectionProvider & Scope, SaferisError, E]
-
-final case class SqlFragment(
-    sql: String,
-    override private[saferis] val writes: Seq[Write[?]],
-    override private[saferis] val issues: List[FragmentIssue] = Nil,
+/** A statement as text pieces and parameters, plus construction issues and an optional per-statement timeout. */
+final class SqlFragment private (
+    val pieces: Chunk[SqlPiece],
+    val issues: List[FragmentIssue],
+    override val timeout: Option[Duration],
 ) extends Placeholder:
 
-  inline private def make[E](rs: ResultSet)(using table: Table[E])(using trace: Trace): Task[E] =
-    for cs <- ZIO.foreach(table.columns)(c => c.read(rs))
-    yield (Macros.make[E](cs))
+  /** Postgres inspection form (`$1`, `$2`). Not the text a driver sends. */
+  override def sql: String = SqlPieces.postgres(pieces)
 
-  private def doWrites(statement: PreparedStatement)(using trace: Trace) = ZIO.foreachDiscard(writes.zipWithIndex):
-    (write, idx) => write.write(statement, idx + 1)
+  def show: String = SqlPieces.show(pieces)
 
-  private def applyTimeout(statement: PreparedStatement)(using trace: Trace): ZIO[ConnectionProvider, Throwable, Unit] =
-    for
-      providerDefault <- ZIO.serviceWith[ConnectionProvider](_.defaultQueryTimeout)
-      fiberRefValue   <- Saferis.timeoutFiberRef.get
-      effective = fiberRefValue.orElse(providerDefault)
-      _ <- effective match
-        case Some(d) =>
-          val seconds = Saferis.toJdbcSeconds(d)
-          ZIO.attempt(statement.setQueryTimeout(seconds))
-        case None => ZIO.unit
-    yield ()
+  def withTimeout(d: Duration): SqlFragment =
+    new SqlFragment(pieces, issues, Some(d))
 
-  /** Map a throwable to a SaferisError, consulting the active provider's `retryClassifier` so that transient failures
-    * surface as `SaferisError.Retryable`.
-    */
-  private def classifyError[R <: ConnectionProvider, A](
-      effect: ZIO[R, Throwable, A],
-      sqlText: String,
-  )(using trace: Trace): ZIO[R, SaferisError, A] =
-    effect.flatMapError: t =>
-      ZIO
-        .serviceWith[ConnectionProvider](_.retryClassifier)
-        .map(SaferisError.fromThrowable(t, Some(sqlText), _))
+  def stripMargin: SqlFragment = stripMargin('|')
 
-  /** Refuse to run if the fragment carries validation issues. The check happens before any connection is acquired, so
-    * invalid fragments never reach JDBC.
-    */
-  private def validateIssues[R, A](effect: => ZIO[R, SaferisError, A])(using
-      trace: Trace
-  ): ZIO[R, SaferisError, A] =
-    if issues.isEmpty then effect
-    else ZIO.fail(SaferisError.InvalidStatement(issues))
+  def stripMargin(marginChar: Char): SqlFragment =
+    new SqlFragment(SqlFragment.stripPieces(pieces, marginChar), issues, timeout)
 
-  /** Lift this fragment's validation status into a ZIO effect.
-    *
-    * Succeeds with the fragment if no issues were accumulated during construction; fails with
-    * [[SaferisError.InvalidStatement]] otherwise. Useful for callers who want to surface or log construction failures
-    * before running the statement.
-    */
-  def validate(using trace: Trace): IO[SaferisError, SqlFragment] =
+  def append(other: SqlFragment): SqlFragment =
+    new SqlFragment(
+      SqlPieces.merge(pieces ++ other.pieces),
+      issues ++ other.issues,
+      timeout.orElse(other.timeout),
+    )
+
+  def :+(other: SqlFragment): SqlFragment = append(other)
+
+  def validate(using Trace): IO[SaferisError, SqlFragment] =
     if issues.isEmpty then ZIO.succeed(this)
     else ZIO.fail(SaferisError.InvalidStatement(issues))
 
-  /** Executes a query and returns an effect of a Chunk of [[Table]] instances.
-    *
-    * @return
-    */
-  inline def query[E: Table](using trace: Trace): ScopedQuery[Chunk[E]] =
-    validateIssues:
-      val effect = for
-        connection <- ZIO.serviceWithZIO[ConnectionProvider](_.getConnection)
-        statement  <- ZIO.attempt(connection.prepareStatement(sql))
-        _          <- applyTimeout(statement)
-        _          <- doWrites(statement)
-        rs         <- ZIO.attempt(statement.executeQuery())
-        results    <-
-          def loop(acc: ChunkBuilder[E]): ZIO[Any, Throwable, Chunk[E]] =
-            ZIO.attempt(rs.next()).flatMap { hasNext =>
-              if hasNext then make[E](rs).flatMap(e => loop(acc += e))
-              else ZIO.succeed(acc.result())
-            }
-          loop(Chunk.newBuilder[E])
-      yield results
-      classifyError(effect, sql)
-  end query
+  /** Fails with `InvalidStatement` before a connection is checked out. Timeout is this fragment, else the fiber ref. */
+  def toCommand(using Trace): IO[SaferisError, SqlCommand] =
+    if issues.nonEmpty then ZIO.fail(SaferisError.InvalidStatement(issues))
+    else
+      Saferis.timeoutFiberRef.get.map: aspect =>
+        SqlCommand(pieces, timeout.orElse(aspect))
 
-  /** Executes a query and returns an effect of an option of [[Table]]. If the query returns no rows, None is returned.
-    *
-    * @return
-    */
-  inline def queryOne[E: Table](using trace: Trace): ScopedQuery[Option[E]] =
-    validateIssues:
-      val effect = for
-        connection <- ZIO.serviceWithZIO[ConnectionProvider](_.getConnection)
-        statement  <- ZIO.attempt(connection.prepareStatement(sql))
-        _          <- applyTimeout(statement)
-        _          <- doWrites(statement)
-        rs         <- ZIO.attempt(statement.executeQuery())
-        result     <- if rs.next() then make[E](rs).map(Some(_)) else ZIO.succeed(None)
-      yield result
-      classifyError(effect, sql)
-  end queryOne
+  inline def query[E](using table: Table[E])(using Trace): ZIO[SqlSession, SaferisError, Chunk[E]] =
+    val read = SqlFragment.readTable[E]
+    for
+      command <- toCommand
+      rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(read))
+    yield rows
 
-  /** Executes a query and returns an effect of a simple value (like Int, String, etc.) from the first column of the
-    * first row. This is useful for queries like "SELECT COUNT(*)" or "SELECT MAX(age)" that return a single value. Also
-    * supports tuples by validating that the result set has the expected number of columns.
-    *
-    * @tparam A
-    *   the type to decode (must have a Decoder instance)
-    * @return
-    *   an effect of Option[A] - None if no results, Some(value) if results found
-    */
-  inline def queryValue[A](using decoder: Decoder[A])(using trace: Trace): ScopedQuery[Option[A]] =
-    validateIssues:
-      val effect = for
-        connection <- ZIO.serviceWithZIO[ConnectionProvider](_.getConnection)
-        statement  <- ZIO.attempt(connection.prepareStatement(sql))
-        _          <- applyTimeout(statement)
-        _          <- doWrites(statement)
-        rs         <- ZIO.attempt(statement.executeQuery())
-        result     <-
-          if rs.next() then
-            // we need to get the first column and it's name
-            val name = rs.getMetaData.getColumnName(1)
-            decoder.decode(rs, name).map(Some(_))
-          else ZIO.succeed(None)
-      yield result
-      classifyError(effect, sql)
+  inline def queryOne[E](using table: Table[E])(using Trace): ZIO[SqlSession, SaferisError, Option[E]] =
+    query[E].map(_.headOption)
+
+  inline def queryValue[A](using decoder: RowDecoder[A])(using Trace): ZIO[SqlSession, SaferisError, Option[A]] =
+    val read: SqlRow => Either[SaferisError, A] = row =>
+      decoder
+        .decode(row)
+        .left
+        .map: err =>
+          val column = if row.width == 1 then row.labels.headOption.getOrElse("0") else "0"
+          SaferisError.DecodingError(column, "value", err.detail)
+    for
+      command <- toCommand
+      rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(read))
+    yield rows.headOption
   end queryValue
 
-  /** Executes a query and returns a lazy ZStream of [[Table]] instances.
-    *
-    * Unlike `query` which eagerly loads all results into a Chunk, this method streams rows lazily - ideal for large
-    * result sets or real-time processing. The connection remains open until the stream is fully consumed or closed.
-    *
-    * @return
-    *   A ZStream that lazily iterates through result rows
-    */
-  inline def queryStream[E: Table](using
-      trace: Trace
-  ): ZStream[ConnectionProvider & Scope, SaferisError, E] =
-    if issues.nonEmpty then ZStream.fail(SaferisError.InvalidStatement(issues))
-    else
-      val thisSql    = sql
-      val acquireRaw =
-        for
-          connection <- ZIO.serviceWithZIO[ConnectionProvider](_.getConnection)
-          statement  <- ZIO.acquireRelease(ZIO.attempt(connection.prepareStatement(thisSql)))(s =>
-            ZIO.succeed(s.close())
-          )
-          _  <- applyTimeout(statement)
-          _  <- doWrites(statement)
-          rs <- ZIO.acquireRelease(ZIO.attempt(statement.executeQuery()))(r => ZIO.succeed(r.close()))
-        yield rs
-      val acquire: ZIO[ConnectionProvider & Scope, SaferisError, ResultSet] =
-        classifyError(acquireRaw, thisSql)
+  inline def queryStream[E](using table: Table[E])(using Trace): ZStream[SqlSession, SaferisError, E] =
+    val read = SqlFragment.readTable[E]
+    ZStream.unwrap:
+      toCommand.map: command =>
+        ZStream.serviceWithStream[SqlSession](_.stream(command)(read))
 
-      def iterate(rs: ResultSet, classifier: SaferisError.RetryClassifier): ZStream[Any, SaferisError, E] =
-        ZStream
-          .unfoldZIO(rs): resultSet =>
-            ZIO
-              .attempt(resultSet.next())
-              .flatMap: hasNext =>
-                if hasNext then make[E](resultSet).map(e => Some((e, resultSet)))
-                else ZIO.succeed(None)
-          .mapError(SaferisError.fromThrowable(_, Some(thisSql), classifier))
+  def update(using Trace): ZIO[SqlSession, SaferisError, Long]  = dml
+  def delete(using Trace): ZIO[SqlSession, SaferisError, Long]  = dml
+  def insert(using Trace): ZIO[SqlSession, SaferisError, Long]  = dml
+  def execute(using Trace): ZIO[SqlSession, SaferisError, Long] = dml
 
-      val streamed: ZIO[ConnectionProvider & Scope, SaferisError, ZStream[Any, SaferisError, E]] =
-        for
-          rs         <- acquire
-          classifier <- ZIO.serviceWith[ConnectionProvider](_.retryClassifier)
-        yield iterate(rs, classifier)
-      ZStream.unwrapScoped[ConnectionProvider & Scope](streamed)
-  end queryStream
+  def dml(using Trace): ZIO[SqlSession, SaferisError, Long] =
+    for
+      command <- toCommand
+      count   <- ZIO.serviceWithZIO[SqlSession](_.exec(command))
+    yield count
 
-  /** alias for [[Statement.dml]]
-    *
-    * @return
-    */
-  def update(using trace: Trace): ZIO[ConnectionProvider & Scope, SaferisError, Int] = dml
+end SqlFragment
 
-  /** alias for [[Statement.dml]]
-    *
-    * @return
-    */
-  def delete(using trace: Trace): ZIO[ConnectionProvider & Scope, SaferisError, Int] = dml
+object SqlFragment:
+  def apply(
+      pieces: Chunk[SqlPiece],
+      issues: List[FragmentIssue] = Nil,
+      timeout: Option[Duration] = None,
+  ): SqlFragment =
+    new SqlFragment(SqlPieces.merge(pieces), issues, timeout)
 
-  /** alias for [[Statement.dml]]
-    *
-    * @return
-    */
-  def insert(using trace: Trace): ZIO[ConnectionProvider & Scope, SaferisError, Int] = dml
+  def apply(placeholder: Placeholder): SqlFragment =
+    new SqlFragment(SqlPieces.merge(placeholder.pieces), placeholder.issues, placeholder.timeout)
 
-  /** Generic execution for any SQL statement (DML or DDL). Alias for [[dml]] with a more generic name suitable for DDL
-    * operations.
-    * @return
-    */
-  def execute(using trace: Trace): ZIO[ConnectionProvider & Scope, SaferisError, Int] = dml
+  val empty: SqlFragment = new SqlFragment(Chunk.empty, Nil, None)
 
-  /** Executes the statement which must be an SQL Data Manipulation Language (DML) statement, such as INSERT, UPDATE or
-    * DELETE or an SQL statement that returns an Int, such as a DML statement.
-    * @return
-    */
-  inline def dml(using trace: Trace): ZIO[ConnectionProvider & Scope, SaferisError, Int] =
-    validateIssues:
-      val effect = for
-        connection <- ZIO.serviceWithZIO[ConnectionProvider](_.getConnection)
-        statement  <- ZIO.attempt(connection.prepareStatement(sql))
-        _          <- applyTimeout(statement)
-        _          <- ZIO.foreach(writes.zipWithIndex): (write, idx) =>
-          write.write(statement, idx + 1)
-        result <- ZIO.attempt(statement.executeUpdate())
-      yield result
-      classifyError(effect, sql)
-  end dml
+  def text(sql: String): SqlFragment =
+    if sql.isEmpty then empty else new SqlFragment(Chunk(SqlPiece.Text(sql)), Nil, None)
 
-  /** Strips leading whitespace from each line in the SQL string, and removes the margin character. See
-    * [[String.stripMargin]]
-    *
-    * @param marginChar
-    * @return
-    */
-  def stripMargin(marginChar: Char) = copy(sql = sql.stripMargin(marginChar))
+  def param(value: SqlValue): SqlFragment =
+    new SqlFragment(Chunk(SqlPiece.Param(value)), Nil, None)
 
-  /** Strips leading whitespace from each line in the SQL string, and removes the margin character. Using the default
-    * margin character '|'. See [[String.stripMargin]]
-    *
-    * @return
-    */
-  def stripMargin = copy(sql = sql.stripMargin)
-
-  /** Appends another [[SqlFragment]] to this one.
-    *
-    * @param other
-    * @return
-    */
-  def append(other: SqlFragment) =
-    copy(sql = sql + other.sql, writes = writes ++ other.writes, issues = issues ++ other.issues)
-
-  /** alias for [[append]]
-    *
-    * @param other
-    * @return
-    */
-  def :+(other: SqlFragment) = append(other)
-
-  /** Shows the SQL with parameters inlined for debugging/testing purposes if there are more parameters than '?'
-    * placeholders, the extra parameters are ignored. This shouldn't happen in practice. Conversely if there are more
-    * '?' placeholders than parameters, the extra placeholders are left as '?'
-    *
-    * @return
-    */
-  def show: String =
-    val AverageCharsPerLiteral = 10
-    val sb                     = new StringBuilder(sql.length + writes.length * AverageCharsPerLiteral)
-    var idx                    = 0
-    var i                      = 0
-    while i < sql.length do
-      val c = sql.charAt(i)
-      if c == '?' && idx < writes.length then
-        sb.append(writes(idx).literal)
-        idx += 1
-      else sb.append(c)
+  private[saferis] def interpolate(parts: Seq[String], holders: Seq[Placeholder]): SqlFragment =
+    // `StringContext.parts` still contains Scala escapes. `StringContext.s` used to decode them.
+    val decoded                   = parts.map(StringContext.processEscapes)
+    val b                         = Chunk.newBuilder[SqlPiece]
+    val issues                    = List.newBuilder[FragmentIssue]
+    var timeout: Option[Duration] = None
+    var i                         = 0
+    while i < holders.length do
+      if i < decoded.length then b += SqlPiece.Text(decoded(i))
+      b ++= holders(i).pieces
+      issues ++= holders(i).issues
+      timeout = timeout.orElse(holders(i).timeout)
       i += 1
-    sb.toString
-  end show
+    if i < decoded.length then b += SqlPiece.Text(decoded(i))
+    new SqlFragment(SqlPieces.merge(b.result()), issues.result(), timeout)
+  end interpolate
 
+  inline def readTable[E](using table: Table[E]): SqlRow => Either[SaferisError, E] = row =>
+    val decoded = table.columns.foldLeft[Either[SaferisError, List[(String, Any)]]](Right(Nil)): (acc, col) =>
+      acc.flatMap(pairs => col.read(row).map(pair => pair :: pairs))
+    decoded.flatMap: pairs =>
+      Macros
+        .make[E](pairs.reverse)
+        .left
+        .map: err =>
+          SaferisError.DecodingError(table.name, "row", err.detail)
+
+  /** `String.stripMargin`, walking text only. A parameter is content, so it ends the margin scan for that line. */
+  private def stripPieces(pieces: Chunk[SqlPiece], marginChar: Char): Chunk[SqlPiece] =
+    val out         = Chunk.newBuilder[SqlPiece]
+    val pending     = new StringBuilder
+    val leading     = new StringBuilder
+    var atLineStart = true
+
+    def emit(text: String): Unit =
+      if text.nonEmpty then pending.append(text)
+
+    def flush(): Unit =
+      if pending.nonEmpty then
+        out += SqlPiece.Text(pending.toString)
+        pending.clear()
+
+    def commitLeading(): Unit =
+      if leading.nonEmpty then
+        emit(leading.toString)
+        leading.clear()
+
+    def onChar(c: Char): Unit =
+      if c == '\n' then
+        if atLineStart then commitLeading()
+        emit("\n")
+        atLineStart = true
+      else if atLineStart then
+        if c <= ' ' then leading.append(c)
+        else if c == marginChar then
+          leading.clear()
+          atLineStart = false
+        else
+          commitLeading()
+          emit(c.toString)
+          atLineStart = false
+      else emit(c.toString)
+
+    pieces.foreach:
+      case SqlPiece.Text(text) =>
+        text.foreach(onChar)
+      case param: SqlPiece.Param =>
+        if atLineStart then
+          commitLeading()
+          atLineStart = false
+        flush()
+        out += param
+    if atLineStart then commitLeading()
+    flush()
+    SqlPieces.merge(out.result())
+  end stripPieces
 end SqlFragment

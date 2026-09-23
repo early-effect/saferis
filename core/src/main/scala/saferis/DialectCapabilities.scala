@@ -326,5 +326,5 @@ trait SchemaIntrospectionSupport:
   /** Introspect a table's schema from the database. */
   def introspectTable(tableName: String)(using
       Trace
-  ): ZIO[ConnectionProvider & Scope, SaferisError, Option[DatabaseTable]]
+  ): ZIO[SqlSession, SaferisError, Option[DatabaseTable]]
 end SchemaIntrospectionSupport

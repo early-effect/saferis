@@ -25,7 +25,7 @@ import zio.test.*
   *     labels, which are emitted idiomatically, so escaping lives at the public boundary).
   */
 object SqlInjectionDdlSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default >>> Transactor.default
+  val xaLayer = DataSourceProvider.default
 
   @tableName("victim_table")
   final case class VictimTable(@key id: Int, name: String) derives Table
@@ -46,62 +46,58 @@ object SqlInjectionDdlSpecs extends ZIOSpecDefault:
   val quoteFreeDropPayload = "idx_x on victim_table (name); drop table victim_table; --"
 
   /** Recreate the victim table fresh and confirm it exists. */
-  def freshVictim(xa: Transactor) =
+  def freshVictim =
     for
-      _ <- xa.run(dropTable[VictimTable](ifExists = true))
-      _ <- xa.run(Schema[VictimTable].ddl().execute)
-      _ <- xa.run(insert(VictimTable(1, "alice")))
+      _ <- (dropTable[VictimTable](ifExists = true))
+      _ <- (Schema[VictimTable].ddl().execute)
+      _ <- (insert(VictimTable(1, "alice")))
     yield ()
 
-  def victimCount(xa: Transactor) =
-    xa.run(
+  def victimCount =
+    (
       sql"select count(*) as count from information_schema.tables where table_name = ${"victim_table"}"
         .queryOne[CountResult]
-    ).map(_.map(_.count).getOrElse(0L))
+      )
+      .map(_.map(_.count).getOrElse(0L))
 
   def spec = suite("SQL injection attempts on DDL identifiers")(
     test("malicious index name via createIndex (escaped path) cannot drop the victim table"):
       for
-        xa <- ZIO.service[Transactor]
-        _  <- freshVictim(xa)
+        _ <- freshVictim
         // Attempt injection through the index name. escapeIdentifier should neutralize it; even if the DB
         // rejects the resulting statement, the victim table must survive.
-        _     <- xa.run(createIndex[VictimTable](dropPayload, Seq("name"))).either
-        count <- victimCount(xa)
+        _     <- (createIndex[VictimTable](dropPayload, Seq("name"))).either
+        count <- victimCount
       yield assertTrue(count == 1L) // victim_table still exists regardless of whether the create succeeded/failed
     ,
     test("malicious column name via createIndex (escaped path) cannot drop the victim table"):
       for
-        xa    <- ZIO.service[Transactor]
-        _     <- freshVictim(xa)
-        _     <- xa.run(createIndex[VictimTable]("idx_safe", Seq(dropPayload))).either
-        count <- victimCount(xa)
+        _     <- freshVictim
+        _     <- (createIndex[VictimTable]("idx_safe", Seq(dropPayload))).either
+        count <- victimCount
       yield assertTrue(count == 1L)
     ,
     test("malicious index name via dropIndex (escaped path) cannot drop the victim table"):
       for
-        xa    <- ZIO.service[Transactor]
-        _     <- freshVictim(xa)
-        _     <- xa.run(dropIndex(dropPayload, ifExists = true)).either
-        count <- victimCount(xa)
+        _     <- freshVictim
+        _     <- (dropIndex(dropPayload, ifExists = true)).either
+        count <- victimCount
       yield assertTrue(count == 1L)
     ,
     test("malicious index name via createIndexIfNotExists cannot drop the victim table"):
       // createIndexIfNotExists escapes its user-supplied index name at the public boundary, so this quote-bearing
       // payload becomes an inert quoted identifier and the victim survives.
       for
-        xa    <- ZIO.service[Transactor]
-        _     <- freshVictim(xa)
-        _     <- xa.run(createIndexIfNotExists[VictimTable](dropPayload, Seq("name"))).either
-        count <- victimCount(xa)
+        _     <- freshVictim
+        _     <- (createIndexIfNotExists[VictimTable](dropPayload, Seq("name"))).either
+        count <- victimCount
       yield assertTrue(count == 1L)
     ,
     test("malicious column name via createIndexIfNotExists cannot drop the victim table"):
       for
-        xa    <- ZIO.service[Transactor]
-        _     <- freshVictim(xa)
-        _     <- xa.run(createIndexIfNotExists[VictimTable]("idx_safe", Seq(dropPayload))).either
-        count <- victimCount(xa)
+        _     <- freshVictim
+        _     <- (createIndexIfNotExists[VictimTable]("idx_safe", Seq(dropPayload))).either
+        count <- victimCount
       yield assertTrue(count == 1L)
     ,
     test("QUOTE-FREE stacked-query index name via createIndexIfNotExists cannot drop the victim"):
@@ -109,18 +105,16 @@ object SqlInjectionDdlSpecs extends ZIOSpecDefault:
       // Without escaping it would produce a syntactically valid stacked statement ending in `drop table
       // victim_table`. Escaping the user-supplied index name at the public boundary makes it inert.
       for
-        xa    <- ZIO.service[Transactor]
-        _     <- freshVictim(xa)
-        _     <- xa.run(createIndexIfNotExists[VictimTable](quoteFreeDropPayload, Seq("name"))).either
-        count <- victimCount(xa)
+        _     <- freshVictim
+        _     <- (createIndexIfNotExists[VictimTable](quoteFreeDropPayload, Seq("name"))).either
+        count <- victimCount
       yield assertTrue(count == 1L)
     ,
     test("QUOTE-FREE stacked-query index name via createIndex (escaped path) cannot drop the victim"):
       for
-        xa    <- ZIO.service[Transactor]
-        _     <- freshVictim(xa)
-        _     <- xa.run(createIndex[VictimTable](quoteFreeDropPayload, Seq("name"))).either
-        count <- victimCount(xa)
+        _     <- freshVictim
+        _     <- (createIndex[VictimTable](quoteFreeDropPayload, Seq("name"))).either
+        count <- victimCount
       yield assertTrue(count == 1L),
   ).provideShared(xaLayer) @@ TestAspect.sequential
 end SqlInjectionDdlSpecs

@@ -2,7 +2,6 @@ package saferis.docs
 
 import saferis.*
 import saferis.Schema.*
-import saferis.docs.DocsTransactor.xa
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.*
@@ -86,15 +85,14 @@ Use multiple `@key` annotations to create a composite primary key:""",
         Schema[OrderItem].ddl().sql
       }.assert(sql => assertTrue(sql.contains("primary key") && sql.contains("orderId"))),
       exampleZIO {
-        xa
-          .run(for
-            _     <- ddl.createTable[OrderItem](ifNotExists = true)
-            _     <- dml.insert(OrderItem(1, 100, 2))
-            _     <- dml.insert(OrderItem(1, 101, 1))
-            _     <- dml.insert(OrderItem(2, 100, 3))
-            items <- sql"SELECT * FROM ${Table[OrderItem]}".query[OrderItem]
-          yield items)
-          .either
+        (for
+          _     <- ddl.createTable[OrderItem](ifNotExists = true)
+          _     <- dml.insert(OrderItem(1, 100, 2))
+          _     <- dml.insert(OrderItem(1, 101, 1))
+          _     <- dml.insert(OrderItem(2, 100, 3))
+          items <- sql"SELECT * FROM ${Table[OrderItem]}".query[OrderItem]
+        yield items).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(items) => assertTrue(items.exists(_.orderId == 1L) && items.exists(_.productId == 101L))
         case Left(err)    => assertTrue(false).label(err.message)
@@ -105,68 +103,44 @@ Use multiple `@key` annotations to create a composite primary key:""",
       exampleValue {
         val minPrice = 10.0
         sql"SELECT * FROM $products WHERE ${products.price} > $minPrice".sql
-      }.assert(sql => assertTrue(sql.contains("?"))),
+      }.assert(sql => assertTrue(sql.contains("$1"))),
       exampleValue {
         sql"SELECT ${products.name}, ${products.price} FROM $products WHERE ${products.inStock} = ${true}".sql
-      }.assert(sql => assertTrue(sql.contains("core_concepts_products") && sql.contains("?"))),
+      }.assert(sql => assertTrue(sql.contains("core_concepts_products") && sql.contains("$1"))),
       md"""The interpolator handles each type differently:
 
 | Interpolated Type | Treatment | Example |
 |-------------------|-----------|---------|
 | Table instance | SQL identifier | `$$products` → `products` |
 | Column reference | SQL identifier | `$${products.name}` → `name` |
-| Scalar values | Prepared statement `?` | `$$minPrice` → `?` with bound value |
-| `SqlFragment` | Embedded SQL | Nested fragments are composed |
+| Scalar values | Parameter | `$$minPrice` → `$$1` with a bound value |
+| `SqlFragment` | Embedded SQL | Nested fragments are spliced in |
 
+`fragment.sql` is the Postgres inspection form (`$$1`, `$$2`). It is not the text a driver sends.
 See [SQL Injection Prevention](sql-injection-prevention.html) for the complete security model.""",
     ),
-    section("The Transactor")(
-      md"""The `Transactor` wraps a `ConnectionProvider` and executes SQL operations:
+    section("The session")(
+      md"""`SqlSession` executes statements. On the JVM, `JdbcSession.layer` builds one from a `DataSource`:
 
 ```scala
 import saferis.*
 import zio.*
 import javax.sql.DataSource
 
-// Assuming you have a DataSource
 val dataSource: DataSource = ???
 
 @tableName("core_concepts_users")
 case class User(@generated @key id: Int, name: String) derives Table
 
-// From a ConnectionProvider
-val provider = ConnectionProvider.FromDataSource(dataSource)
-val xa = Transactor(provider, _ => (), None)
+val session = ZLayer.succeed(dataSource) >>> JdbcSession.layer()
 
-// Execute operations
-val result = xa.run(
+val result: ZIO[SqlSession, SaferisError, Chunk[User]] =
   sql"SELECT * FROM $${Table[User]}".query[User]
-)
 ```
 
-### Concurrency Limiting
+`JdbcSessionConfig` carries the session-wide statement timeout, a JDBC `configure` callback, a vendor retry hook, and an `SqlListener`. A connection pool already queues callers. The session does not add a second semaphore.
 
-The `Transactor.layer` method accepts an optional `maxConcurrency` parameter that limits concurrent database operations using a ZIO Semaphore:
-
-```scala
-import saferis.*
-
-// Default: no concurrency limit (recommended for connection pools)
-val defaultLayer = Transactor.layer()
-
-// With concurrency limit (for SQLite or direct JDBC without pooling)
-val limitedLayer = Transactor.layer(maxConcurrency = 1L)
-```
-
-`Transactor.layer` also accepts an optional `defaultTimeout` that applies a JDBC statement timeout to every query run through the Transactor, see [Statement Timeouts](statement-timeouts.html).
-
-**When to use `maxConcurrency`:**
-- SQLite or other embedded databases without connection pooling
-- Direct JDBC connections without a pool
-- When you need concurrency limits below pool size for backpressure
-
-**When NOT to use `maxConcurrency`:**
-- With HikariCP or similar connection pools. The pool handles queuing more efficiently and HikariCP specifically recommends letting threads wait on the pool rather than limiting concurrency externally. Using a semaphore with a pool creates double-queuing and adds overhead in high-contention scenarios."""
+Open a transaction with `transact`. Nested `transact` joins the outer transaction: one commit, one rollback. See [Statement Timeouts](statement-timeouts.html) for `defaultTimeout`."""
     ),
   )
 end CoreConcepts

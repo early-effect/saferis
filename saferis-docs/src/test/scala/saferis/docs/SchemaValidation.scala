@@ -2,7 +2,6 @@ package saferis.docs
 
 import saferis.*
 import saferis.Schema.*
-import saferis.docs.DocsTransactor.xa
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.*
@@ -52,12 +51,12 @@ flowchart TB
       md"""Use `Schema(instance).verify` to validate a schema against the database:""",
       exampleZIO {
         val schema = Schema[VerifyUser].build
-        xa.run(for
+        (for
           _ <- ddl.createTable(schema)
           // Verify succeeds when schema matches
           _ <- Schema(schema).verify
-        yield "Schema verification passed")
-          .either
+        yield "Schema verification passed").either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(msg) => assertTrue(msg.contains("passed"))
         case Left(err)  => assertTrue(false).label(err.message)
@@ -65,7 +64,7 @@ flowchart TB
       md"""When verification fails, it returns a `SaferisError.SchemaValidation` containing a list of issues:""",
       exampleZIO {
         val schema = Schema[VerifyUserIndexed].withIndex(_.email).named("idx_verify_email").build
-        xa.run(for
+        (for
           // Create table without the index
           _ <- ddl.createTable[VerifyUserIndexed](ifNotExists = true)
           // Verification will find the missing index
@@ -74,8 +73,9 @@ flowchart TB
           case Left(SaferisError.SchemaValidation(issues)) =>
             issues.map(_.description).mkString("\n")
           case Left(e)  => s"Unexpected error: ${e.message}"
-          case Right(_) => "Verification passed")
-          .either
+          case Right(_) => "Verification passed"
+        ).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(msg) => assertTrue(msg.nonEmpty && !msg.startsWith("Unexpected"))
         case Left(err)  => assertTrue(false).label(err.message)
@@ -106,7 +106,7 @@ flowchart TB
 | `VerifyOptions.strict` | Check everything including exact names |""",
       exampleZIO {
         val schema = Schema[OptionsUser].build
-        xa.run(
+        (
           for
             _ <- ddl.createTable[OptionsUser](ifNotExists = true)
             // Add an extra column to the database
@@ -122,6 +122,7 @@ flowchart TB
             minimalResult.fold(_.message, _ => "Minimal passed"),
           )
         ).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right((defaultMsg, minimalMsg)) =>
           assertTrue(defaultMsg.contains("Default failed") && minimalMsg.contains("Minimal passed"))
@@ -165,13 +166,13 @@ flowchart TB
           .onDelete(Cascade)
           .build
 
-        xa.run(for
+        (for
           _ <- ddl.createTable[VerifyCustomer](ifNotExists = true)
           _ <- ddl.createTable(ordersSchema)
           // Full verification including FK
           _ <- Schema(ordersSchema).verify
-        yield "All constraints verified")
-          .either
+        yield "All constraints verified").either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(msg) => assertTrue(msg.contains("verified"))
         case Left(err)  => assertTrue(false).label(err.message)
@@ -196,10 +197,10 @@ Use `strictTypeMatching = true` to require exact type matches."""
 exactly the shape you'd put in `ZIOAppDefault.run`, here validating two schemas
 against the live database:""",
       exampleZIO {
-        def validateSchemas: ZIO[Any, SaferisError, Unit] =
+        def validateSchemas: ZIO[SqlSession, SaferisError, Unit] =
           val customerSchema = Schema[StartupCustomer].build
           val orderSchema    = Schema[StartupOrder].build
-          xa.run(for
+          (for
             _ <- ddl.createTable(customerSchema)
             _ <- ddl.createTable(orderSchema)
             _ <- Schema(customerSchema).verify
@@ -210,6 +211,7 @@ against the live database:""",
           .tapError(e => ZIO.logError(s"Schema validation failed: ${e.message}"))
           .as("All schemas validated successfully")
           .either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(msg) => assertTrue(msg.contains("validated"))
         case Left(err)  => assertTrue(false).label(err.message)

@@ -8,7 +8,7 @@ import zio.test.*
 import java.time.Instant
 
 object WhereGroupSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default >>> Transactor.default
+  val xaLayer = DataSourceProvider.default
 
   // Test table with non-Option types for comparison tests
   @tableName("where_group_test")
@@ -46,9 +46,9 @@ object WhereGroupSpecs extends ZIOSpecDefault:
           .andWhere(w => w(_.status).eq("pending"))
           .build
           .sql
-        assertTrue(sql.contains("active = ?")) &&
+        assertTrue(sql.contains("active = $1")) &&
         assertTrue(sql.contains("and")) &&
-        assertTrue(sql.contains("status = ?"))
+        assertTrue(sql.contains("status = $2"))
       ,
       test("OR condition with same type generates parenthesized SQL"):
         val frag = Query[TestRow]
@@ -58,7 +58,7 @@ object WhereGroupSpecs extends ZIOSpecDefault:
           .build
         assertTrue(frag.sql.contains("(")) &&
         assertTrue(frag.sql.contains(" or ")) &&
-        assertTrue(frag.sql.contains("status = ?"))
+        assertTrue(frag.sql.contains("status = $2"))
       ,
       test("OR with different columns different types generates correct SQL"):
         val now  = Instant.now()
@@ -67,12 +67,12 @@ object WhereGroupSpecs extends ZIOSpecDefault:
           .lte(now)
           .andWhere(w => w(_.status).eq("pending").or(_.claimedUntil).lt(now))
           .build
-        assertTrue(frag.sql.contains("deadline <= ?")) &&
+        assertTrue(frag.sql.contains("deadline <= $1")) &&
         assertTrue(frag.sql.contains("(")) &&
-        assertTrue(frag.sql.contains("status = ?")) &&
+        assertTrue(frag.sql.contains("status = $2")) &&
         assertTrue(frag.sql.contains(" or ")) &&
-        assertTrue(frag.sql.contains("claimed_until < ?")) &&
-        assertTrue(frag.writes.size == 3) // deadline + status + claimedUntil
+        assertTrue(frag.sql.contains("claimed_until < $3")) &&
+        assertTrue(frag.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 3) // deadline + status + claimedUntil
       ,
       test("multiple OR conditions chain correctly"):
         val frag = Query[TestRow]
@@ -81,8 +81,8 @@ object WhereGroupSpecs extends ZIOSpecDefault:
           .andWhere(w => w(_.status).eq("pending").or(_.status).eq("active").or(_.status).eq("retry"))
           .build
         assertTrue(frag.sql.contains("(")) &&
-        assertTrue(frag.sql.count(_ == '?') == 4) && // active + 3 status values
-        assertTrue(frag.writes.size == 4)
+        assertTrue(frag.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 4) && // active + 3 status values
+        assertTrue(frag.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 4)
       ,
       test("AND within group generates correct SQL"):
         val frag = Query[TestRow]
@@ -92,8 +92,8 @@ object WhereGroupSpecs extends ZIOSpecDefault:
           .build
         assertTrue(frag.sql.contains("(")) &&
         assertTrue(frag.sql.contains(" and ")) &&
-        assertTrue(frag.sql.contains("status = ?")) &&
-        assertTrue(frag.sql.contains("claimed_by = ?"))
+        assertTrue(frag.sql.contains("status = $2")) &&
+        assertTrue(frag.sql.contains("claimed_by = $3"))
       ,
       test("is null in group generates correct SQL"):
         val frag = Query[NullableRow]
@@ -113,9 +113,9 @@ object WhereGroupSpecs extends ZIOSpecDefault:
           .andWhere(w => w(_.priority).lt(5).or(_.priority).gt(10))
           .build
         assertTrue(frag.sql.contains("(")) &&
-        assertTrue(frag.sql.contains("priority < ?")) &&
+        assertTrue(frag.sql.contains("priority < $2")) &&
         assertTrue(frag.sql.contains(" or ")) &&
-        assertTrue(frag.sql.contains("priority > ?"))
+        assertTrue(frag.sql.contains("priority > $3"))
       ,
       test("mixed types in OR chain - string and instant"):
         val now  = Instant.now()
@@ -127,7 +127,7 @@ object WhereGroupSpecs extends ZIOSpecDefault:
         assertTrue(frag.sql.contains("(")) &&
         assertTrue(frag.sql.contains("claimed_by is null")) &&
         assertTrue(frag.sql.contains(" or ")) &&
-        assertTrue(frag.sql.contains("claimed_until < ?")),
+        assertTrue(frag.sql.contains("claimed_until < $2")),
     ),
     suite("Update andWhere")(
       test("Update with andWhere generates correct SQL"):
@@ -141,9 +141,9 @@ object WhereGroupSpecs extends ZIOSpecDefault:
           .build
         assertTrue(frag.sql.contains("update where_group_test set")) &&
         assertTrue(frag.sql.contains("where")) &&
-        assertTrue(frag.sql.contains("id = ?")) &&
-        assertTrue(frag.sql.contains("status = ? or")) &&
-        assertTrue(frag.sql.contains("claimed_until < ?"))
+        assertTrue(frag.sql.contains("id = $3")) &&
+        assertTrue(frag.sql.contains("status = $4 or")) &&
+        assertTrue(frag.sql.contains("claimed_until < $5"))
     ),
     suite("Delete andWhere")(
       test("Delete with andWhere generates correct SQL"):
@@ -154,9 +154,9 @@ object WhereGroupSpecs extends ZIOSpecDefault:
           .build
         assertTrue(frag.sql.contains("delete from where_group_test")) &&
         assertTrue(frag.sql.contains("where")) &&
-        assertTrue(frag.sql.contains("active = ?")) &&
-        assertTrue(frag.sql.contains("status = ? or")) &&
-        assertTrue(frag.sql.contains("claimed_by = ?"))
+        assertTrue(frag.sql.contains("active = $1")) &&
+        assertTrue(frag.sql.contains("status = $2 or")) &&
+        assertTrue(frag.sql.contains("claimed_by = $3"))
     ),
   )
 
@@ -168,25 +168,24 @@ object WhereGroupSpecs extends ZIOSpecDefault:
     test("Query with andWhere executes correctly"):
       val now = Instant.now()
       for
-        xa <- ZIO.service[Transactor]
-        _  <- xa.run(ddl.createTable[TestRow]())
+        _ <- (ddl.createTable[TestRow]())
         // Insert test data
-        _ <- xa.run(
+        _ <- (
           dml.insert(TestRow(-1, "active", "node-1", now.plusSeconds(60), now, 1, true))
         )
-        _ <- xa.run(dml.insert(TestRow(-1, "pending", "", now, now.minusSeconds(60), 2, true)))
-        _ <- xa.run(
+        _ <- (dml.insert(TestRow(-1, "pending", "", now, now.minusSeconds(60), 2, true)))
+        _ <- (
           dml.insert(TestRow(-1, "expired", "node-2", now.minusSeconds(60), now, 3, false))
         )
         // Query using andWhere: active AND (status = 'pending' OR status = 'expired')
-        results <- xa.run(
+        results <- (
           Query[TestRow]
             .where(_.active)
             .eq(true)
             .andWhere(w => w(_.status).eq("pending").or(_.status).eq("expired"))
             .query[TestRow]
         )
-        _ <- xa.run(ddl.dropTable[TestRow]())
+        _ <- (ddl.dropTable[TestRow]())
       yield assertTrue(results.size == 1) && // Only the pending row (active=true)
         assertTrue(results.head.status == "pending")
       end for
@@ -194,38 +193,36 @@ object WhereGroupSpecs extends ZIOSpecDefault:
     test("Query with mixed type OR condition"):
       val now = Instant.now()
       for
-        xa <- ZIO.service[Transactor]
-        _  <- xa.run(ddl.createTable[TestRow]())
+        _ <- (ddl.createTable[TestRow]())
         // Insert test data
-        _ <- xa.run(dml.insert(TestRow(-1, "pending", "", now.plusSeconds(60), now, 1, true)))
-        _ <- xa.run(dml.insert(TestRow(-1, "active", "node-1", now.minusSeconds(60), now, 2, true))) // expired claim
-        _ <- xa.run(dml.insert(TestRow(-1, "active", "node-2", now.plusSeconds(60), now, 3, true)))  // valid claim
+        _ <- (dml.insert(TestRow(-1, "pending", "", now.plusSeconds(60), now, 1, true)))
+        _ <- (dml.insert(TestRow(-1, "active", "node-1", now.minusSeconds(60), now, 2, true))) // expired claim
+        _ <- (dml.insert(TestRow(-1, "active", "node-2", now.plusSeconds(60), now, 3, true)))  // valid claim
         // Query: active AND (claimedBy = '' OR claimedUntil < now) - find claimable rows
-        results <- xa.run(
+        results <- (
           Query[TestRow]
             .where(_.active)
             .eq(true)
             .andWhere(w => w(_.claimedBy).eq("").or(_.claimedUntil).lt(now))
             .query[TestRow]
         )
-        _ <- xa.run(ddl.dropTable[TestRow]())
+        _ <- (ddl.dropTable[TestRow]())
       yield assertTrue(results.size == 2) // unclaimed + expired claim
       end for
     ,
     test("Update with andWhere updates correct rows"):
       val now = Instant.now()
       for
-        xa <- ZIO.service[Transactor]
-        _  <- xa.run(ddl.createTable[TestRow]())
+        _ <- (ddl.createTable[TestRow]())
         // Insert test data
-        _ <- xa.run(
+        _ <- (
           dml.insert(TestRow(-1, "pending", "", now, now.plusSeconds(60), 1, true))
         )
-        _ <- xa.run(
+        _ <- (
           dml.insert(TestRow(-1, "pending", "other-node", now.plusSeconds(300), now.plusSeconds(60), 2, true))
         )
         // Update only rows with empty claimedBy OR low priority
-        updated <- xa.run(
+        updated <- (
           Update[TestRow]
             .set(_.claimedBy, "my-node")
             .set(_.priority, 10)
@@ -235,8 +232,8 @@ object WhereGroupSpecs extends ZIOSpecDefault:
             .build
             .update
         )
-        remaining <- xa.run(Query[TestRow].where(_.claimedBy).eq("").query[TestRow])
-        _         <- xa.run(ddl.dropTable[TestRow]())
+        remaining <- (Query[TestRow].where(_.claimedBy).eq("").query[TestRow])
+        _         <- (ddl.dropTable[TestRow]())
       yield assertTrue(updated == 1) && // Only one row updated (empty claimedBy)
         assertTrue(remaining.isEmpty)   // The claimable row was claimed
       end for
@@ -244,21 +241,20 @@ object WhereGroupSpecs extends ZIOSpecDefault:
     test("Query with is null in andWhere"):
       val now = Instant.now()
       val res = for
-        xa <- ZIO.service[Transactor]
-        _  <- xa.run(ddl.createTable[NullableRow]())
+        _ <- (ddl.createTable[NullableRow]())
         // Insert test data
-        _ <- xa.run(dml.insert(NullableRow(-1, Some("active"), Some("node-1"), Some(now.plusSeconds(60)), now, true)))
-        _ <- xa.run(dml.insert(NullableRow(-1, None, None, None, now, true)))
-        _ <- xa.run(dml.insert(NullableRow(-1, Some("pending"), None, Some(now.minusSeconds(60)), now, true)))
+        _ <- (dml.insert(NullableRow(-1, Some("active"), Some("node-1"), Some(now.plusSeconds(60)), now, true)))
+        _ <- (dml.insert(NullableRow(-1, None, None, None, now, true)))
+        _ <- (dml.insert(NullableRow(-1, Some("pending"), None, Some(now.minusSeconds(60)), now, true)))
         // Query: active AND (status is null OR claimedBy is null)
-        results <- xa.run(
+        results <- (
           Query[NullableRow]
             .where(_.active)
             .eq(true)
             .andWhere(w => w(_.status).isNull.or(_.claimedBy).isNull)
             .query[NullableRow]
         )
-        _ <- xa.run(ddl.dropTable[NullableRow]())
+        _ <- (ddl.dropTable[NullableRow]())
       yield assertTrue(results.size == 2)
       res,
     // status=None row and claimedBy=None rows

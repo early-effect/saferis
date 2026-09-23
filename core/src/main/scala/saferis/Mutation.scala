@@ -1,8 +1,8 @@
 package saferis
 
 import zio.Chunk
-import zio.Scope
 import zio.Trace
+import zio.ZIO
 import zio.stream.ZStream
 
 // ============================================================================
@@ -10,10 +10,10 @@ import zio.stream.ZStream
 // ============================================================================
 
 /** A column/value pair for INSERT statements */
-final case class ValueClause(columnLabel: String, write: Write[?])
+final case class ValueClause(columnLabel: String, value: SqlValue)
 
 /** A column/value pair for UPDATE SET clauses */
-final case class SetClause(columnLabel: String, write: Write[?])
+final case class SetClause(columnLabel: String, value: SqlValue)
 
 // ============================================================================
 // ReturningQuery - Type-safe wrapper for mutations with RETURNING
@@ -36,13 +36,13 @@ final case class SetClause(columnLabel: String, write: Write[?])
   */
 final case class ReturningQuery[A: Table](fragment: SqlFragment):
   /** Execute query and return all matching rows */
-  inline def query(using Trace): ScopedQuery[Chunk[A]] = fragment.query[A]
+  inline def query(using Trace): ZIO[SqlSession, SaferisError, Chunk[A]] = fragment.query[A]
 
   /** Execute query and return the first row (if any) */
-  inline def queryOne(using Trace): ScopedQuery[Option[A]] = fragment.queryOne[A]
+  inline def queryOne(using Trace): ZIO[SqlSession, SaferisError, Option[A]] = fragment.queryOne[A]
 
   /** Execute query and stream all matching rows lazily */
-  inline def queryStream(using Trace): ZStream[ConnectionProvider & Scope, SaferisError, A] = fragment.queryStream[A]
+  inline def queryStream(using Trace): ZStream[SqlSession, SaferisError, A] = fragment.queryStream[A]
 
   /** Get the underlying SQL fragment */
   def build: SqlFragment = fragment
@@ -72,20 +72,20 @@ final case class Insert[A: Table](
   inline def value[T](inline selector: A => T, v: T)(using enc: Encoder[T]): Insert[A] =
     val fieldName   = Macros.extractFieldName[A, T](selector)
     val columnLabel = fieldNamesToColumns(fieldName).label
-    val write       = enc(v)
-    copy(values = values :+ ValueClause(columnLabel, write))
+    val encoded     = enc.encode(v)
+    copy(values = values :+ ValueClause(columnLabel, encoded))
 
   /** Build the INSERT SQL fragment */
   def build: SqlFragment =
     require(values.nonEmpty, "INSERT requires at least one value")
-    val columns      = values.map(_.columnLabel).mkString(", ")
-    val placeholders = values.map(_ => "?").mkString(", ")
-    val sql          = s"insert into $tableName ($columns) values ($placeholders)"
-    SqlFragment(sql, values.map(_.write))
+    val columns = values.map(_.columnLabel).mkString(", ")
+    val params  = values.map(clause => SqlFragment.param(clause.value))
+    val body    = params.reduce((left, right) => left.append(SqlFragment.text(", ")).append(right))
+    SqlFragment.text(s"insert into $tableName ($columns) values (").append(body).append(SqlFragment.text(")"))
 
   /** Build INSERT with RETURNING clause (for dialects that support it) */
   def returning: SqlFragment =
-    build :+ SqlFragment(" returning *", Seq.empty)
+    build :+ SqlFragment.text(" returning *")
 
 end Insert
 
@@ -123,8 +123,8 @@ final case class UpdateBuilder[A: Table](
   inline def set[T](inline selector: A => T, v: T)(using enc: Encoder[T]): UpdateBuilder[A] =
     val fieldName   = Macros.extractFieldName[A, T](selector)
     val columnLabel = fieldNamesToColumns(fieldName).label
-    val write       = enc(v)
-    copy(setClauses = setClauses :+ SetClause(columnLabel, write))
+    val encoded     = enc.encode(v)
+    copy(setClauses = setClauses :+ SetClause(columnLabel, encoded))
 
   /** Start a type-safe WHERE condition by selecting a column */
   inline def where[T](inline selector: A => T): UpdateWhereBuilder[A, T] =
@@ -191,25 +191,21 @@ final case class UpdateReady[A: Table](
   /** Build the UPDATE SQL fragment */
   def build: SqlFragment =
     require(setClauses.nonEmpty, "UPDATE requires at least one SET clause")
-    val setClausesSql = setClauses.map(s => s"${s.columnLabel} = ?").mkString(", ")
-    val setWrites     = setClauses.map(_.write)
-
-    var result = SqlFragment(s"update $tableName set $setClausesSql", setWrites)
+    val sets = setClauses.map: clause =>
+      SqlFragment.text(s"${clause.columnLabel} = ").append(SqlFragment.param(clause.value))
+    val setFrag = sets.reduce((left, right) => left.append(SqlFragment.text(", ")).append(right))
+    var result  = SqlFragment.text(s"update $tableName set ").append(setFrag)
 
     if wherePredicates.nonEmpty then
       val whereJoined = Placeholder.join(wherePredicates, " and ")
-      result = result :+ SqlFragment(" where ", Seq.empty) :+ SqlFragment(
-        whereJoined.sql,
-        whereJoined.writes,
-        whereJoined.issues,
-      )
+      result = result :+ SqlFragment.text(" where ") :+ SqlFragment(whereJoined)
 
     result
   end build
 
   /** Build UPDATE with RETURNING clause (for dialects that support it) */
   def returning: SqlFragment =
-    build :+ SqlFragment(" returning *", Seq.empty)
+    build :+ SqlFragment.text(" returning *")
 
   /** Build UPDATE with RETURNING clause, with compile-time capability check.
     *
@@ -227,7 +223,7 @@ final case class UpdateReady[A: Table](
     * }}}
     */
   def returningAs(using Dialect & ReturningSupport): ReturningQuery[A] =
-    ReturningQuery[A](build :+ SqlFragment(" returning *", Seq.empty))
+    ReturningQuery[A](build :+ SqlFragment.text(" returning *"))
 
 end UpdateReady
 
@@ -360,22 +356,18 @@ final case class DeleteReady[A: Table](
 
   /** Build the DELETE SQL fragment */
   def build: SqlFragment =
-    var result = SqlFragment(s"delete from $tableName", Seq.empty)
+    var result = SqlFragment.text(s"delete from $tableName")
 
     if wherePredicates.nonEmpty then
       val whereJoined = Placeholder.join(wherePredicates, " and ")
-      result = result :+ SqlFragment(" where ", Seq.empty) :+ SqlFragment(
-        whereJoined.sql,
-        whereJoined.writes,
-        whereJoined.issues,
-      )
+      result = result :+ SqlFragment.text(" where ") :+ SqlFragment(whereJoined)
 
     result
   end build
 
   /** Build DELETE with RETURNING clause (for dialects that support it) */
   def returning: SqlFragment =
-    build :+ SqlFragment(" returning *", Seq.empty)
+    build :+ SqlFragment.text(" returning *")
 
   /** Build DELETE with RETURNING clause, with compile-time capability check.
     *
@@ -392,7 +384,7 @@ final case class DeleteReady[A: Table](
     * }}}
     */
   def returningAs(using Dialect & ReturningSupport): ReturningQuery[A] =
-    ReturningQuery[A](build :+ SqlFragment(" returning *", Seq.empty))
+    ReturningQuery[A](build :+ SqlFragment.text(" returning *"))
 
 end DeleteReady
 

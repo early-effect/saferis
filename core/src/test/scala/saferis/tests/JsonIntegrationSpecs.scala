@@ -12,7 +12,7 @@ import zio.test.*
 
 /** Integration tests for JSON support, including SQL injection prevention via escaping. */
 object JsonIntegrationSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default >>> Transactor.default
+  val xaLayer = DataSourceProvider.default
 
   given (Dialect & JsonSupport) = PostgresDialect
 
@@ -120,14 +120,13 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
     suite("PostgreSQL database integration")(
       test("insert and query JSON data with special characters"):
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Profile](ifExists = true))
-          _  <- xa.run(createTable[Profile]())
+          _ <- (dropTable[Profile](ifExists = true))
+          _ <- (createTable[Profile]())
           // Insert profile with data containing special characters
           userData = UserData("o'brien@test.com", true, "admin's_role")
-          _ <- xa.run(insert(Profile(0, "O'Brien", Json(userData))))
+          _ <- (insert(Profile(0, "O'Brien", Json(userData))))
           // Query back the data
-          profiles <- xa.run(sql"SELECT id, name, data FROM json_test_profiles".query[Profile])
+          profiles <- (sql"SELECT id, name, data FROM json_test_profiles".query[Profile])
         yield assertTrue(
           profiles.length == 1,
           profiles.head.name == "O'Brien",
@@ -137,16 +136,15 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
       ,
       test("jsonb_exists with key containing single quote"):
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Profile](ifExists = true))
-          _  <- xa.run(createTable[Profile]())
+          _ <- (dropTable[Profile](ifExists = true))
+          _ <- (createTable[Profile]())
           // Insert data with a key that contains a single quote (via raw JSON)
-          _ <- xa.run(
+          _ <- (
             sql"""INSERT INTO json_test_profiles (name, data)
                   VALUES ('Test', '{"user''s_email":"test@test.com","verified":true,"role":"user"}'::jsonb)""".insert
           )
           // Query using jsonb_exists with escaped key
-          count <- xa.run(
+          count <- (
             sql"""SELECT count(*) as count FROM json_test_profiles
                   WHERE jsonb_exists(data, 'user''s_email')""".queryOne[CountResult]
           )
@@ -154,16 +152,15 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
       ,
       test("JSON path extraction with field containing single quote"):
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Profile](ifExists = true))
-          _  <- xa.run(createTable[Profile]())
+          _ <- (dropTable[Profile](ifExists = true))
+          _ <- (createTable[Profile]())
           // Insert data with a key that contains a single quote
-          _ <- xa.run(
+          _ <- (
             sql"""INSERT INTO json_test_profiles (name, data)
                   VALUES ('Test', '{"user''s_name":"O''Connor","verified":true,"role":"user"}'::jsonb)""".insert
           )
           // Query using ->> with escaped key
-          result <- xa.run(
+          result <- (
             sql"""SELECT data->>'user''s_name' as value FROM json_test_profiles""".queryOne[JsonFieldResult]
           )
         yield assertTrue(result.flatMap(_.value).contains("O'Connor"))
@@ -178,10 +175,9 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
           .build
 
         for
-          xa      <- ZIO.service[Transactor]
-          _       <- xa.run(dropTable[Profile](ifExists = true))
-          _       <- xa.run(createTable(profiles))
-          indexes <- xa.run(
+          _       <- (dropTable[Profile](ifExists = true))
+          _       <- (createTable(profiles))
+          indexes <- (
             sql"""SELECT indexname, indexdef FROM pg_indexes
                   WHERE tablename = 'json_test_profiles' AND indexname = 'idx_users_field'""".query[IndexInfo]
           )
@@ -202,10 +198,9 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
           .build
 
         for
-          xa      <- ZIO.service[Transactor]
-          _       <- xa.run(dropTable[Profile](ifExists = true))
-          _       <- xa.run(createTable(profiles))
-          indexes <- xa.run(
+          _       <- (dropTable[Profile](ifExists = true))
+          _       <- (createTable(profiles))
+          indexes <- (
             sql"""SELECT indexname, indexdef FROM pg_indexes
                   WHERE tablename = 'json_test_profiles' AND indexname = 'idx_users_email_path'""".query[IndexInfo]
           )
@@ -242,15 +237,14 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
     suite("End-to-end Json[A] type operations")(
       test("insert and select using Json[A] type"):
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Profile](ifExists = true))
-          _  <- xa.run(createTable[Profile]())
+          _ <- (dropTable[Profile](ifExists = true))
+          _ <- (createTable[Profile]())
           // Insert using the type-safe insert function
           userData = UserData("alice@test.com", true, "admin")
           profile  = Profile(0, "Alice", Json(userData))
-          _ <- xa.run(insert(profile))
+          _ <- (insert(profile))
           // Query using type-safe query
-          profiles <- xa.run(Query[Profile].all.query[Profile])
+          profiles <- (Query[Profile].all.query[Profile])
         yield assertTrue(
           profiles.length == 1,
           profiles.head.name == "Alice",
@@ -261,15 +255,14 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
       ,
       test("insert multiple profiles with Json[A] and query all"):
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Profile](ifExists = true))
-          _  <- xa.run(createTable[Profile]())
+          _ <- (dropTable[Profile](ifExists = true))
+          _ <- (createTable[Profile]())
           // Insert multiple profiles
-          _ <- xa.run(insert(Profile(0, "Alice", Json(UserData("alice@test.com", true, "admin")))))
-          _ <- xa.run(insert(Profile(0, "Bob", Json(UserData("bob@test.com", false, "user")))))
-          _ <- xa.run(insert(Profile(0, "Charlie", Json(UserData("charlie@test.com", true, "moderator")))))
+          _ <- (insert(Profile(0, "Alice", Json(UserData("alice@test.com", true, "admin")))))
+          _ <- (insert(Profile(0, "Bob", Json(UserData("bob@test.com", false, "user")))))
+          _ <- (insert(Profile(0, "Charlie", Json(UserData("charlie@test.com", true, "moderator")))))
           // Query all
-          profiles <- xa.run(Query[Profile].all.query[Profile])
+          profiles <- (Query[Profile].all.query[Profile])
         yield assertTrue(
           profiles.length == 3,
           profiles.map(_.name).toSet == Set("Alice", "Bob", "Charlie"),
@@ -278,19 +271,18 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
       ,
       test("update Json[A] column using update function"):
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Profile](ifExists = true))
-          _  <- xa.run(createTable[Profile]())
+          _ <- (dropTable[Profile](ifExists = true))
+          _ <- (createTable[Profile]())
           // Insert initial profile
           userData = UserData("alice@test.com", false, "user")
-          _ <- xa.run(insert(Profile(0, "Alice", Json(userData))))
+          _ <- (insert(Profile(0, "Alice", Json(userData))))
           // Get the inserted profile
-          inserted <- xa.run(Query[Profile].where(_.name).eq("Alice").query[Profile])
+          inserted <- (Query[Profile].where(_.name).eq("Alice").query[Profile])
           // Update the profile with new JSON data
           updatedData = UserData("alice@test.com", true, "admin")
-          _ <- xa.run(update(inserted.head.copy(data = Json(updatedData))))
+          _ <- (update(inserted.head.copy(data = Json(updatedData))))
           // Query back
-          updated <- xa.run(Query[Profile].where(_.name).eq("Alice").query[Profile])
+          updated <- (Query[Profile].where(_.name).eq("Alice").query[Profile])
         yield assertTrue(
           updated.length == 1,
           updated.head.data.value.verified == true,
@@ -299,14 +291,13 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
       ,
       test("Query builder where clause with Json column"):
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Profile](ifExists = true))
-          _  <- xa.run(createTable[Profile]())
+          _ <- (dropTable[Profile](ifExists = true))
+          _ <- (createTable[Profile]())
           // Insert profiles
-          _ <- xa.run(insert(Profile(0, "Alice", Json(UserData("alice@test.com", true, "admin")))))
-          _ <- xa.run(insert(Profile(0, "Bob", Json(UserData("bob@test.com", false, "user")))))
+          _ <- (insert(Profile(0, "Alice", Json(UserData("alice@test.com", true, "admin")))))
+          _ <- (insert(Profile(0, "Bob", Json(UserData("bob@test.com", false, "user")))))
           // Query using where clause on non-JSON column
-          admins <- xa.run(Query[Profile].where(_.name).eq("Alice").query[Profile])
+          admins <- (Query[Profile].where(_.name).eq("Alice").query[Profile])
         yield assertTrue(
           admins.length == 1,
           admins.head.data.value.role == "admin",
@@ -314,12 +305,11 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
       ,
       test("insertReturning with Json[A] type"):
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Profile](ifExists = true))
-          _  <- xa.run(createTable[Profile]())
+          _ <- (dropTable[Profile](ifExists = true))
+          _ <- (createTable[Profile]())
           // Insert and get returned row
           userData = UserData("alice@test.com", true, "admin")
-          returned <- xa.run(insertReturning(Profile(0, "Alice", Json(userData))))
+          returned <- (insertReturning(Profile(0, "Alice", Json(userData))))
         yield assertTrue(
           returned.id > 0, // Generated ID should be assigned
           returned.name == "Alice",
@@ -328,28 +318,26 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
       ,
       test("delete with Json[A] type"):
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Profile](ifExists = true))
-          _  <- xa.run(createTable[Profile]())
+          _ <- (dropTable[Profile](ifExists = true))
+          _ <- (createTable[Profile]())
           // Insert profile
           userData = UserData("alice@test.com", true, "admin")
-          inserted <- xa.run(insertReturning(Profile(0, "Alice", Json(userData))))
+          inserted <- (insertReturning(Profile(0, "Alice", Json(userData))))
           // Delete it
-          _ <- xa.run(delete(inserted))
+          _ <- (delete(inserted))
           // Verify deleted
-          remaining <- xa.run(Query[Profile].all.query[Profile])
+          remaining <- (Query[Profile].all.query[Profile])
         yield assertTrue(remaining.isEmpty)
       ,
       test("Json[A] with special characters in values - end to end"):
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Profile](ifExists = true))
-          _  <- xa.run(createTable[Profile]())
+          _ <- (dropTable[Profile](ifExists = true))
+          _ <- (createTable[Profile]())
           // Insert profile with special characters in JSON data
           userData = UserData("o'brien@test.com", true, "admin's_special_role")
-          _ <- xa.run(insert(Profile(0, "O'Brien", Json(userData))))
+          _ <- (insert(Profile(0, "O'Brien", Json(userData))))
           // Query back and verify data integrity
-          profiles <- xa.run(Query[Profile].all.query[Profile])
+          profiles <- (Query[Profile].all.query[Profile])
         yield assertTrue(
           profiles.length == 1,
           profiles.head.name == "O'Brien",
@@ -367,15 +355,14 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
         ) derives Table
 
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[MultiJson](ifExists = true))
-          _  <- xa.run(createTable[MultiJson]())
+          _ <- (dropTable[MultiJson](ifExists = true))
+          _ <- (createTable[MultiJson]())
           // Insert with both JSON columns
           userData = UserData("alice@test.com", true, "admin")
           settings = Settings("dark", true)
-          _ <- xa.run(insert(MultiJson(0, Json(userData), Json(settings))))
+          _ <- (insert(MultiJson(0, Json(userData), Json(settings))))
           // Query back
-          results <- xa.run(Query[MultiJson].all.query[MultiJson])
+          results <- (Query[MultiJson].all.query[MultiJson])
         yield assertTrue(
           results.length == 1,
           results.head.profile.value.email == "alice@test.com",
@@ -394,16 +381,15 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
 
         val res =
           for
-            xa <- ZIO.service[Transactor]
-            _  <- xa.run(dropTable[OptionalJson](ifExists = true))
-            _  <- xa.run(createTable[OptionalJson]())
+            _ <- (dropTable[OptionalJson](ifExists = true))
+            _ <- (createTable[OptionalJson]())
             // Insert with JSON data
             userData = UserData("alice@test.com", true, "admin")
-            _ <- xa.run(insert(OptionalJson(0, "Alice", Some(Json(userData)))))
+            _ <- (insert(OptionalJson(0, "Alice", Some(Json(userData)))))
             // Insert without JSON data (null)
-            _ <- xa.run(insert(OptionalJson(0, "Bob", None)))
+            _ <- (insert(OptionalJson(0, "Bob", None)))
             // Query back
-            results <- xa.run(Query[OptionalJson].all.query[OptionalJson])
+            results <- (Query[OptionalJson].all.query[OptionalJson])
             alice = results.find(_.name == "Alice")
             bob   = results.find(_.name == "Bob")
           yield assertTrue(
@@ -430,12 +416,11 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
         case class RawJsonRow(id: Long, data: String) derives Table
 
         val t = for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[GenericRow[GenericEvent]](ifExists = true))
-          _  <- xa.run(createTable[GenericRow[GenericEvent]]())
-          _  <- xa.run(dml.insert(GenericRow(0, Json(GenericEvent("test", 42)))))
+          _ <- (dropTable[GenericRow[GenericEvent]](ifExists = true))
+          _ <- (createTable[GenericRow[GenericEvent]]())
+          _ <- (dml.insert(GenericRow(0, Json(GenericEvent("test", 42)))))
           // Use raw SQL query to verify the data was inserted correctly
-          rows <- xa.run(sql"SELECT id, data FROM generic_json_events".query[RawJsonRow])
+          rows <- (sql"SELECT id, data::text AS data FROM generic_json_events".query[RawJsonRow])
         yield assertTrue(
           rows.length == 1,
           rows.head.data.contains("test"), // JSON contains "test"
@@ -447,14 +432,13 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
         // Uses QueryEventRow and QueryTestEvent defined at class level
         val t =
           for
-            xa <- ZIO.service[Transactor]
-            _  <- xa.run(dropTable[QueryEventRow[QueryTestEvent]](ifExists = true))
-            _  <- xa.run(createTable[QueryEventRow[QueryTestEvent]]())
-            _  <- xa.run(dml.insert(QueryEventRow(0, "first", Json(QueryTestEvent("event1", 10)))))
-            _  <- xa.run(dml.insert(QueryEventRow(0, "second", Json(QueryTestEvent("event2", 20)))))
+            _ <- (dropTable[QueryEventRow[QueryTestEvent]](ifExists = true))
+            _ <- (createTable[QueryEventRow[QueryTestEvent]]())
+            _ <- (dml.insert(QueryEventRow(0, "first", Json(QueryTestEvent("event1", 10)))))
+            _ <- (dml.insert(QueryEventRow(0, "second", Json(QueryTestEvent("event2", 20)))))
             // Query DSL should find the Table from companion object's polymorphic given
-            all    <- xa.run(Query[QueryEventRow[QueryTestEvent]].all.query[QueryEventRow[QueryTestEvent]])
-            byName <- xa.run(
+            all    <- (Query[QueryEventRow[QueryTestEvent]].all.query[QueryEventRow[QueryTestEvent]])
+            byName <- (
               Query[QueryEventRow[QueryTestEvent]].where(_.name).eq("first").query[QueryEventRow[QueryTestEvent]]
             )
           yield assertTrue(

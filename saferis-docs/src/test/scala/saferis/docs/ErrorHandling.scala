@@ -2,7 +2,6 @@ package saferis.docs
 
 import saferis.*
 import saferis.Schema.*
-import saferis.docs.DocsTransactor.xa
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.*
@@ -24,13 +23,17 @@ object ErrorHandling extends SaferisDocSpecSuite:
     section("Error Categories")(
       md"""| Error Type | When It Occurs |
 |------------|----------------|
-| `ConstraintViolation` | PRIMARY KEY, FOREIGN KEY, UNIQUE, NOT NULL, or CHECK constraint violated |
-| `SyntaxError` | Invalid SQL syntax |
-| `DataError` | Data type mismatch, division by zero, etc. |
-| `QueryError` | General SQL execution errors |
-| `Timeout` | Statement timeout fired (or query was canceled server-side); see [Statement Timeouts](statement-timeouts.html) |
-| `Retryable` | Transient failure the application can reasonably retry; see [Retryable Errors](retryable-errors.html) |
-| `ConnectionError` | Cannot acquire database connection |
+| `UniqueViolation` | SQLSTATE `23505`. The message is `unique violation` |
+| `ConstraintViolation` | Other class `23` failures (foreign key, check, not null). `23514` says `check violation` |
+| `Deadlock` | SQLSTATE `40P01` |
+| `SerializationFailure` | SQLSTATE `40001` |
+| `SyntaxError` | Class `42` |
+| `DataError` | Class `22` |
+| `QueryError` | Other SQL execution errors, including `25P02` after a failed statement |
+| `Timeout` | Statement timeout, or SQLSTATE `57014`. See [Statement Timeouts](statement-timeouts.html) |
+| `Retryable` | Vendor code the session hook marked transient. See [Retryable Errors](retryable-errors.html) |
+| `ConnectionLost` | Class `08` |
+| `ConnectionError` | Cannot acquire a connection, or `configure` threw |
 | `DecodingError` | Cannot decode a column value to the expected Scala type |
 | `EncodingError` | Cannot encode a parameter value for the prepared statement |
 | `ReturningOperationFailed` | INSERT/UPDATE/DELETE RETURNING returned no rows |
@@ -38,19 +41,25 @@ object ErrorHandling extends SaferisDocSpecSuite:
 | `Unexpected` | Non-SQL errors (wrapped in Unexpected) |"""
     ),
     section("SQL Error Classification")(
-      md"""SQL errors are automatically categorized based on SQLState codes:
+      md"""SQL errors are categorized by SQLSTATE. The cases do not carry a `Throwable`.
 
-| SQLState Prefix | Error Type | Description |
-|-----------------|------------|-------------|
-| `23` | `ConstraintViolation` | Integrity constraint violations |
-| `42` | `SyntaxError` | Syntax errors or access violations |
-| `22` | `DataError` | Data exceptions |
-| Other | `QueryError` | General query errors |"""
+| SQLSTATE | Error Type |
+|----------|------------|
+| `23505` | `UniqueViolation` |
+| `23514` | `ConstraintViolation` (`check violation`) |
+| other `23` | `ConstraintViolation` (server message kept) |
+| `40P01` | `Deadlock` |
+| `40001` | `SerializationFailure` |
+| `08` | `ConnectionLost` |
+| `42` | `SyntaxError` |
+| `22` | `DataError` |
+| `57014` | `Timeout` |
+| other | `QueryError`, or `Retryable` when the vendor hook matches |"""
     ),
     section("Pattern Matching on Errors")(
       md"""Use pattern matching for type-safe error handling:""",
       exampleZIO {
-        xa.run(for
+        (for
           _      <- ddl.createTable[ErrorUser](ifNotExists = true)
           _      <- dml.insert(ErrorUser(-1, "alice@example.com", "Alice"))
           _      <- dml.insert(ErrorUser(-1, "bob@example.com", "Bob"))
@@ -63,8 +72,9 @@ object ErrorHandling extends SaferisDocSpecSuite:
           case Left(error) =>
             s"Other error: ${error.message}"
           case Right(user) =>
-            s"Found user: ${user.map(_.name).getOrElse("none")}")
-          .either
+            s"Found user: ${user.map(_.name).getOrElse("none")}"
+        ).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(msg) => assertTrue(msg.contains("Alice"))
         case Left(err)  => assertTrue(false).label(err.message)
@@ -73,21 +83,22 @@ object ErrorHandling extends SaferisDocSpecSuite:
     section("Handling Constraint Violations")(
       exampleZIO {
         val schema = Schema[UniqueEmail].withUniqueConstraint(_.email).build
-        xa.run(for
+        (for
           _ <- ddl.createTable(schema)
           _ <- dml.insert(UniqueEmail(-1, "alice@example.com"))
           // Try to insert duplicate email
           result <- dml.insert(UniqueEmail(-1, "alice@example.com")).either
         yield result match
-          case Left(SaferisError.ConstraintViolation(constraintType, _, _, _)) =>
-            s"Constraint violation: $constraintType"
+          case Left(SaferisError.UniqueViolation(constraint, _, _)) =>
+            s"Unique violation: ${constraint.getOrElse("unknown")}"
           case Left(error) =>
             s"Other error: ${error.message}"
           case Right(_) =>
-            "Insert succeeded")
-          .either
+            "Insert succeeded"
+        ).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
-        case Right(msg) => assertTrue(msg.contains("Constraint violation"))
+        case Right(msg) => assertTrue(msg.contains("Unique violation"))
         case Left(err)  => assertTrue(false).label(err.message)
       },
       md"""### What the violation looks like unhandled
@@ -96,28 +107,30 @@ The previous example caught the error with `.either`. If you *don't* recover, th
 constraint violation propagates as a real failure; the actual `SaferisError` is
 shown below the snippet:""",
       expectCrash {
-        xa.run(for
+        (for
           _ <- ddl.createTable[CrashKey](ifNotExists = true)
           _ <- dml.insert(CrashKey(1, "first"))
           _ <- dml.insert(CrashKey(1, "duplicate")) // duplicate primary key → constraint violation
-        yield ()): ZIO[Scope, SaferisError, Unit]
+        yield ())
+          .provideLayer(DocsTransactor.layer)
       }.assert(c => assertTrue(c.failures.nonEmpty)),
     ),
-    section("Converting Raw Exceptions")(
-      md"""Use `SaferisError.fromThrowable` to wrap exceptions:""",
+    section("Classifying a SQLSTATE")(
+      md"""Drivers call `SqlState.classify`. Application code matches the case. There is no `fromThrowable`.""",
       exampleValue {
-        // Convert a Throwable to SaferisError
-        val sqlException = new java.sql.SQLException("duplicate key", "23505")
-        val error        = SaferisError.fromThrowable(sqlException)
-        // error: SaferisError.ConstraintViolation(...)
-
-        // Non-SQL exceptions become Unexpected
-        val runtimeException = new RuntimeException("something went wrong")
-        val unexpectedError  = SaferisError.fromThrowable(runtimeException)
-        // unexpectedError: SaferisError.Unexpected(...)
-        (error, unexpectedError)
+        val unique = SqlState.classify(
+          Some("23505"),
+          "duplicate key",
+          Some("users_email_key"),
+          Some("insert into users values ($1)"),
+          vendorRetry = false,
+          timedOut = false,
+        )
+        val other = SqlState.classify(None, "something went wrong", None, None, vendorRetry = false, timedOut = false)
+        (unique, other)
       }.assert {
-        case (_: SaferisError.ConstraintViolation, _: SaferisError.Unexpected) => assertTrue(true)
+        case (SaferisError.UniqueViolation(constraint, "unique violation", _), _: SaferisError.QueryError) =>
+          assertTrue(constraint.contains("users_email_key"))
         case other => assertTrue(false).label(s"unexpected: $other")
       },
     ),
@@ -125,10 +138,12 @@ shown below the snippet:""",
       md"""Each error type provides relevant details:""",
       exampleValue {
         def logError(error: SaferisError): String = error match
+          case e: SaferisError.UniqueViolation =>
+            s"Unique ${e.constraint.getOrElse("constraint")} violated. SQL: ${e.sql.getOrElse("N/A")}"
           case e: SaferisError.ConstraintViolation =>
-            s"Constraint ${e.constraintType} violated. SQL: ${e.sql.getOrElse("N/A")}"
+            s"Constraint ${e.sqlState} violated. SQL: ${e.sql.getOrElse("N/A")}"
           case e: SaferisError.SyntaxError =>
-            s"Syntax error: ${e.cause.getMessage}. SQL: ${e.sql.getOrElse("N/A")}"
+            s"Syntax error: ${e.message}. SQL: ${e.sql.getOrElse("N/A")}"
           case e: SaferisError.DecodingError =>
             s"Failed to decode column '${e.columnName}' as ${e.expectedType}"
           case e: SaferisError.SchemaValidation =>
@@ -136,9 +151,16 @@ shown below the snippet:""",
           case e =>
             e.message
 
-        val sample = SaferisError.fromThrowable(new java.sql.SQLException("duplicate key", "23505"))
+        val sample = SqlState.classify(
+          Some("23505"),
+          "duplicate key",
+          Some("users_email_key"),
+          Some("insert into users values ($1)"),
+          vendorRetry = false,
+          timedOut = false,
+        )
         logError(sample)
-      }.assert(msg => assertTrue(msg.contains("Constraint") && msg.contains("violated"))),
+      }.assert(msg => assertTrue(msg.contains("Unique") && msg.contains("violated"))),
     ),
   )
 end ErrorHandling

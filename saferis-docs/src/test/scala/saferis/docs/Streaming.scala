@@ -1,7 +1,6 @@
 package saferis.docs
 
 import saferis.*
-import saferis.docs.DocsTransactor.xa
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.*
@@ -25,11 +24,11 @@ object Streaming extends SaferisDocSpecSuite:
   val items = Table[ZipItem]
 
   def doc = page("Streaming with ZStream")(
-    md"""For large result sets, Saferis provides `queryStream` which returns a `ZStream` that lazily iterates through results. This is ideal when you need to process rows one at a time without loading the entire result set into memory.""",
+    md"""For large result sets, Saferis provides `queryStream`, a `ZStream` that pulls rows as they are consumed. The stream finalizer owns the cursor. The caller does not open a `Scope`. `pagedStream` and `seekingStream` still run one statement per page, so the pool releases the connection between pages.""",
     section("Basic Streaming")(
       md"""Use `queryStream` instead of `query` to get a stream:""",
       exampleZIO {
-        xa.run(for
+        (for
           _ <- ddl.createTable[StreamEvent](ifNotExists = true)
           _ <- ddl.truncateTable[StreamEvent]()
           _ <- dml.insert(StreamEvent(-1, "event1", "data1"))
@@ -37,8 +36,8 @@ object Streaming extends SaferisDocSpecSuite:
           _ <- dml.insert(StreamEvent(-1, "event3", "data3"))
           // Stream returns a ZStream, use runCollect to materialize
           result <- Query[StreamEvent].all.queryStream[StreamEvent].runCollect
-        yield result)
-          .either
+        yield result).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(result) => assertTrue(result.size == 3 && result.exists(_.name == "event1"))
         case Left(err)     => assertTrue(false).label(err.message)
@@ -55,7 +54,7 @@ object Streaming extends SaferisDocSpecSuite:
     section("Lazy Evaluation")(
       md"""Streams are evaluated lazily - rows are only fetched as they're consumed:""",
       exampleZIO {
-        xa.run(
+        (
           for
             _ <- ddl.createTable[StreamEvent](ifNotExists = true)
             _ <- ddl.truncateTable[StreamEvent]()
@@ -66,6 +65,7 @@ object Streaming extends SaferisDocSpecSuite:
             first2 <- Query[StreamEvent].all.queryStream[StreamEvent].take(2).runCollect
           yield first2
         ).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(first2) => assertTrue(first2.size == 2)
         case Left(err)     => assertTrue(false).label(err.message)
@@ -74,7 +74,7 @@ object Streaming extends SaferisDocSpecSuite:
     section("Stream Composition")(
       md"""ZStream provides powerful composition operators:""",
       exampleZIO {
-        xa.run(
+        (
           for
             _ <- ddl.createTable[StreamEvent](ifNotExists = true)
             _ <- ddl.truncateTable[StreamEvent]()
@@ -95,6 +95,7 @@ object Streaming extends SaferisDocSpecSuite:
               .runCollect
           yield (names, batches.map(_.size))
         ).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right((names, batchSizes)) =>
           assertTrue(
@@ -133,7 +134,7 @@ val fiber = Query[ResourceEvent].all
     section("Streaming with Query Builder")(
       md"""All query builder methods support streaming:""",
       exampleZIO {
-        xa.run(for
+        (for
           _      <- ddl.createTable[StreamEvent](ifNotExists = true)
           _      <- ddl.truncateTable[StreamEvent]()
           _      <- dml.insert(StreamEvent(-1, "event1", "data1"))
@@ -144,8 +145,8 @@ val fiber = Query[ResourceEvent].all
             .orderBy(events.id.asc)
             .queryStream[StreamEvent]
             .runCollect
-        yield result)
-          .either
+        yield result).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(result) => assertTrue(result.size == 1 && result.head.name == "event1")
         case Left(err)     => assertTrue(false).label(err.message)
@@ -154,7 +155,7 @@ val fiber = Query[ResourceEvent].all
     section("Streaming with Mutations (RETURNING)")(
       md"""For dialects that support RETURNING (PostgreSQL, SQLite), you can stream returned rows:""",
       exampleZIO {
-        xa.run(for
+        (for
           _       <- ddl.createTable[StreamEvent](ifNotExists = true)
           _       <- ddl.truncateTable[StreamEvent]()
           _       <- dml.insert(StreamEvent(-1, "event1", "data1"))
@@ -165,8 +166,8 @@ val fiber = Query[ResourceEvent].all
             .returningAs
             .queryStream
             .runCollect
-        yield deleted)
-          .either
+        yield deleted).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(deleted) => assertTrue(deleted.size == 1 && deleted.head.name == "event1")
         case Left(err)      => assertTrue(false).label(err.message)
@@ -175,7 +176,7 @@ val fiber = Query[ResourceEvent].all
     section("Combining Streams")(
       md"""You can compose streams from different queries:""",
       exampleZIO {
-        xa.run(
+        (
           for
             _ <- ddl.createTable[ZipUser](ifNotExists = true)
             _ <- ddl.createTable[ZipItem](ifNotExists = true)
@@ -192,6 +193,7 @@ val fiber = Query[ResourceEvent].all
               userStream.zip(itemStream).runCollect
           yield zipped.map((u, i) => s"${u.name} -> ${i.value}")
         ).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(zipped) =>
           assertTrue(

@@ -10,7 +10,7 @@ import zio.*
 import zio.test.*
 
 object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default >>> Transactor.default
+  val xaLayer = DataSourceProvider.default
 
   // Test tables
   @tableName("fk_int_users")
@@ -93,20 +93,17 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
         .build
 
       for
-        xa <- ZIO.service[Transactor]
         // Clean up
-        _ <- xa.run(dropTable[Order](ifExists = true))
-        _ <- xa.run(dropTable[User](ifExists = true))
-        _ <- xa.run(dropTable[Product](ifExists = true))
+        _ <- (dropTable[Order](ifExists = true))
+        _ <- (dropTable[User](ifExists = true))
+        _ <- (dropTable[Product](ifExists = true))
         // Create parent tables first
-        _ <- xa.run(createTable[User]())
-        _ <- xa.run(createTable[Product]())
+        _ <- (createTable[User]())
+        _ <- (createTable[Product]())
         // Create child table with FK
-        _ <- xa.run(createTable(orders))
+        _ <- (createTable(orders))
         // Try to insert order with non-existent user (should fail)
-        result <- xa
-          .run(sql"insert into fk_int_orders (userId, productId, amount) values (999, 1, 100.00)".insert)
-          .either
+        result <- (sql"insert into fk_int_orders (userId, productId, amount) values (999, 1, 100.00)".insert).either
       yield assertTrue(result.isLeft)
       end for
     },
@@ -119,23 +116,20 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
         .build
 
       for
-        xa <- ZIO.service[Transactor]
         // Clean up
-        _ <- xa.run(dropTable[Order](ifExists = true))
-        _ <- xa.run(dropTable[User](ifExists = true))
-        _ <- xa.run(dropTable[Product](ifExists = true))
+        _ <- (dropTable[Order](ifExists = true))
+        _ <- (dropTable[User](ifExists = true))
+        _ <- (dropTable[Product](ifExists = true))
         // Create parent tables first
-        _ <- xa.run(createTable[User]())
-        _ <- xa.run(createTable[Product]())
+        _ <- (createTable[User]())
+        _ <- (createTable[Product]())
         // Create child table with FK
-        _ <- xa.run(createTable(orders))
+        _ <- (createTable(orders))
         // Insert parent records
-        _ <- xa.run(sql"insert into fk_int_users (name, email) values ('Alice', 'alice@test.com')".insert)
-        _ <- xa.run(sql"insert into fk_int_products (name, price) values ('Widget', 9.99)".insert)
+        _ <- (sql"insert into fk_int_users (name, email) values ('Alice', 'alice@test.com')".insert)
+        _ <- (sql"insert into fk_int_products (name, price) values ('Widget', 9.99)".insert)
         // Insert order referencing existing parents (should succeed)
-        result <- xa
-          .run(sql"insert into fk_int_orders (userId, productId, amount) values (1, 1, 100.00)".insert)
-          .either
+        result <- (sql"insert into fk_int_orders (userId, productId, amount) values (1, 1, 100.00)".insert).either
       yield assertTrue(result.isRight)
       end for
     },
@@ -149,26 +143,25 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
         .build
 
       for
-        xa <- ZIO.service[Transactor]
         // Clean up
-        _ <- xa.run(dropTable[Order](ifExists = true))
-        _ <- xa.run(dropTable[User](ifExists = true))
-        _ <- xa.run(dropTable[Product](ifExists = true))
+        _ <- (dropTable[Order](ifExists = true))
+        _ <- (dropTable[User](ifExists = true))
+        _ <- (dropTable[Product](ifExists = true))
         // Create tables
-        _ <- xa.run(createTable[User]())
-        _ <- xa.run(createTable[Product]())
-        _ <- xa.run(createTable(orders))
+        _ <- (createTable[User]())
+        _ <- (createTable[Product]())
+        _ <- (createTable(orders))
         // Insert parent records
-        _ <- xa.run(sql"insert into fk_int_users (name, email) values ('Alice', 'alice@test.com')".insert)
-        _ <- xa.run(sql"insert into fk_int_products (name, price) values ('Widget', 9.99)".insert)
+        _ <- (sql"insert into fk_int_users (name, email) values ('Alice', 'alice@test.com')".insert)
+        _ <- (sql"insert into fk_int_products (name, price) values ('Widget', 9.99)".insert)
         // Insert order
-        _ <- xa.run(sql"insert into fk_int_orders (userId, productId, amount) values (1, 1, 100.00)".insert)
+        _ <- (sql"insert into fk_int_orders (userId, productId, amount) values (1, 1, 100.00)".insert)
         // Verify order exists
-        countBefore <- xa.run(sql"select count(*) as count from fk_int_orders".queryOne[CountResult])
+        countBefore <- (sql"select count(*) as count from fk_int_orders".queryOne[CountResult])
         // Delete user (should cascade to orders)
-        _ <- xa.run(sql"delete from fk_int_users where id = 1".delete)
+        _ <- (sql"delete from fk_int_users where id = 1".delete)
         // Verify order was deleted
-        countAfter <- xa.run(sql"select count(*) as count from fk_int_orders".queryOne[CountResult])
+        countAfter <- (sql"select count(*) as count from fk_int_orders".queryOne[CountResult])
       yield assertTrue(
         countBefore.map(_.count).contains(1),
         countAfter.map(_.count).contains(0),
@@ -179,15 +172,14 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
       // For SET NULL, the FK column must be nullable. We create the table with FK via SQL
       // since the type-safe API requires matching types (Option[Int] vs Int)
       for
-        xa <- ZIO.service[Transactor]
         // Clean up (drop child tables first due to FK constraints)
-        _ <- xa.run(dropTable[OrderNullable](ifExists = true))
-        _ <- xa.run(dropTable[Order](ifExists = true))
-        _ <- xa.run(dropTable[User](ifExists = true))
+        _ <- (dropTable[OrderNullable](ifExists = true))
+        _ <- (dropTable[Order](ifExists = true))
+        _ <- (dropTable[User](ifExists = true))
         // Create user table
-        _ <- xa.run(createTable[User]())
+        _ <- (createTable[User]())
         // Create nullable order table with SET NULL FK via SQL
-        _ <- xa.run(
+        _ <- (
           sql"""create table fk_int_orders_nullable (
             id serial primary key,
             userId int,
@@ -196,15 +188,15 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
           )""".dml
         )
         // Insert parent record
-        _ <- xa.run(sql"insert into fk_int_users (name, email) values ('Bob', 'bob@test.com')".insert)
+        _ <- (sql"insert into fk_int_users (name, email) values ('Bob', 'bob@test.com')".insert)
         // Insert order
-        _ <- xa.run(sql"insert into fk_int_orders_nullable (userId, amount) values (1, 50.00)".insert)
+        _ <- (sql"insert into fk_int_orders_nullable (userId, amount) values (1, 50.00)".insert)
         // Verify order has userId
-        before <- xa.run(sql"select userId from fk_int_orders_nullable where id = 1".queryOne[UserIdResult])
+        before <- (sql"select userId from fk_int_orders_nullable where id = 1".queryOne[UserIdResult])
         // Delete user (should set userId to null)
-        _ <- xa.run(sql"delete from fk_int_users where id = 1".delete)
+        _ <- (sql"delete from fk_int_users where id = 1".delete)
         // Verify userId is now null
-        after <- xa.run(sql"select userId from fk_int_orders_nullable where id = 1".queryOne[UserIdResult])
+        after <- (sql"select userId from fk_int_orders_nullable where id = 1".queryOne[UserIdResult])
       yield assertTrue(
         before.flatMap(_.userId).contains(1),
         after.exists(_.userId.isEmpty),
@@ -220,23 +212,22 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
         .build
 
       for
-        xa <- ZIO.service[Transactor]
         // Clean up (drop all child tables first due to FK constraints)
-        _ <- xa.run(dropTable[Order](ifExists = true))
-        _ <- xa.run(dropTable[OrderNullable](ifExists = true))
-        _ <- xa.run(dropTable[User](ifExists = true))
-        _ <- xa.run(dropTable[Product](ifExists = true))
+        _ <- (dropTable[Order](ifExists = true))
+        _ <- (dropTable[OrderNullable](ifExists = true))
+        _ <- (dropTable[User](ifExists = true))
+        _ <- (dropTable[Product](ifExists = true))
         // Create tables
-        _ <- xa.run(createTable[User]())
-        _ <- xa.run(createTable[Product]())
-        _ <- xa.run(createTable(orders))
+        _ <- (createTable[User]())
+        _ <- (createTable[Product]())
+        _ <- (createTable(orders))
         // Insert parent records
-        _ <- xa.run(sql"insert into fk_int_users (name, email) values ('Charlie', 'charlie@test.com')".insert)
-        _ <- xa.run(sql"insert into fk_int_products (name, price) values ('Gadget', 19.99)".insert)
+        _ <- (sql"insert into fk_int_users (name, email) values ('Charlie', 'charlie@test.com')".insert)
+        _ <- (sql"insert into fk_int_products (name, price) values ('Gadget', 19.99)".insert)
         // Insert order
-        _ <- xa.run(sql"insert into fk_int_orders (userId, productId, amount) values (1, 1, 75.00)".insert)
+        _ <- (sql"insert into fk_int_orders (userId, productId, amount) values (1, 1, 75.00)".insert)
         // Try to delete user (should fail due to RESTRICT)
-        result <- xa.run(sql"delete from fk_int_users where id = 1".delete).either
+        result <- (sql"delete from fk_int_users where id = 1".delete).either
       yield assertTrue(result.isLeft)
       end for
     },
@@ -250,23 +241,20 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
         .build
 
       for
-        xa <- ZIO.service[Transactor]
         // Clean up
-        _ <- xa.run(dropTable[OrderItem](ifExists = true))
-        _ <- xa.run(dropTable[OrderDetail](ifExists = true))
+        _ <- (dropTable[OrderItem](ifExists = true))
+        _ <- (dropTable[OrderDetail](ifExists = true))
         // Create tables
-        _ <- xa.run(createTable[OrderDetail]())
-        _ <- xa.run(createTable(orderItems))
+        _ <- (createTable[OrderDetail]())
+        _ <- (createTable(orderItems))
         // Insert detail
-        _ <- xa.run(insert(OrderDetail(1, 1, "SKU-001")))
+        _ <- (insert(OrderDetail(1, 1, "SKU-001")))
         // Insert item referencing the detail (should succeed)
-        insertResult <- xa
-          .run(sql"insert into fk_int_order_items (orderId, lineNum, price) values (1, 1, 25.00)".insert)
-          .either
+        insertResult <-
+          (sql"insert into fk_int_order_items (orderId, lineNum, price) values (1, 1, 25.00)".insert).either
         // Try to insert item with non-existent compound key (should fail)
-        failResult <- xa
-          .run(sql"insert into fk_int_order_items (orderId, lineNum, price) values (999, 999, 10.00)".insert)
-          .either
+        failResult <-
+          (sql"insert into fk_int_order_items (orderId, lineNum, price) values (999, 999, 10.00)".insert).either
       yield assertTrue(
         insertResult.isRight,
         failResult.isLeft,
@@ -276,6 +264,6 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
   ).provideShared(xaLayer) @@ TestAspect.sequential
 
   // Helper case classes for query results
-  final case class CountResult(count: Int) derives Table
+  final case class CountResult(count: Long) derives Table
   final case class UserIdResult(userId: Option[Int]) derives Table
 end ForeignKeyIntegrationSpecs

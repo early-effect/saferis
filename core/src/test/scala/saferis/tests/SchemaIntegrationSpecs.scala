@@ -14,7 +14,7 @@ import zio.test.*
   * actual database behavior.
   */
 object SchemaIntegrationSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default >>> Transactor.default
+  val xaLayer = DataSourceProvider.default
 
   // Provide PostgresDialect for JSON operators
   given (Dialect & JsonSupport) = PostgresDialect
@@ -77,11 +77,10 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
           .build
 
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[User](ifExists = true))
-          _  <- xa.run(createTable(users))
+          _ <- (dropTable[User](ifExists = true))
+          _ <- (createTable(users))
           // Query PostgreSQL system tables to verify index exists
-          indexes <- xa.run(
+          indexes <- (
             sql"""SELECT indexname, indexdef FROM pg_indexes
                   WHERE tablename = 'schema_int_users' AND indexname = 'idx_active_users'""".query[IndexInfo]
           )
@@ -101,10 +100,9 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
           .build
 
         for
-          xa      <- ZIO.service[Transactor]
-          _       <- xa.run(dropTable[User](ifExists = true))
-          _       <- xa.run(createTable(users))
-          indexes <- xa.run(
+          _       <- (dropTable[User](ifExists = true))
+          _       <- (createTable(users))
+          indexes <- (
             sql"""SELECT indexname, indexdef FROM pg_indexes
                   WHERE tablename = 'schema_int_users' AND indexname = 'idx_unique_active_email'""".query[IndexInfo]
           )
@@ -124,19 +122,16 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
           .build
 
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[User](ifExists = true))
-          _  <- xa.run(createTable(users))
+          _ <- (dropTable[User](ifExists = true))
+          _ <- (createTable(users))
           // Insert two users with same email but different status
-          _ <- xa.run(
+          _ <- (
             sql"INSERT INTO schema_int_users (name, email, status, age) VALUES ('Alice', 'alice@test.com', 'active', 30)".insert
           )
           // This should succeed because the partial index only applies to active users
-          result <- xa
-            .run(
-              sql"INSERT INTO schema_int_users (name, email, status, age) VALUES ('Alice2', 'alice@test.com', 'inactive', 25)".insert
-            )
-            .either
+          result <- (
+            sql"INSERT INTO schema_int_users (name, email, status, age) VALUES ('Alice2', 'alice@test.com', 'inactive', 25)".insert
+          ).either
         yield assertTrue(result.isRight)
         end for
       },
@@ -149,18 +144,15 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
           .build
 
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[User](ifExists = true))
-          _  <- xa.run(createTable(users))
-          _  <- xa.run(
+          _ <- (dropTable[User](ifExists = true))
+          _ <- (createTable(users))
+          _ <- (
             sql"INSERT INTO schema_int_users (name, email, status, age) VALUES ('Alice', 'alice@test.com', 'active', 30)".insert
           )
           // This should fail because both are active with same email
-          result <- xa
-            .run(
-              sql"INSERT INTO schema_int_users (name, email, status, age) VALUES ('Alice2', 'alice@test.com', 'active', 25)".insert
-            )
-            .either
+          result <- (
+            sql"INSERT INTO schema_int_users (name, email, status, age) VALUES ('Alice2', 'alice@test.com', 'active', 25)".insert
+          ).either
         yield assertTrue(result.isLeft)
         end for
       },
@@ -175,10 +167,9 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
           .build
 
         for
-          xa      <- ZIO.service[Transactor]
-          _       <- xa.run(dropTable[User](ifExists = true))
-          _       <- xa.run(createTable(users))
-          indexes <- xa.run(
+          _       <- (dropTable[User](ifExists = true))
+          _       <- (createTable(users))
+          indexes <- (
             sql"""SELECT indexname, indexdef FROM pg_indexes
                   WHERE tablename = 'schema_int_users' AND indexname = 'idx_name_email'""".query[IndexInfo]
           )
@@ -194,26 +185,25 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
     suite("JSON data operations")(
       test("insert and query JSON data") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Profile](ifExists = true))
-          _  <- xa.run(dropTable[User](ifExists = true))
-          _  <- xa.run(createTable[User]())
-          _  <- xa.run(createTable[Profile]())
+          _ <- (dropTable[Profile](ifExists = true))
+          _ <- (dropTable[User](ifExists = true))
+          _ <- (createTable[User]())
+          _ <- (createTable[Profile]())
           // Insert user
-          _ <- xa.run(
+          _ <- (
             sql"INSERT INTO schema_int_users (name, email, status, age) VALUES ('Alice', 'alice@test.com', 'active', 30)".insert
           )
           // Insert profile with JSON data
           jsonData = """{"email":"alice@test.com","verified":true,"role":"admin"}"""
-          _ <- xa.run(sql"INSERT INTO schema_int_profiles (userId, data) VALUES (1, $jsonData::jsonb)".insert)
+          _ <- (sql"INSERT INTO schema_int_profiles (userId, data) VALUES (1, $jsonData::jsonb)".insert)
           // Verify data using SQL JSON extraction
-          email <- xa.run(
+          email <- (
             sql"SELECT data->>'email' as value FROM schema_int_profiles WHERE id = 1".queryOne[JsonFieldResult]
           )
-          role <- xa.run(
+          role <- (
             sql"SELECT data->>'role' as value FROM schema_int_profiles WHERE id = 1".queryOne[JsonFieldResult]
           )
-          count <- xa.run(sql"SELECT count(*) as count FROM schema_int_profiles".queryOne[CountResult])
+          count <- (sql"SELECT count(*) as count FROM schema_int_profiles".queryOne[CountResult])
         yield assertTrue(
           count.exists(_.count == 1),
           email.flatMap(_.value).contains("alice@test.com"),
@@ -222,16 +212,15 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
       },
       test("insert using Json type directly") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Event](ifExists = true))
-          _  <- xa.run(createTable[Event]())
+          _ <- (dropTable[Event](ifExists = true))
+          _ <- (createTable[Event]())
           // Create event with JSON metadata
           metadata = Metadata(List("important", "urgent"), 1, true)
-          _ <- xa.run(insert(Event(0, "Test Event", Json(metadata))))
+          _ <- (insert(Event(0, "Test Event", Json(metadata))))
           // Verify using SQL
-          events  <- xa.run(sql"SELECT name FROM schema_int_events".query[NameResult])
-          version <- xa.run(sql"SELECT metadata->>'version' as value FROM schema_int_events".queryOne[JsonFieldResult])
-          active  <- xa.run(sql"SELECT metadata->>'active' as value FROM schema_int_events".queryOne[JsonFieldResult])
+          events  <- (sql"SELECT name FROM schema_int_events".query[NameResult])
+          version <- (sql"SELECT metadata->>'version' as value FROM schema_int_events".queryOne[JsonFieldResult])
+          active  <- (sql"SELECT metadata->>'active' as value FROM schema_int_events".queryOne[JsonFieldResult])
         yield assertTrue(
           events.length == 1,
           events.head.name == "Test Event",
@@ -244,27 +233,26 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
     suite("JSON query operators")(
       test("query with JSON contains (@>) operator") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Profile](ifExists = true))
-          _  <- xa.run(dropTable[User](ifExists = true))
-          _  <- xa.run(createTable[User]())
-          _  <- xa.run(createTable[Profile]())
-          _  <- xa.run(
+          _ <- (dropTable[Profile](ifExists = true))
+          _ <- (dropTable[User](ifExists = true))
+          _ <- (createTable[User]())
+          _ <- (createTable[Profile]())
+          _ <- (
             sql"INSERT INTO schema_int_users (name, email, status, age) VALUES ('Alice', 'alice@test.com', 'active', 30)".insert
           )
-          _ <- xa.run(
+          _ <- (
             sql"INSERT INTO schema_int_profiles (userId, data) VALUES (1, '{\"email\":\"alice@test.com\",\"verified\":true,\"role\":\"admin\"}'::jsonb)".insert
           )
-          _ <- xa.run(
+          _ <- (
             sql"INSERT INTO schema_int_profiles (userId, data) VALUES (1, '{\"email\":\"bob@test.com\",\"verified\":false,\"role\":\"user\"}'::jsonb)".insert
           )
           // Query using @> operator - verify count only since Json is opaque
-          verifiedCount <- xa.run(
+          verifiedCount <- (
             sql"""SELECT count(*) as count FROM schema_int_profiles WHERE data @> '{"verified":true}'"""
               .queryOne[CountResult]
           )
           // Also verify the email to ensure we got the right record
-          verifiedEmail <- xa.run(
+          verifiedEmail <- (
             sql"""SELECT data->>'email' as value FROM schema_int_profiles WHERE data @> '{"verified":true}'"""
               .queryOne[JsonFieldResult]
           )
@@ -273,20 +261,19 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
           verifiedEmail.flatMap(_.value).contains("alice@test.com"),
         )
       },
-      test("query with JSON key exists (?) operator") {
+      test("query with JSON key exists operator") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Event](ifExists = true))
-          _  <- xa.run(createTable[Event]())
-          _  <- xa.run(
+          _ <- (dropTable[Event](ifExists = true))
+          _ <- (createTable[Event]())
+          _ <- (
             sql"INSERT INTO schema_int_events (name, metadata) VALUES ('Event1', '{\"tags\":[\"a\"],\"version\":1,\"active\":true}'::jsonb)".insert
           )
-          _ <- xa.run(
+          _ <- (
             sql"INSERT INTO schema_int_events (name, metadata) VALUES ('Event2', '{\"version\":2,\"active\":false}'::jsonb)".insert
           )
           // Query using jsonb_exists function (equivalent to ? operator) - find events that have 'tags' key
           // Note: We use jsonb_exists() instead of ? operator because ? is interpreted as JDBC parameter placeholder
-          withTags <- xa.run(
+          withTags <- (
             sql"""SELECT id, name, metadata FROM schema_int_events WHERE jsonb_exists(metadata, 'tags')""".query[Event]
           )
         yield assertTrue(
@@ -296,26 +283,25 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
       },
       test("query with JSON path extraction (->>)") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Profile](ifExists = true))
-          _  <- xa.run(dropTable[User](ifExists = true))
-          _  <- xa.run(createTable[User]())
-          _  <- xa.run(createTable[Profile]())
-          _  <- xa.run(
+          _ <- (dropTable[Profile](ifExists = true))
+          _ <- (dropTable[User](ifExists = true))
+          _ <- (createTable[User]())
+          _ <- (createTable[Profile]())
+          _ <- (
             sql"INSERT INTO schema_int_users (name, email, status, age) VALUES ('Alice', 'alice@test.com', 'active', 30)".insert
           )
-          _ <- xa.run(
+          _ <- (
             sql"INSERT INTO schema_int_profiles (userId, data) VALUES (1, '{\"email\":\"alice@test.com\",\"verified\":true,\"role\":\"admin\"}'::jsonb)".insert
           )
-          _ <- xa.run(
+          _ <- (
             sql"INSERT INTO schema_int_profiles (userId, data) VALUES (1, '{\"email\":\"bob@test.com\",\"verified\":false,\"role\":\"user\"}'::jsonb)".insert
           )
           // Query using ->> operator for text extraction - verify count and extracted role
-          adminCount <- xa.run(
+          adminCount <- (
             sql"""SELECT count(*) as count FROM schema_int_profiles WHERE data->>'role' = 'admin'"""
               .queryOne[CountResult]
           )
-          adminRole <- xa.run(
+          adminRole <- (
             sql"""SELECT data->>'role' as value FROM schema_int_profiles WHERE data->>'role' = 'admin'"""
               .queryOne[JsonFieldResult]
           )
@@ -326,21 +312,20 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
       },
       test("query with JSON has any keys (?|) operator") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Event](ifExists = true))
-          _  <- xa.run(createTable[Event]())
-          _  <- xa.run(
+          _ <- (dropTable[Event](ifExists = true))
+          _ <- (createTable[Event]())
+          _ <- (
             sql"INSERT INTO schema_int_events (name, metadata) VALUES ('Event1', '{\"tags\":[\"a\"],\"version\":1,\"active\":true}'::jsonb)".insert
           )
-          _ <- xa.run(
+          _ <- (
             sql"INSERT INTO schema_int_events (name, metadata) VALUES ('Event2', '{\"priority\":1,\"version\":2}'::jsonb)".insert
           )
-          _ <- xa.run(
+          _ <- (
             sql"INSERT INTO schema_int_events (name, metadata) VALUES ('Event3', '{\"version\":3}'::jsonb)".insert
           )
           // Query using jsonb_exists_any function (equivalent to ?| operator) - find events that have 'tags' OR 'priority' keys
           // Use count to avoid JSON decode issues with partial data
-          result <- xa.run(
+          result <- (
             sql"""SELECT count(*) as count FROM schema_int_events WHERE jsonb_exists_any(metadata, array['tags', 'priority'])"""
               .queryOne[CountResult]
           )
@@ -348,18 +333,17 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
       },
       test("query with JSON has all keys (?&) operator") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Event](ifExists = true))
-          _  <- xa.run(createTable[Event]())
-          _  <- xa.run(
+          _ <- (dropTable[Event](ifExists = true))
+          _ <- (createTable[Event]())
+          _ <- (
             sql"INSERT INTO schema_int_events (name, metadata) VALUES ('Event1', '{\"tags\":[\"a\"],\"version\":1,\"active\":true}'::jsonb)".insert
           )
-          _ <- xa.run(
+          _ <- (
             sql"INSERT INTO schema_int_events (name, metadata) VALUES ('Event2', '{\"version\":2,\"active\":false}'::jsonb)".insert
           )
           // Query using jsonb_exists_all function (equivalent to ?& operator) - find events that have BOTH 'version' AND 'active' keys
           // Use count to avoid JSON decode issues with partial data
-          result <- xa.run(
+          result <- (
             sql"""SELECT count(*) as count FROM schema_int_events WHERE jsonb_exists_all(metadata, array['version', 'active'])"""
               .queryOne[CountResult]
           )
@@ -377,12 +361,11 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
           .build
 
         for
-          xa      <- ZIO.service[Transactor]
-          _       <- xa.run(dropTable[Profile](ifExists = true))
-          _       <- xa.run(dropTable[User](ifExists = true))
-          _       <- xa.run(createTable[User]())
-          _       <- xa.run(createTable(profiles))
-          indexes <- xa.run(
+          _       <- (dropTable[Profile](ifExists = true))
+          _       <- (dropTable[User](ifExists = true))
+          _       <- (createTable[User]())
+          _       <- (createTable(profiles))
+          indexes <- (
             sql"""SELECT indexname, indexdef FROM pg_indexes
                   WHERE tablename = 'schema_int_profiles' AND indexname = 'idx_verified_profiles'""".query[IndexInfo]
           )
@@ -403,12 +386,11 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
           .build
 
         for
-          xa      <- ZIO.service[Transactor]
-          _       <- xa.run(dropTable[Profile](ifExists = true))
-          _       <- xa.run(dropTable[User](ifExists = true))
-          _       <- xa.run(createTable[User]())
-          _       <- xa.run(createTable(profiles))
-          indexes <- xa.run(
+          _       <- (dropTable[Profile](ifExists = true))
+          _       <- (dropTable[User](ifExists = true))
+          _       <- (createTable[User]())
+          _       <- (createTable(profiles))
+          indexes <- (
             sql"""SELECT indexname, indexdef FROM pg_indexes
                   WHERE tablename = 'schema_int_profiles' AND indexname = 'idx_admin_profiles'""".query[IndexInfo]
           )
@@ -433,10 +415,9 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
           .build
 
         for
-          xa      <- ZIO.service[Transactor]
-          _       <- xa.run(dropTable[User](ifExists = true))
-          _       <- xa.run(createTable(users))
-          indexes <- xa.run(
+          _       <- (dropTable[User](ifExists = true))
+          _       <- (createTable(users))
+          indexes <- (
             sql"""SELECT indexname, indexdef FROM pg_indexes
                   WHERE tablename = 'schema_int_users' AND indexname = 'idx_adult_active'""".query[IndexInfo]
           )
@@ -459,10 +440,9 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
           .build
 
         for
-          xa      <- ZIO.service[Transactor]
-          _       <- xa.run(dropTable[User](ifExists = true))
-          _       <- xa.run(createTable(users))
-          indexes <- xa.run(
+          _       <- (dropTable[User](ifExists = true))
+          _       <- (createTable(users))
+          indexes <- (
             sql"""SELECT indexname, indexdef FROM pg_indexes
                   WHERE tablename = 'schema_int_users' AND indexname = 'idx_active_or_pending'""".query[IndexInfo]
           )
@@ -482,10 +462,9 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
           .build
 
         for
-          xa      <- ZIO.service[Transactor]
-          _       <- xa.run(dropTable[User](ifExists = true))
-          _       <- xa.run(createTable(users))
-          indexes <- xa.run(
+          _       <- (dropTable[User](ifExists = true))
+          _       <- (createTable(users))
+          indexes <- (
             sql"""SELECT indexname, indexdef FROM pg_indexes
                   WHERE tablename = 'schema_int_users' AND indexname = 'idx_active_age_group'""".query[IndexInfo]
           )
@@ -505,10 +484,9 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
           .build
 
         for
-          xa      <- ZIO.service[Transactor]
-          _       <- xa.run(dropTable[User](ifExists = true))
-          _       <- xa.run(createTable(users))
-          indexes <- xa.run(
+          _       <- (dropTable[User](ifExists = true))
+          _       <- (createTable(users))
+          indexes <- (
             sql"""SELECT indexname, indexdef FROM pg_indexes
                   WHERE tablename = 'schema_int_users' AND indexname = 'idx_multi_status'""".query[IndexInfo]
           )
@@ -523,15 +501,14 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
     suite("Schema-qualified table names")(
       test("typed Query DSL works against a schema-qualified table") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(sql"create schema if not exists prd".insert)
-          _  <- xa.run(dropTable[QualifiedRow](ifExists = true))
-          _  <- xa.run(sql"create table prd.schema_int_qualified (id bigint primary key, name text)".insert)
-          _  <- xa.run(sql"insert into prd.schema_int_qualified (id, name) values (1, 'alice')".insert)
-          _  <- xa.run(sql"insert into prd.schema_int_qualified (id, name) values (2, 'bob')".insert)
+          _ <- (sql"create schema if not exists prd".insert)
+          _ <- (dropTable[QualifiedRow](ifExists = true))
+          _ <- (sql"create table prd.schema_int_qualified (id bigint primary key, name text)".insert)
+          _ <- (sql"insert into prd.schema_int_qualified (id, name) values (1, 'alice')".insert)
+          _ <- (sql"insert into prd.schema_int_qualified (id, name) values (2, 'bob')".insert)
           // Typed Query DSL — exercises both the FROM-clause alias and the WHERE column reference.
-          alice <- xa.run(Query[QualifiedRow].where(_.name).eq("alice").queryOne[QualifiedRow])
-          all   <- xa.run(Query[QualifiedRow].all.query[QualifiedRow])
+          alice <- (Query[QualifiedRow].where(_.name).eq("alice").queryOne[QualifiedRow])
+          all   <- (Query[QualifiedRow].all.query[QualifiedRow])
         yield assertTrue(
           alice.exists(_.id == 1L),
           alice.exists(_.name == "alice"),
@@ -551,26 +528,25 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
           .build
 
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[Profile](ifExists = true))
-          _  <- xa.run(dropTable[User](ifExists = true))
-          _  <- xa.run(createTable[User]())
-          _  <- xa.run(createTable(profiles))
+          _ <- (dropTable[Profile](ifExists = true))
+          _ <- (dropTable[User](ifExists = true))
+          _ <- (createTable[User]())
+          _ <- (createTable(profiles))
           // Verify index exists
-          indexes <- xa.run(
+          indexes <- (
             sql"""SELECT indexname, indexdef FROM pg_indexes
                   WHERE tablename = 'schema_int_profiles' AND indexname = 'idx_profile_user'""".query[IndexInfo]
           )
           // Verify FK constraint by testing cascade delete
-          _ <- xa.run(
+          _ <- (
             sql"INSERT INTO schema_int_users (name, email, status, age) VALUES ('Alice', 'alice@test.com', 'active', 30)".insert
           )
-          _ <- xa.run(
+          _ <- (
             sql"INSERT INTO schema_int_profiles (userId, data) VALUES (1, '{\"email\":\"a@b.com\",\"verified\":true,\"role\":\"user\"}'::jsonb)".insert
           )
-          countBefore <- xa.run(sql"SELECT count(*) as count FROM schema_int_profiles".queryOne[CountResult])
-          _           <- xa.run(sql"DELETE FROM schema_int_users WHERE id = 1".delete)
-          countAfter  <- xa.run(sql"SELECT count(*) as count FROM schema_int_profiles".queryOne[CountResult])
+          countBefore <- (sql"SELECT count(*) as count FROM schema_int_profiles".queryOne[CountResult])
+          _           <- (sql"DELETE FROM schema_int_users WHERE id = 1".delete)
+          countAfter  <- (sql"SELECT count(*) as count FROM schema_int_profiles".queryOne[CountResult])
         yield assertTrue(
           indexes.nonEmpty,
           countBefore.exists(_.count == 1),

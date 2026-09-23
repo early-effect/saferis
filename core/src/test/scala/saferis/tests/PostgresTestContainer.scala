@@ -2,7 +2,8 @@ package saferis.tests
 
 import org.postgresql.ds.PGSimpleDataSource
 import org.testcontainers.containers.PostgreSQLContainer
-import saferis.ConnectionProvider
+import saferis.JdbcSession
+import saferis.JdbcSessionConfig
 import zio.*
 
 import javax.sql.DataSource
@@ -55,7 +56,11 @@ object PostgresTestContainer:
     private val base                                           = ZLayer.derive[DataSourceProvider]
     val datasource: URLayer[PostgresTestContainer, DataSource] =
       base.flatMap(l => ZLayer.succeed(l.get.dataSource))
-    val provider: ZLayer[PostgresTestContainer, Nothing, ConnectionProvider] =
-      DataSourceProvider.datasource >>> ConnectionProvider.FromDataSource.layer
-    val default = PostgresTestContainer.default >>> provider
+    val session =
+      DataSourceProvider.datasource >>> JdbcSession.layer()
+    val default =
+      PostgresTestContainer.default >>> session
+    def configured(config: JdbcSessionConfig) =
+      PostgresTestContainer.default >>> datasource >>> JdbcSession.layer(config)
+  end DataSourceProvider
 end PostgresTestContainer

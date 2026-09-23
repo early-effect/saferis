@@ -1,8 +1,7 @@
 package saferis
 
-import zio.*
+import zio.Chunk
 
-import java.sql.ResultSet
 import scala.annotation.StaticAnnotation
 
 /** Represents a label for a column in a result set. Fields in a case class can be annotated with this to specify the
@@ -32,7 +31,6 @@ class key extends StaticAnnotation
   *   the scala field name in the case class
   * @param label
   *   the column name/label in the result set
-  * @param reader
   */
 final case class Column[R](
     name: String,
@@ -45,21 +43,24 @@ final case class Column[R](
 )(using readable: Decoder[R], writable: Encoder[R])
     extends Placeholder:
   type ColumnType = R
-  val writes = Seq.empty
-  // Note: We cannot access dialect here as Column is constructed at compile-time
-  // The label should already be the raw identifier
-  // For generated aliases, we use the value directly (no escaping needed)
-  // For user aliases, escaping will happen at the condition level where Dialect is available
-  val sql = tableAlias.fold(label)(a => s"${a.value}.$label")
+  override val sql: String        = tableAlias.fold(label)(a => s"${a.value}.$label")
+  val pieces: Chunk[SqlPiece]     = Chunk(SqlPiece.Text(sql))
+  val issues: List[FragmentIssue] = Nil
 
-  private[saferis] def read(rs: ResultSet)(using Trace): Task[(String, R)] =
-    readable.decode(rs, label).map(v => name -> v)
-  private[saferis] def withTableAlias(alias: Option[Alias]) = copy(tableAlias = alias)
+  def pgType: PgType = writable.pgType
 
-  // Provide SQL type information based on the encoder
-  private[saferis] def sqlType: Int                                                          = writable.jdbcType
-  private[saferis] def columnType(using dialect: Dialect = postgres.PostgresDialect): String =
-    writable.columnType
+  private[saferis] def read(row: SqlRow): Either[SaferisError, (String, R)] =
+    def fail(detail: String) = Left(SaferisError.DecodingError(label, pgType.toString, detail))
+    row.get(label) match
+      case Left(err)    => fail(err.detail)
+      case Right(value) =>
+        readable.decode(value) match
+          case Left(err)      => fail(err.detail)
+          case Right(decoded) => Right(name -> decoded)
+
+  private[saferis] def withTableAlias(alias: Option[Alias]): Column[R] = copy(tableAlias = alias)
+
+  private[saferis] def columnType(using Dialect): String = writable.columnType
 
   /** Returns the DEFAULT clause for DDL if a default value is defined */
   private[saferis] def defaultClause: Option[String] =

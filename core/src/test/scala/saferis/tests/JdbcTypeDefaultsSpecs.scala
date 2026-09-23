@@ -34,18 +34,15 @@ object JdbcTypeDefaultsSpecs extends ZIOSpecDefault:
       val encoder = summon[Encoder[Double]]
       assertTrue(encoder.columnType == "double precision")
     },
-    test("date encoder uses date column type") {
-      val encoder = summon[Encoder[java.sql.Date]]
+    test("local date encoder uses date column type") {
+      val encoder = summon[Encoder[java.time.LocalDate]]
+      assertTrue(encoder.pgType == PgType.Date) &&
       assertTrue(encoder.columnType == "date")
-    },
-    test("url encoder uses PostgreSQL-specific 'text'") {
-      val encoder = summon[Encoder[java.net.URL]]
-      assertTrue(encoder.columnType == "text")
     },
     test("Text opaque type uses text column type (not varchar)") {
       val encoder = summon[Encoder[Text]]
       assertTrue(encoder.columnType == "text") &&
-      assertTrue(encoder.jdbcType == java.sql.Types.LONGVARCHAR)
+      assertTrue(encoder.pgType == PgType.Text)
     },
     test("Text can be used in table definitions") {
       @tableName("articles")
@@ -58,10 +55,10 @@ object JdbcTypeDefaultsSpecs extends ZIOSpecDefault:
       assertTrue(titleColumn.columnType == "varchar(255)") &&
       assertTrue(contentColumn.columnType == "text")
     },
-    test("Json[A] encoder uses Types.OTHER (maps to jsonb in PostgreSQL)") {
+    test("Json[A] encoder uses jsonb") {
       final case class Metadata(tags: List[String], version: Int) derives JsonCodec
       val encoder = summon[Encoder[Json[Metadata]]]
-      assertTrue(encoder.jdbcType == java.sql.Types.OTHER) &&
+      assertTrue(encoder.pgType == PgType.Jsonb) &&
       assertTrue(encoder.columnType == "jsonb")
     },
     test("Json[A] can be used in table definitions") {

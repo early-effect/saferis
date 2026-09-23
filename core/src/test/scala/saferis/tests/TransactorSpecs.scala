@@ -9,18 +9,15 @@ import zio.*
 import zio.test.*
 
 import java.sql.Connection
-import java.sql.SQLException
 
 object TransactorSpecs extends ZIOSpecDefault:
-  val serializable = DataSourceProvider.default >>> Transactor.layer(
-    configurator = _.setTransactionIsolation(Connection.TRANSACTION_SERIALIZABLE),
-    maxConcurrency = 1,
+  val serializable = DataSourceProvider.configured(
+    JdbcSessionConfig(configure = _.setTransactionIsolation(Connection.TRANSACTION_SERIALIZABLE))
   )
-  val readCommitted = DataSourceProvider.default >>> Transactor.layer(
-    configurator = _.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED),
-    maxConcurrency = 2,
+  val readCommitted = DataSourceProvider.configured(
+    JdbcSessionConfig(configure = _.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED))
   )
-  val defaultTransactor = DataSourceProvider.default >>> Transactor.default
+  val defaultTransactor = DataSourceProvider.default
 
   val frank                = "Frank"
   val bob                  = "Bob"
@@ -41,33 +38,25 @@ object TransactorSpecs extends ZIOSpecDefault:
     suiteAll("should run"):
       test("a select all query"):
         val sql = sql"select * from $testTable"
-        for
-          xa <- ZIO.service[Transactor]
-          a  <- xa.run:
+        for a <-
             sql.query[TestTable]
         yield assertTrue(a.size == 4)
 
       test("a single row query"):
         val sql = sql"select * from $testTable where name = $alice"
-        for
-          xa <- ZIO.service[Transactor]
-          a  <- xa.run:
+        for a <-
             sql.queryOne[TestTable]
         yield assertTrue(a == Some(TestTable("Alice", Some(30), Some("alice@example.com"))))
 
       test("a single value query"):
         val sql = sql"select count(1) from $testTable"
-        for
-          xa <- ZIO.service[Transactor]
-          a  <- xa.run:
-            sql.queryValue[Int]
+        for a <-
+            sql.queryValue[Long]
         yield assertTrue(a == Some(4))
 
       test("a single tuple query"):
         val sql = sql"select name, age from $testTable where name = $bob"
-        for
-          xa <- ZIO.service[Transactor]
-          a  <- xa.run:
+        for a <-
             sql.queryValue[(String, Option[Int])]
         yield assertTrue(a == Some((bob, Some(25))))
 
@@ -76,14 +65,13 @@ object TransactorSpecs extends ZIOSpecDefault:
         final case class InsertTable(@key id: Int, name: String) derives Table
 
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run:
+          _ <-
             sql"drop table if exists test_transactor_insert".dml
-          _ <- xa.run:
+          _ <-
             sql"create table test_transactor_insert (id integer primary key, name varchar(255))".dml
-          rowsAffected <- xa.run:
+          rowsAffected <-
             insert(InsertTable(1, "Test Insert"))
-          result <- xa.run:
+          result <-
             sql"select * from test_transactor_insert where id = 1".queryOne[InsertTable]
         yield assertTrue(rowsAffected == 1) &&
           assertTrue(result.contains(InsertTable(1, "Test Insert")))
@@ -94,16 +82,15 @@ object TransactorSpecs extends ZIOSpecDefault:
         final case class UpdateTable(@key id: Int, name: String) derives Table
 
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run:
+          _ <-
             sql"drop table if exists test_transactor_update".dml
-          _ <- xa.run:
+          _ <-
             sql"create table test_transactor_update (id integer primary key, name varchar(255))".dml
-          _ <- xa.run:
+          _ <-
             insert(UpdateTable(1, "Original"))
-          rowsAffected <- xa.run:
+          rowsAffected <-
             update(UpdateTable(1, "Updated"))
-          result <- xa.run:
+          result <-
             sql"select * from test_transactor_update where id = 1".queryOne[UpdateTable]
         yield assertTrue(rowsAffected == 1) &&
           assertTrue(result.contains(UpdateTable(1, "Updated")))
@@ -114,16 +101,15 @@ object TransactorSpecs extends ZIOSpecDefault:
         final case class DeleteTable(@key id: Int, name: String) derives Table
 
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run:
+          _ <-
             sql"drop table if exists test_transactor_delete".dml
-          _ <- xa.run:
+          _ <-
             sql"create table test_transactor_delete (id integer primary key, name varchar(255))".dml
-          _ <- xa.run:
+          _ <-
             insert(DeleteTable(1, "To Delete"))
-          rowsAffected <- xa.run:
+          rowsAffected <-
             delete(DeleteTable(1, "To Delete"))
-          result <- xa.run:
+          result <-
             sql"select * from test_transactor_delete where id = 1".queryOne[DeleteTable]
         yield assertTrue(rowsAffected == 1) &&
           assertTrue(result.isEmpty)
@@ -134,16 +120,15 @@ object TransactorSpecs extends ZIOSpecDefault:
         final case class DDLTable(@key id: Int, name: String) derives Table
 
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run:
+          _ <-
             dropTable[DDLTable](ifExists = true)
-          createResult <- xa.run:
+          createResult <-
             createTable[DDLTable]()
-          _ <- xa.run:
+          _ <-
             insert(DDLTable(1, "DDL Test"))
-          queryResult <- xa.run:
+          queryResult <-
             sql"select * from test_transactor_ddl where id = 1".queryOne[DDLTable]
-          dropResult <- xa.run:
+          dropResult <-
             dropTable[DDLTable]()
         yield assertTrue(createResult >= 0) &&
           assertTrue(queryResult.contains(DDLTable(1, "DDL Test"))) &&
@@ -154,23 +139,20 @@ object TransactorSpecs extends ZIOSpecDefault:
   val transactionSuite =
     suiteAll("should run statements in a transaction"):
       test("yielding an effect of the result"):
-        for
-          xa <- ZIO.service[Transactor]
-          a  <- xa.transact:
+        for a <- transact(
             for
               a <- sql"select * from $testTable where name = $alice".queryOne[TestTable]
               b <- sql"select * from $testTable where name = $bob".queryOne[TestTable]
               c <- sql"select * from $testTable where name = $none".queryOne[TestTable]
             yield a.toSeq ++ b.toSeq ++ c.toSeq
+          )
         yield assertTrue(a.size == 2)
 
       test("commit on success"):
         for
-          xa <- ZIO.service[Transactor]
-          a  <- xa
-            .transact:
-              insertReturning(TestTable(frank, Some(42), None))
-          newNames <- xa.run:
+          a <- transact:
+            insertReturning(TestTable(frank, Some(42), None))
+          newNames <-
             sql"select * from $testTable".query[TestTable].map(_.map(_.name))
         yield assertTrue(a.name == frank) &&
           assertTrue(newNames.contains(frank)) &&
@@ -179,23 +161,20 @@ object TransactorSpecs extends ZIOSpecDefault:
       test("rollback on effect failure"):
         val names = sql"select * from $testTable".query[TestTable].map(_.map(_.name))
         for
-          xa     <- ZIO.service[Transactor]
-          before <- xa.run:
+          before <-
             names
-          error <- xa
-            .transact:
-              for
-                _ <- sql"delete from $testTable where name = $bob".delete
-                _ <- sql"delete from $testTable where name = $alice".delete
-                _ <- sql"deli meat from $testTable where name = $charlie".delete // pastrami please - this will fail
-              yield ()
-            .flip
-          after <- xa
-            .run:
-              names
+          error <- transact(
+            for
+              _ <- sql"delete from $testTable where name = $bob".delete
+              _ <- sql"delete from $testTable where name = $alice".delete
+              _ <- sql"deli meat from $testTable where name = $charlie".delete // pastrami please - this will fail
+            yield ()
+          ).flip
+          after <-
+            names
           isSyntaxError = error match
-            case SaferisError.SyntaxError(_, _) => true
-            case _                              => false
+            case SaferisError.SyntaxError(_, _, _) => true
+            case _                                 => false
         yield assertTrue(isSyntaxError) && // the pastrami is a lie
           assertTrue(after == before)
         end for
@@ -205,19 +184,18 @@ object TransactorSpecs extends ZIOSpecDefault:
         final case class MixedTable(@key id: Int, name: String, value: Int) derives Table
 
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run:
+          _ <-
             sql"drop table if exists test_transactor_mixed".dml
-          _ <- xa.run:
+          _ <-
             sql"create table test_transactor_mixed (id integer primary key, name varchar(255), value integer)".dml
-          result <- xa.transact:
+          result <- transact:
             for
               _         <- insert(MixedTable(1, "First", 10))
               _         <- insert(MixedTable(2, "Second", 20))
               _         <- update(MixedTable(1, "Updated First", 15))
               remaining <- sql"select * from test_transactor_mixed".query[MixedTable]
             yield remaining
-          count <- xa.run:
+          count <-
             sql"select count(*) as count from test_transactor_mixed".queryOne[CountResult]
         yield assertTrue(result.size == 2) &&
           assertTrue(result.exists(_.name == "Updated First")) &&
@@ -229,15 +207,14 @@ object TransactorSpecs extends ZIOSpecDefault:
         final case class IsolationTable(@key id: Int, value: Int) derives Table
 
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run:
+          _ <-
             sql"drop table if exists test_transactor_isolation".dml
-          _ <- xa.run:
+          _ <-
             sql"create table test_transactor_isolation (id integer primary key, value integer)".dml
-          _ <- xa.run:
+          _ <-
             insert(IsolationTable(1, 100))
           // Test that transaction sees consistent data
-          result <- xa.transact:
+          result <- transact:
             for
               initial <- sql"select * from test_transactor_isolation where id = 1".queryOne[IsolationTable]
               _       <- update(IsolationTable(1, 200))
@@ -246,6 +223,73 @@ object TransactorSpecs extends ZIOSpecDefault:
         yield assertTrue(result._1.map(_.value).contains(100)) &&
           assertTrue(result._2.map(_.value).contains(200))
         end for
+
+      test("nested transact joins the outer transaction and does not commit early"):
+        for
+          _      <- sql"drop table if exists test_nested_txn".dml
+          _      <- sql"create table test_nested_txn (id integer primary key)".dml
+          failed <- transact(
+            for
+              _ <- transact(sql"insert into test_nested_txn (id) values (1)".dml)
+              _ <- ZIO.fail(SaferisError.Unexpected("outer failed"))
+            yield ()
+          ).exit
+          count <- sql"select count(*) from test_nested_txn".queryValue[Long]
+        yield assertTrue(failed.isFailure, count.contains(0L))
+
+      test("nested transact commits with the outer transaction"):
+        for
+          _ <- sql"drop table if exists test_nested_txn_ok".dml
+          _ <- sql"create table test_nested_txn_ok (id integer primary key)".dml
+          _ <- transact:
+            transact(sql"insert into test_nested_txn_ok (id) values (1)".dml)
+          count <- sql"select count(*) from test_nested_txn_ok".queryValue[Long]
+        yield assertTrue(count.contains(1L))
+
+      test("a failure inside nested transact rolls the outer transaction back"):
+        for
+          _    <- sql"drop table if exists test_nested_fail".dml
+          _    <- sql"create table test_nested_fail (id integer primary key)".dml
+          exit <- transact(
+            for
+              _ <- sql"insert into test_nested_fail (id) values (1)".dml
+              _ <- transact(sql"deli meat from test_nested_fail".dml)
+            yield ()
+          ).exit
+          count <- sql"select count(*) from test_nested_fail".queryValue[Long]
+          syntax = exit match
+            case Exit.Failure(cause) =>
+              cause.failureOption match
+                case Some(_: SaferisError.SyntaxError) => true
+                case _                                 => false
+            case _ => false
+        yield assertTrue(syntax, count.contains(0L))
+
+      test("catching a statement failure still rolls back and the next command is 25P02"):
+        for
+          _    <- sql"drop table if exists test_abort_txn".dml
+          _    <- sql"create table test_abort_txn (id integer primary key)".dml
+          seen <- Ref.make[Option[Either[SaferisError, Option[Long]]]](None)
+          exit <- transact(
+            for
+              _     <- sql"insert into test_abort_txn (id) values (1)".dml
+              _     <- sql"deli meat from test_abort_txn".dml.catchAll(_ => ZIO.succeed(0L))
+              later <- sql"select count(*) from test_abort_txn".queryValue[Long].either
+              _     <- seen.set(Some(later))
+            yield ()
+          ).exit
+          captured <- seen.get
+          count    <- sql"select count(*) from test_abort_txn".queryValue[Long]
+          aborted = captured match
+            case Some(Left(SaferisError.QueryError(Some("25P02"), _, _))) => true
+            case _                                                        => false
+          recorded = exit match
+            case Exit.Failure(cause) =>
+              cause.failureOption match
+                case Some(_: SaferisError.SyntaxError) => true
+                case _                                 => false
+            case _ => false
+        yield assertTrue(aborted, recorded, count.contains(0L))
   end transactionSuite
 
   val concurrencyTestsUnlimited =
@@ -255,17 +299,15 @@ object TransactorSpecs extends ZIOSpecDefault:
         final case class UnlimitedTable(@key id: Int, name: String) derives Table
 
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run:
+          _ <-
             sql"drop table if exists test_transactor_unlimited".dml
-          _ <- xa.run:
+          _ <-
             sql"create table test_transactor_unlimited (id integer primary key, name varchar(255))".dml
           // Run many operations concurrently - should all succeed quickly
           results <- ZIO.collectAllPar:
             (1 to 10).map: i =>
-              xa.run:
-                insert(UnlimitedTable(i, s"Unlimited $i"))
-          count <- xa.run:
+              insert(UnlimitedTable(i, s"Unlimited $i"))
+          count <-
             sql"select count(*) as count from test_transactor_unlimited".queryOne[CountResult]
         yield assertTrue(results.forall(_ == 1)) &&
           assertTrue(count.map(_.count).contains(10))
@@ -278,17 +320,15 @@ object TransactorSpecs extends ZIOSpecDefault:
         final case class LimitedTable(@key id: Int, name: String) derives Table
 
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run:
+          _ <-
             sql"drop table if exists test_transactor_limited".dml
-          _ <- xa.run:
+          _ <-
             sql"create table test_transactor_limited (id integer primary key, name varchar(255))".dml
           // Run operations concurrently - only 2 should run at once due to semaphore
           results <- ZIO.collectAllPar:
             (1 to 5).map: i =>
-              xa.run:
-                insert(LimitedTable(i, s"Limited $i"))
-          count <- xa.run:
+              insert(LimitedTable(i, s"Limited $i"))
+          count <-
             sql"select count(*) as count from test_transactor_limited".queryOne[CountResult]
         yield assertTrue(results.forall(_ == 1)) &&
           assertTrue(count.map(_.count).contains(5))
@@ -301,17 +341,15 @@ object TransactorSpecs extends ZIOSpecDefault:
         final case class SerializedTable(@key id: Int, name: String) derives Table
 
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run:
+          _ <-
             sql"drop table if exists test_transactor_serialized".dml
-          _ <- xa.run:
+          _ <-
             sql"create table test_transactor_serialized (id integer primary key, name varchar(255))".dml
           // Run operations concurrently - but they should be effectively serialized
           results <- ZIO.collectAllPar:
             (1 to 3).map: i =>
-              xa.run:
-                insert(SerializedTable(i, s"Serialized $i"))
-          count <- xa.run:
+              insert(SerializedTable(i, s"Serialized $i"))
+          count <-
             sql"select count(*) as count from test_transactor_serialized".queryOne[CountResult]
         yield assertTrue(results.forall(_ == 1)) &&
           assertTrue(count.map(_.count).contains(3))
@@ -321,14 +359,13 @@ object TransactorSpecs extends ZIOSpecDefault:
     suiteAll("should apply configurator"):
       test("configurator sets transaction isolation"):
         for
-          xa <- ZIO.service[Transactor]
           // This transactor was configured with SERIALIZABLE isolation
           // We'll verify it works correctly (detailed isolation testing would require more complex scenarios)
-          result <- xa.transact:
+          result <- transact:
             sql"select 1 as value".queryOne[ValueResult]
         yield assertTrue(result.map(_.value).contains(1))
 
-  final case class CountResult(count: Int) derives Table
+  final case class CountResult(count: Long) derives Table
   final case class ValueResult(value: Int) derives Table
 
   val all = suiteAll("A transactor"):

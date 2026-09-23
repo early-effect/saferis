@@ -52,8 +52,8 @@ object TableSpecs extends ZIOSpecDefault:
 
     test("provide getByKey"):
       val sql = testTable.getByKey("Frank").sql
-      assertTrue(sql == "select * from test_table_no_key where name = ?")
+      assertTrue(sql == "select * from test_table_no_key where name = $1")
       val sql2 = (testTable as "tt").getByKey("Frank").sql
-      assertTrue(sql2 == "select * from test_table_no_key as tt where tt.name = ?")
+      assertTrue(sql2 == "select * from test_table_no_key as tt where tt.name = $1")
 
 end TableSpecs

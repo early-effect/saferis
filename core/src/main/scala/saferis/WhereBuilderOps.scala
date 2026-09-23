@@ -23,8 +23,7 @@ trait WhereBuilderOps[Parent, T]:
   // === Literal comparison operators ===
 
   private def completeLiteral(operator: Operator, value: T)(using enc: Encoder[T]): Parent =
-    val write     = enc(value)
-    val condition = LiteralCondition(whereAlias, whereColumn, operator, write)
+    val condition = LiteralCondition(whereAlias, whereColumn, operator, enc.encode(value))
     val whereFrag = Condition.toSqlFragment(Vector(condition))
     addPredicate(whereFrag)
 
@@ -82,21 +81,25 @@ trait WhereBuilderOps[Parent, T]:
     * }}}
     */
   def inSubquery(subquery: SelectQuery[T]): Parent =
-    val subquerySql = subquery.build
-    val inSql       = s"${whereAlias.toSql}.${whereColumn.label} in (${subquerySql.sql})"
-    val whereFrag   = SqlFragment(inSql, subquerySql.writes)
+    val whereFrag =
+      SqlFragment
+        .text(s"${whereAlias.toSql}.${whereColumn.label} in (")
+        .append(subquery.build)
+        .append(SqlFragment.text(")"))
     addPredicate(whereFrag)
 
   /** NOT IN subquery - type-safe variant */
   def notInSubquery(subquery: SelectQuery[T]): Parent =
-    val subquerySql = subquery.build
-    val notInSql    = s"${whereAlias.toSql}.${whereColumn.label} not in (${subquerySql.sql})"
-    val whereFrag   = SqlFragment(notInSql, subquerySql.writes)
+    val whereFrag =
+      SqlFragment
+        .text(s"${whereAlias.toSql}.${whereColumn.label} not in (")
+        .append(subquery.build)
+        .append(SqlFragment.text(")"))
     addPredicate(whereFrag)
 
   // === Literal collection operators ===
 
-  /** IN literal — varargs form for inline values. Emits `col IN (?, ?, ?, ...)` with one bound parameter per distinct
+  /** IN literal — varargs form for inline values. Emits `col IN ($1, $2, ...)` with one bound parameter per distinct
     * element. By construction at least one element is supplied, so this overload always produces valid SQL.
     *
     * {{{
@@ -121,8 +124,11 @@ trait WhereBuilderOps[Parent, T]:
     */
   def inList(values: Iterable[T])(using Encoder[T]): Parent =
     val list      = Placeholder.listTagged(values, helper = "WhereBuilder.inList", origin = Placeholder.captureOrigin())
-    val inSql     = s"${whereAlias.toSql}.${whereColumn.label} in (${list.sql})"
-    val whereFrag = SqlFragment(inSql, list.writes, issues = list.issues)
+    val whereFrag =
+      SqlFragment
+        .text(s"${whereAlias.toSql}.${whereColumn.label} in (")
+        .append(SqlFragment(list))
+        .append(SqlFragment.text(")"))
     addPredicate(whereFrag)
 
   /** NOT IN literal — varargs form for inline values. */
@@ -132,8 +138,11 @@ trait WhereBuilderOps[Parent, T]:
   /** NOT IN literal collection — symmetric to [[inList]]. */
   def notInList(values: Iterable[T])(using Encoder[T]): Parent =
     val list = Placeholder.listTagged(values, helper = "WhereBuilder.notInList", origin = Placeholder.captureOrigin())
-    val notInSql  = s"${whereAlias.toSql}.${whereColumn.label} not in (${list.sql})"
-    val whereFrag = SqlFragment(notInSql, list.writes, issues = list.issues)
+    val whereFrag =
+      SqlFragment
+        .text(s"${whereAlias.toSql}.${whereColumn.label} not in (")
+        .append(SqlFragment(list))
+        .append(SqlFragment.text(")"))
     addPredicate(whereFrag)
 
 end WhereBuilderOps

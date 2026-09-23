@@ -9,15 +9,16 @@ object SpecializedDML:
   inline def insertReturning[A](entity: A)(using
       table: Table[A],
       dialect: Dialect & ReturningSupport,
-  )(using trace: Trace): ZIO[ConnectionProvider & Scope, SaferisError, Option[A]] =
-    val tableName        = table.name
-    val insertColumns    = table.insertColumnsSql.sql
-    val returningColumns = table.returningColumnsSql.sql
-    val insertSql        = dialect.insertReturningSql(tableName, insertColumns, returningColumns)
-
-    val placeholders = table.insertPlaceholders(entity)
-    val sql          = SqlFragment(insertSql, placeholders.flatMap(_.writes))
-
+  )(using trace: Trace): ZIO[SqlSession, SaferisError, Option[A]] =
+    val _   = dialect.insertReturningSql(table.name, "", "")
+    val sql =
+      SqlFragment
+        .text(s"insert into ${table.name} ")
+        .append(table.insertColumnsSql)
+        .append(SqlFragment.text(" values "))
+        .append(table.insertPlaceholdersSql(entity))
+        .append(SqlFragment.text(" returning "))
+        .append(table.returningColumnsSql)
     sql.queryOne[A]
   end insertReturning
 
@@ -25,17 +26,15 @@ object SpecializedDML:
   inline def updateReturning[A](entity: A)(using
       table: Table[A],
       dialect: Dialect & ReturningSupport,
-  )(using trace: Trace): ZIO[ConnectionProvider & Scope, SaferisError, Option[A]] =
-    val tableName        = table.name
-    val setClause        = table.updateSetClause(entity).sql
-    val whereClause      = table.updateWhereClause(entity).sql
-    val returningColumns = table.returningColumnsSql.sql
-    val updateSql        = dialect.updateReturningSql(tableName, setClause, whereClause, returningColumns)
-
-    val updateWrites = table.updateSetClause(entity).writes
-    val keyWrites    = table.updateWhereClause(entity).writes
-    val sql          = SqlFragment(updateSql, updateWrites ++ keyWrites)
-
+  )(using trace: Trace): ZIO[SqlSession, SaferisError, Option[A]] =
+    val _   = dialect.updateReturningSql(table.name, "", "", "")
+    val sql =
+      SqlFragment
+        .text(s"update ${table.name} set ")
+        .append(table.updateSetClause(entity))
+        .append(table.updateWhereClause(entity))
+        .append(SqlFragment.text(" returning "))
+        .append(table.returningColumnsSql)
     sql.queryOne[A]
   end updateReturning
 
@@ -43,15 +42,14 @@ object SpecializedDML:
   inline def deleteReturning[A](entity: A)(using
       table: Table[A],
       dialect: Dialect & ReturningSupport,
-  )(using trace: Trace): ZIO[ConnectionProvider & Scope, SaferisError, Option[A]] =
-    val tableName        = table.name
-    val whereClause      = table.updateWhereClause(entity).sql
-    val returningColumns = table.returningColumnsSql.sql
-    val deleteSql        = dialect.deleteReturningSql(tableName, whereClause, returningColumns)
-
-    val keyWrites = table.updateWhereClause(entity).writes
-    val sql       = SqlFragment(deleteSql, keyWrites)
-
+  )(using trace: Trace): ZIO[SqlSession, SaferisError, Option[A]] =
+    val _   = dialect.deleteReturningSql(table.name, "", "")
+    val sql =
+      SqlFragment
+        .text(s"delete from ${table.name}")
+        .append(table.updateWhereClause(entity))
+        .append(SqlFragment.text(" returning "))
+        .append(table.returningColumnsSql)
     sql.queryOne[A]
   end deleteReturning
 
@@ -64,16 +62,16 @@ object SpecializedDML:
   private[saferis] inline def upsert[A](entity: A, conflictColumns: Seq[String])(using
       table: Table[A],
       dialect: Dialect & UpsertSupport,
-  )(using trace: Trace): ZIO[ConnectionProvider & Scope, SaferisError, Int] =
-    val tableName     = table.name
-    val insertColumns = table.insertColumnsSql.sql
-    val updateColumns = table.updateSetClause(entity).sql
-    val upsertSql     = dialect.upsertSql(tableName, insertColumns, conflictColumns, updateColumns)
-
-    val insertWrites = table.insertPlaceholders(entity).flatMap(_.writes)
-    val updateWrites = table.updateSetClause(entity).writes
-    val sql          = SqlFragment(upsertSql, insertWrites ++ updateWrites)
-
+  )(using trace: Trace): ZIO[SqlSession, SaferisError, Long] =
+    val _   = dialect.upsertSql(table.name, "", conflictColumns, "")
+    val sql =
+      SqlFragment
+        .text(s"insert into ${table.name} ")
+        .append(table.insertColumnsSql)
+        .append(SqlFragment.text(" values "))
+        .append(table.insertPlaceholdersSql(entity))
+        .append(SqlFragment.text(s" on conflict (${conflictColumns.mkString(", ")}) do update set "))
+        .append(table.updateSetClause(entity))
     sql.dml
   end upsert
 
@@ -85,7 +83,7 @@ object SpecializedDML:
   )(using
       table: Table[A],
       dialect: Dialect & IndexIfNotExistsSupport,
-  )(using trace: Trace): ZIO[ConnectionProvider & Scope, SaferisError, Int] =
+  )(using trace: Trace): ZIO[SqlSession, SaferisError, Long] =
     val tableName = table.name
     // indexName and columnNames are caller-supplied strings, so escape them at this public trust boundary to
     // prevent SQL injection. tableName comes from the compile-time @tableName/type name (not user input) and is
@@ -94,7 +92,7 @@ object SpecializedDML:
     val safeIndexName   = dialect.escapeIdentifier(indexName)
     val safeColumnNames = columnNames.map(dialect.escapeIdentifier)
     val sql             =
-      SqlFragment(dialect.createIndexIfNotExistsSql(safeIndexName, tableName, safeColumnNames, unique), Seq.empty)
+      SqlFragment.text(dialect.createIndexIfNotExistsSql(safeIndexName, tableName, safeColumnNames, unique))
     sql.dml
   end createIndexIfNotExists
 
@@ -107,7 +105,7 @@ object SpecializedDML:
   private[saferis] def jsonExtract(columnName: String, fieldPath: String)(using
       dialect: Dialect & JsonSupport
   ): SqlFragment =
-    SqlFragment(dialect.jsonExtractSql(columnName, fieldPath), Seq.empty)
+    SqlFragment.text(dialect.jsonExtractSql(columnName, fieldPath))
 
   /** Array containment check - only available for dialects that support arrays.
     *
@@ -117,7 +115,7 @@ object SpecializedDML:
   private[saferis] def arrayContains(columnName: String, value: String)(using
       dialect: Dialect & ArraySupport
   ): SqlFragment =
-    SqlFragment(dialect.arrayContainsSql(columnName, value), Seq.empty)
+    SqlFragment.text(dialect.arrayContainsSql(columnName, value))
 
   /** Get SQL for UPSERT operation - only available for dialects that support it.
     *

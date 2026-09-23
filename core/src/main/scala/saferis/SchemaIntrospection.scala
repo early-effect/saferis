@@ -2,14 +2,12 @@ package saferis
 
 import zio.*
 
-import java.sql.{Connection, DatabaseMetaData}
-import scala.annotation.unused
 import scala.collection.mutable.ListBuffer
 
 /** Schema introspection and validation.
   *
-  * Uses JDBC DatabaseMetaData as the portable default. Dialects can implement SchemaIntrospectionSupport for richer
-  * metadata (e.g., partial index WHERE clauses).
+  * JDBC metadata is reached only through `JdbcMetadataProbe`, implemented by `JdbcSession`. Dialects can implement
+  * SchemaIntrospectionSupport for richer metadata.
   */
 object SchemaIntrospection:
 
@@ -18,17 +16,21 @@ object SchemaIntrospection:
       dialect: Dialect
   )(using
       Trace
-  ): ZIO[ConnectionProvider & Scope, SaferisError, Option[DatabaseTable]] =
+  ): ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
     dialect match
       case d: SchemaIntrospectionSupport => d.introspectTable(tableName)
-      case _                             => introspectViaJdbc(tableName)
+      case _                             =>
+        ZIO.serviceWithZIO[SqlSession]:
+          case probe: JdbcMetadataProbe => probe.introspect(tableName)
+          case _                        =>
+            ZIO.fail(SaferisError.Unsupported(s"${dialect.name} schema introspection requires a JDBC session"))
 
   /** Verify a schema against the database using default options. */
   def verify[A](instance: Instance[A])(using
       dialect: Dialect
   )(using
       Trace
-  ): ZIO[ConnectionProvider & Scope, SaferisError, Unit] =
+  ): ZIO[SqlSession, SaferisError, Unit] =
     verifyWith(instance, VerifyOptions.default)
 
   /** Verify a schema against the database with custom options. */
@@ -36,7 +38,7 @@ object SchemaIntrospection:
       dialect: Dialect
   )(using
       Trace
-  ): ZIO[ConnectionProvider & Scope, SaferisError, Unit] =
+  ): ZIO[SqlSession, SaferisError, Unit] =
     for
       dbTableOpt <- introspect(instance.tableName)
       issues = dbTableOpt match
@@ -214,153 +216,4 @@ object SchemaIntrospection:
     val families = Seq(integerTypes, textTypes, numericTypes, boolTypes, timestampTypes, jsonTypes)
     families.exists(family => family.contains(t1) && family.contains(t2))
   end areTypesInSameFamily
-
-  // === JDBC Introspection ===
-
-  private def introspectViaJdbc(tableName: String)(using
-      Trace
-  ): ZIO[ConnectionProvider & Scope, SaferisError, Option[DatabaseTable]] =
-    (for
-      provider <- ZIO.service[ConnectionProvider]
-      conn     <- provider.getConnection
-      result   <- ZIO.attemptBlocking(introspectConnection(conn, tableName))
-    yield result).mapError(SaferisError.fromThrowable(_))
-
-  private def introspectConnection(conn: Connection, tableName: String): Option[DatabaseTable] =
-    val meta   = conn.getMetaData
-    val schema = conn.getSchema
-    val tables = meta.getTables(null, schema, tableName, Array("TABLE"))
-    try
-      if !tables.next() then
-        // Try case-insensitive search
-        val tablesLower = meta.getTables(null, schema, tableName.toLowerCase, Array("TABLE"))
-        try
-          if !tablesLower.next() then
-            val tablesUpper = meta.getTables(null, schema, tableName.toUpperCase, Array("TABLE"))
-            try if !tablesUpper.next() then None else Some(buildTableFromMetadata(meta, schema, tableName.toUpperCase))
-            finally tablesUpper.close()
-          else Some(buildTableFromMetadata(meta, schema, tableName.toLowerCase))
-        finally tablesLower.close()
-      else Some(buildTableFromMetadata(meta, schema, tableName))
-    finally tables.close()
-    end try
-  end introspectConnection
-
-  private def buildTableFromMetadata(meta: DatabaseMetaData, schema: String, tableName: String): DatabaseTable =
-    val columns           = getColumns(meta, schema, tableName)
-    val primaryKeys       = getPrimaryKeys(meta, schema, tableName)
-    val indexes           = getIndexes(meta, schema, tableName, primaryKeys)
-    val uniqueConstraints = getUniqueConstraints(meta, schema, tableName)
-    val foreignKeys       = getForeignKeys(meta, schema, tableName)
-
-    DatabaseTable(tableName, columns, primaryKeys, indexes, uniqueConstraints, foreignKeys)
-
-  private def getColumns(meta: DatabaseMetaData, schema: String, tableName: String): Seq[DatabaseColumn] =
-    val rs      = meta.getColumns(null, schema, tableName, null)
-    val columns = ListBuffer.empty[DatabaseColumn]
-    try
-      while rs.next() do
-        columns += DatabaseColumn(
-          name = rs.getString("COLUMN_NAME"),
-          dataType = rs.getString("TYPE_NAME"),
-          isNullable = rs.getString("IS_NULLABLE") == "YES",
-          isPrimaryKey = false, // Will be set from PK info
-          defaultValue = Option(rs.getString("COLUMN_DEF")),
-          ordinalPosition = rs.getInt("ORDINAL_POSITION"),
-        )
-    finally rs.close()
-    end try
-    columns.toSeq
-  end getColumns
-
-  private def getPrimaryKeys(meta: DatabaseMetaData, schema: String, tableName: String): Seq[String] =
-    val rs   = meta.getPrimaryKeys(null, schema, tableName)
-    val keys = ListBuffer.empty[(String, Int)]
-    try while rs.next() do keys += (rs.getString("COLUMN_NAME") -> rs.getInt("KEY_SEQ"))
-    finally rs.close()
-    keys.sortBy(_._2).map(_._1).toSeq
-
-  private def getIndexes(
-      meta: DatabaseMetaData,
-      schema: String,
-      tableName: String,
-      primaryKeys: Seq[String],
-  ): Seq[DatabaseIndex] =
-    val rs      = meta.getIndexInfo(null, schema, tableName, false, false)
-    val indexes = ListBuffer.empty[(String, String, Boolean, Int)]
-    try
-      while rs.next() do
-        val indexName = rs.getString("INDEX_NAME")
-        val colName   = rs.getString("COLUMN_NAME")
-        if indexName != null && colName != null then
-          indexes += ((indexName, colName, !rs.getBoolean("NON_UNIQUE"), rs.getInt("ORDINAL_POSITION")))
-    finally rs.close()
-
-    indexes
-      .groupBy(_._1)
-      .map { case (name, cols) =>
-        val sortedCols = cols.sortBy(_._4).map(_._2).toSeq
-        val isUnique   = cols.headOption.exists(_._3)
-        DatabaseIndex(name, sortedCols, isUnique, None)
-      }
-      .toSeq
-      .filterNot { idx =>
-        // Filter out primary key index
-        idx.columns.map(_.toLowerCase) == primaryKeys.map(_.toLowerCase)
-      }
-  end getIndexes
-
-  private def getUniqueConstraints(
-      @unused meta: DatabaseMetaData,
-      @unused schema: String,
-      @unused tableName: String,
-  ): Seq[DatabaseUniqueConstraint] =
-    // JDBC doesn't have a direct method for unique constraints separate from indexes
-    // Unique constraints typically show up as unique indexes, handled in getIndexes
-    // Return empty - unique constraints will be detected as unique indexes
-    Seq.empty
-
-  private def getForeignKeys(meta: DatabaseMetaData, schema: String, tableName: String): Seq[DatabaseForeignKey] =
-    val rs  = meta.getImportedKeys(null, schema, tableName)
-    val fks = ListBuffer.empty[(String, String, String, String, String, Int, String, String)]
-    try
-      while rs.next() do
-        fks += ((
-          rs.getString("FK_NAME"),
-          rs.getString("FKCOLUMN_NAME"),
-          rs.getString("PKTABLE_NAME"),
-          rs.getString("PKCOLUMN_NAME"),
-          rs.getShort("DELETE_RULE") match
-            case java.sql.DatabaseMetaData.importedKeyCascade    => "CASCADE"
-            case java.sql.DatabaseMetaData.importedKeySetNull    => "SET NULL"
-            case java.sql.DatabaseMetaData.importedKeySetDefault => "SET DEFAULT"
-            case java.sql.DatabaseMetaData.importedKeyRestrict   => "RESTRICT"
-            case _                                               => "NO ACTION"
-          ,
-          rs.getInt("KEY_SEQ"),
-          rs.getShort("UPDATE_RULE") match
-            case java.sql.DatabaseMetaData.importedKeyCascade    => "CASCADE"
-            case java.sql.DatabaseMetaData.importedKeySetNull    => "SET NULL"
-            case java.sql.DatabaseMetaData.importedKeySetDefault => "SET DEFAULT"
-            case java.sql.DatabaseMetaData.importedKeyRestrict   => "RESTRICT"
-            case _                                               => "NO ACTION"
-          ,
-          rs.getString("FK_NAME"),
-        ))
-    finally rs.close()
-    end try
-
-    fks
-      .groupBy(_._1)
-      .map { case (name, cols) =>
-        val sorted   = cols.sortBy(_._6)
-        val fromCols = sorted.map(_._2).toSeq
-        val toTable  = sorted.headOption.map(_._3).getOrElse("")
-        val toCols   = sorted.map(_._4).toSeq
-        val onDelete = sorted.headOption.map(_._5).getOrElse("NO ACTION")
-        val onUpdate = sorted.headOption.map(_._7).getOrElse("NO ACTION")
-        DatabaseForeignKey(name, fromCols, toTable, toCols, onDelete, onUpdate)
-      }
-      .toSeq
-  end getForeignKeys
 end SchemaIntrospection

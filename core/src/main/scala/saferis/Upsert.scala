@@ -91,8 +91,7 @@ final case class UpsertConflictReady[A: Table](
       allColumns,
       entity,
       conflictColumns,
-      updateColumns.sql,
-      updateColumns.writes,
+      updateColumns,
       doNothing = false,
     )
   end doUpdateAll
@@ -116,12 +115,16 @@ final case class UpsertDoNothingReady[A: Table](
 ):
   /** Build the INSERT ... ON CONFLICT DO NOTHING SQL */
   transparent inline def build(using dialect: Dialect & UpsertSupport): SqlFragment =
-    val table        = summon[Table[A]]
-    val insertCols   = table.insertColumnsSql.sql
-    val insertValues = table.insertPlaceholdersSql(entity)
-    val insertClause = s"$insertCols values ${insertValues.sql}"
-    val sql          = dialect.upsertDoNothingSql(tableName, insertClause, conflictColumns)
-    SqlFragment(sql, insertValues.writes)
+    val table     = summon[Table[A]]
+    val conflicts = conflictColumns.mkString(", ")
+    val _         = dialect.upsertDoNothingSql(tableName, "", conflictColumns)
+    SqlFragment
+      .text(s"insert into $tableName ")
+      .append(table.insertColumnsSql)
+      .append(SqlFragment.text(" values "))
+      .append(table.insertPlaceholdersSql(entity))
+      .append(SqlFragment.text(s" on conflict ($conflicts) do nothing"))
+  end build
 end UpsertDoNothingReady
 
 // ============================================================================
@@ -135,8 +138,7 @@ final case class UpsertActionReady[A: Table](
     private[saferis] val allColumns: Vector[Column[?]],
     private[saferis] val entity: A,
     private[saferis] val conflictColumns: Vector[String],
-    private[saferis] val updateColumnsSql: String,
-    private[saferis] val updateWrites: Seq[Write[?]],
+    private[saferis] val updateColumns: SqlFragment,
     private[saferis] val doNothing: Boolean,
 ):
   /** Add a WHERE clause for conditional update (starts the condition) */
@@ -147,16 +149,21 @@ final case class UpsertActionReady[A: Table](
 
   /** Build without WHERE clause */
   transparent inline def build(using dialect: Dialect & UpsertSupport): SqlFragment =
-    val table        = summon[Table[A]]
-    val insertCols   = table.insertColumnsSql.sql
-    val insertValues = table.insertPlaceholdersSql(entity)
-    val insertClause = s"$insertCols values ${insertValues.sql}"
-    val sql          = dialect.upsertSql(tableName, insertClause, conflictColumns, updateColumnsSql)
-    SqlFragment(sql, insertValues.writes ++ updateWrites)
+    val table     = summon[Table[A]]
+    val conflicts = conflictColumns.mkString(", ")
+    val _         = dialect.upsertSql(tableName, "", conflictColumns, "")
+    SqlFragment
+      .text(s"insert into $tableName ")
+      .append(table.insertColumnsSql)
+      .append(SqlFragment.text(" values "))
+      .append(table.insertPlaceholdersSql(entity))
+      .append(SqlFragment.text(s" on conflict ($conflicts) do update set "))
+      .append(updateColumns)
+  end build
 
   /** Build with RETURNING clause (no WHERE) */
   transparent inline def returning(using dialect: Dialect & UpsertSupport & ReturningSupport): ReturningQuery[A] =
-    ReturningQuery(build :+ SqlFragment(" returning *", Seq.empty))
+    ReturningQuery(build :+ SqlFragment.text(" returning *"))
 end UpsertActionReady
 
 // ============================================================================
@@ -169,8 +176,8 @@ final case class UpsertWhereBuilder[A: Table, T](
     alias: Alias,
     column: Column[T],
 ):
-  private def complete(operator: Operator, write: Write[?]): UpsertWhereReady[A] =
-    val condition = LiteralCondition(alias, column, operator, write)
+  private def complete(operator: Operator, value: SqlValue): UpsertWhereReady[A] =
+    val condition = LiteralCondition(alias, column, operator, value)
     val fragment  = Condition.toSqlFragment(Vector(condition))
     UpsertWhereReady(action, Vector(fragment))
 
@@ -181,27 +188,27 @@ final case class UpsertWhereBuilder[A: Table, T](
 
   /** Equals comparison */
   def eq(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Eq, enc(value))
+    complete(Operator.Eq, enc.encode(value))
 
   /** Not equals comparison */
   def neq(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Neq, enc(value))
+    complete(Operator.Neq, enc.encode(value))
 
   /** Less than comparison */
   def lt(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Lt, enc(value))
+    complete(Operator.Lt, enc.encode(value))
 
   /** Less than or equal comparison */
   def lte(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Lte, enc(value))
+    complete(Operator.Lte, enc.encode(value))
 
   /** Greater than comparison */
   def gt(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Gt, enc(value))
+    complete(Operator.Gt, enc.encode(value))
 
   /** Greater than or equal comparison */
   def gte(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Gte, enc(value))
+    complete(Operator.Gte, enc.encode(value))
 
   /** IS NULL check */
   def isNull: UpsertWhereReady[A] =
@@ -214,13 +221,13 @@ final case class UpsertWhereBuilder[A: Table, T](
   /** Compare to EXCLUDED pseudo-table value (same column) */
   def eqExcluded: UpsertWhereReady[A] =
     val condition = ExcludedCondition(alias, column, Operator.Eq, column)
-    val fragment  = SqlFragment(condition.toSql, Seq.empty)
+    val fragment  = condition.toFragment
     UpsertWhereReady(action, Vector(fragment))
 
   /** Compare to EXCLUDED pseudo-table with not equal */
   def neqExcluded: UpsertWhereReady[A] =
     val condition = ExcludedCondition(alias, column, Operator.Neq, column)
-    val fragment  = SqlFragment(condition.toSql, Seq.empty)
+    val fragment  = condition.toFragment
     UpsertWhereReady(action, Vector(fragment))
 
 end UpsertWhereBuilder
@@ -244,32 +251,26 @@ final case class UpsertWhereReady[A: Table](
 
   /** Build the complete upsert SQL */
   transparent inline def build(using dialect: Dialect & UpsertSupport): SqlFragment =
-    val table        = summon[Table[A]]
-    val insertCols   = table.insertColumnsSql.sql
-    val insertValues = table.insertPlaceholdersSql(action.entity)
-    val insertClause = s"$insertCols values ${insertValues.sql}"
-
-    // Build WHERE clause from predicates
-    val whereJoined = if wherePredicates.nonEmpty then
+    val table     = summon[Table[A]]
+    val conflicts = action.conflictColumns.mkString(", ")
+    val _         = dialect.upsertWithWhereSql(action.tableName, "", action.conflictColumns, "", None)
+    val base      =
+      SqlFragment
+        .text(s"insert into ${action.tableName} ")
+        .append(table.insertColumnsSql)
+        .append(SqlFragment.text(" values "))
+        .append(table.insertPlaceholdersSql(action.entity))
+        .append(SqlFragment.text(s" on conflict ($conflicts) do update set "))
+        .append(action.updateColumns)
+    if wherePredicates.isEmpty then base
+    else
       val joined = Placeholder.join(wherePredicates, " or ")
-      Some(joined.sql)
-    else None
-
-    val sql = dialect.upsertWithWhereSql(
-      action.tableName,
-      insertClause,
-      action.conflictColumns,
-      action.updateColumnsSql,
-      whereJoined,
-    )
-
-    val allWrites = insertValues.writes ++ action.updateWrites ++ wherePredicates.flatMap(_.writes)
-    SqlFragment(sql, allWrites)
+      base.append(SqlFragment.text(" where ")).append(SqlFragment(joined))
   end build
 
   /** Build with RETURNING clause */
   transparent inline def returning(using dialect: Dialect & UpsertSupport & ReturningSupport): ReturningQuery[A] =
-    ReturningQuery(build :+ SqlFragment(" returning *", Seq.empty))
+    ReturningQuery(build :+ SqlFragment.text(" returning *"))
 
 end UpsertWhereReady
 
@@ -301,8 +302,8 @@ final case class UpsertOrBuilder[A: Table, T](
     alias: Alias,
     column: Column[T],
 ):
-  private def complete(operator: Operator, write: Write[?]): UpsertWhereReady[A] =
-    val condition = LiteralCondition(alias, column, operator, write)
+  private def complete(operator: Operator, value: SqlValue): UpsertWhereReady[A] =
+    val condition = LiteralCondition(alias, column, operator, value)
     val fragment  = Condition.toSqlFragment(Vector(condition))
     ready.copy(wherePredicates = ready.wherePredicates :+ fragment)
 
@@ -313,27 +314,27 @@ final case class UpsertOrBuilder[A: Table, T](
 
   /** Equals comparison */
   def eq(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Eq, enc(value))
+    complete(Operator.Eq, enc.encode(value))
 
   /** Not equals comparison */
   def neq(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Neq, enc(value))
+    complete(Operator.Neq, enc.encode(value))
 
   /** Less than comparison */
   def lt(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Lt, enc(value))
+    complete(Operator.Lt, enc.encode(value))
 
   /** Less than or equal comparison */
   def lte(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Lte, enc(value))
+    complete(Operator.Lte, enc.encode(value))
 
   /** Greater than comparison */
   def gt(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Gt, enc(value))
+    complete(Operator.Gt, enc.encode(value))
 
   /** Greater than or equal comparison */
   def gte(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Gte, enc(value))
+    complete(Operator.Gte, enc.encode(value))
 
   /** IS NULL check */
   def isNull: UpsertWhereReady[A] =
@@ -346,13 +347,13 @@ final case class UpsertOrBuilder[A: Table, T](
   /** Compare to EXCLUDED pseudo-table value (same column) */
   def eqExcluded: UpsertWhereReady[A] =
     val condition = ExcludedCondition(alias, column, Operator.Eq, column)
-    val fragment  = SqlFragment(condition.toSql, Seq.empty)
+    val fragment  = condition.toFragment
     ready.copy(wherePredicates = ready.wherePredicates :+ fragment)
 
   /** Compare to EXCLUDED pseudo-table with not equal */
   def neqExcluded: UpsertWhereReady[A] =
     val condition = ExcludedCondition(alias, column, Operator.Neq, column)
-    val fragment  = SqlFragment(condition.toSql, Seq.empty)
+    val fragment  = condition.toFragment
     ready.copy(wherePredicates = ready.wherePredicates :+ fragment)
 
 end UpsertOrBuilder
@@ -367,10 +368,10 @@ final case class UpsertAndBuilder[A: Table, T](
     alias: Alias,
     column: Column[T],
 ):
-  private def complete(operator: Operator, write: Write[?]): UpsertWhereReady[A] =
+  private def complete(operator: Operator, value: SqlValue): UpsertWhereReady[A] =
     // For AND, we need to group the current predicates and add a new one
     // This is simplified - full implementation would track AND/OR grouping
-    val condition = LiteralCondition(alias, column, operator, write)
+    val condition = LiteralCondition(alias, column, operator, value)
     val fragment  = Condition.toSqlFragment(Vector(condition))
     ready.copy(wherePredicates = ready.wherePredicates :+ fragment)
 
@@ -381,27 +382,27 @@ final case class UpsertAndBuilder[A: Table, T](
 
   /** Equals comparison */
   def eq(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Eq, enc(value))
+    complete(Operator.Eq, enc.encode(value))
 
   /** Not equals comparison */
   def neq(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Neq, enc(value))
+    complete(Operator.Neq, enc.encode(value))
 
   /** Less than comparison */
   def lt(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Lt, enc(value))
+    complete(Operator.Lt, enc.encode(value))
 
   /** Less than or equal comparison */
   def lte(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Lte, enc(value))
+    complete(Operator.Lte, enc.encode(value))
 
   /** Greater than comparison */
   def gt(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Gt, enc(value))
+    complete(Operator.Gt, enc.encode(value))
 
   /** Greater than or equal comparison */
   def gte(value: T)(using enc: Encoder[T]): UpsertWhereReady[A] =
-    complete(Operator.Gte, enc(value))
+    complete(Operator.Gte, enc.encode(value))
 
   /** IS NULL check */
   def isNull: UpsertWhereReady[A] =
@@ -414,7 +415,7 @@ final case class UpsertAndBuilder[A: Table, T](
   /** Compare to EXCLUDED pseudo-table value (same column) */
   def eqExcluded: UpsertWhereReady[A] =
     val condition = ExcludedCondition(alias, column, Operator.Eq, column)
-    val fragment  = SqlFragment(condition.toSql, Seq.empty)
+    val fragment  = condition.toFragment
     ready.copy(wherePredicates = ready.wherePredicates :+ fragment)
 
 end UpsertAndBuilder

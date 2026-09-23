@@ -2,8 +2,6 @@ package saferis.sqlite
 
 import saferis.*
 
-import java.sql.Types
-
 /** SQLite dialect implementation providing SQLite-specific type mappings and SQL generation.
   *
   * SQLite characteristics:
@@ -17,27 +15,14 @@ object SQLiteDialect extends Dialect with ReturningSupport with CommonTableExpre
   val name: String = "SQLite"
 
   // === Type Mappings ===
-  def columnType(jdbcType: Int): String = jdbcType match
-    case Types.VARCHAR     => "text"
-    case Types.LONGVARCHAR => "text"
-    case Types.CHAR        => "text"
-    case Types.CLOB        => "text"
-    case Types.INTEGER     => "integer"
-    case Types.BIGINT      => "integer"
-    case Types.SMALLINT    => "integer"
-    case Types.TINYINT     => "integer"
-    case Types.DOUBLE      => "real"
-    case Types.FLOAT       => "real"
-    case Types.DECIMAL     => "real"
-    case Types.NUMERIC     => "real"
-    case Types.BOOLEAN     => "integer"
-    case Types.DATE        => "text"
-    case Types.TIME        => "text"
-    case Types.TIMESTAMP   => "text"
-    case Types.BLOB        => "blob"
-    case Types.BINARY      => "blob"
-    case Types.VARBINARY   => "blob"
-    case _                 => "text"
+  def columnType(tpe: PgType): String = tpe match
+    case PgType.Bool                                    => "integer"
+    case PgType.Int2 | PgType.Int4 | PgType.Int8        => "integer"
+    case PgType.Float4 | PgType.Float8 | PgType.Numeric => "real"
+    case PgType.Bytea                                   => "blob"
+    case PgType.VarChar | PgType.Text | PgType.Date | PgType.Time | PgType.Timestamp | PgType.Timestamptz |
+        PgType.Jsonb | PgType.Uuid =>
+      "text"
 
   // === Auto-increment Syntax ===
   override def autoIncrementClause(isGenerated: Boolean, isKey: Boolean, hasDefault: Boolean): String =

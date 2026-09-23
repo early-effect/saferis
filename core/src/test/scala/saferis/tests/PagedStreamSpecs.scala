@@ -9,7 +9,7 @@ import zio.*
 import zio.test.*
 
 object PagedStreamSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default >>> Transactor.default
+  val xaLayer = DataSourceProvider.default
 
   @tableName("paged_stream_users")
   final case class PagedUser(@generated @key id: Int, name: String, age: Int) derives Table
@@ -20,11 +20,10 @@ object PagedStreamSpecs extends ZIOSpecDefault:
     suite("pagedStream")(
       test("returns pages with correct size") {
         for
-          xa    <- ZIO.service[Transactor]
-          _     <- xa.run(dropTable[PagedUser](ifExists = true))
-          _     <- xa.run(createTable[PagedUser]())
-          _     <- ZIO.foreachDiscard(1 to 10)(i => xa.run(insert(PagedUser(0, s"User$i", 20 + i))))
-          pages <- xa.run:
+          _     <- (dropTable[PagedUser](ifExists = true))
+          _     <- (createTable[PagedUser]())
+          _     <- ZIO.foreachDiscard(1 to 10)(i => (insert(PagedUser(0, s"User$i", 20 + i))))
+          pages <-
             Query[PagedUser].all.pagedStream(_.id, pageSize = 3).runCollect
         yield assertTrue(pages.size == 4) &&
           assertTrue(pages(0).items.size == 3) &&
@@ -34,16 +33,15 @@ object PagedStreamSpecs extends ZIOSpecDefault:
       },
       test("provides correct cursor for checkpointing") {
         for
-          xa    <- ZIO.service[Transactor]
-          _     <- xa.run(dropTable[PagedUser](ifExists = true))
-          _     <- xa.run(createTable[PagedUser]())
-          _     <- ZIO.foreachDiscard(1 to 15)(i => xa.run(insert(PagedUser(0, s"User$i", 20 + i))))
-          pages <- xa.run:
+          _     <- (dropTable[PagedUser](ifExists = true))
+          _     <- (createTable[PagedUser]())
+          _     <- ZIO.foreachDiscard(1 to 15)(i => (insert(PagedUser(0, s"User$i", 20 + i))))
+          pages <-
             Query[PagedUser].all.pagedStream(_.id, pageSize = 5).runCollect
           // Get cursor from first page
           firstPageCursor = pages(0).cursor
           // Resume from cursor
-          remainingPages <- xa.run:
+          remainingPages <-
             Query[PagedUser].all.pagedStream(_.id, pageSize = 5, startAfter = firstPageCursor).runCollect
         yield assertTrue(pages.size == 3) &&
           assertTrue(firstPageCursor.isDefined) &&
@@ -52,11 +50,10 @@ object PagedStreamSpecs extends ZIOSpecDefault:
       },
       test("page numbers are correct") {
         for
-          xa    <- ZIO.service[Transactor]
-          _     <- xa.run(dropTable[PagedUser](ifExists = true))
-          _     <- xa.run(createTable[PagedUser]())
-          _     <- ZIO.foreachDiscard(1 to 25)(i => xa.run(insert(PagedUser(0, s"User$i", 20 + i))))
-          pages <- xa.run:
+          _     <- (dropTable[PagedUser](ifExists = true))
+          _     <- (createTable[PagedUser]())
+          _     <- ZIO.foreachDiscard(1 to 25)(i => (insert(PagedUser(0, s"User$i", 20 + i))))
+          pages <-
             Query[PagedUser].all.pagedStream(_.id, pageSize = 10).runCollect
         yield assertTrue(pages(0).pageNumber == 0) &&
           assertTrue(pages(1).pageNumber == 1) &&
@@ -64,11 +61,10 @@ object PagedStreamSpecs extends ZIOSpecDefault:
       },
       test("works with WHERE clauses") {
         for
-          xa    <- ZIO.service[Transactor]
-          _     <- xa.run(dropTable[PagedUser](ifExists = true))
-          _     <- xa.run(createTable[PagedUser]())
-          _     <- ZIO.foreachDiscard(1 to 30)(i => xa.run(insert(PagedUser(0, s"User$i", 20 + i))))
-          pages <- xa.run:
+          _     <- (dropTable[PagedUser](ifExists = true))
+          _     <- (createTable[PagedUser]())
+          _     <- ZIO.foreachDiscard(1 to 30)(i => (insert(PagedUser(0, s"User$i", 20 + i))))
+          pages <-
             Query[PagedUser]
               .where(_.age)
               .gt(35)
@@ -78,10 +74,9 @@ object PagedStreamSpecs extends ZIOSpecDefault:
       },
       test("empty result returns empty stream") {
         for
-          xa    <- ZIO.service[Transactor]
-          _     <- xa.run(dropTable[PagedUser](ifExists = true))
-          _     <- xa.run(createTable[PagedUser]())
-          pages <- xa.run:
+          _     <- (dropTable[PagedUser](ifExists = true))
+          _     <- (createTable[PagedUser]())
+          pages <-
             Query[PagedUser].all.pagedStream(_.id, pageSize = 10).runCollect
         yield assertTrue(pages.isEmpty)
       },
@@ -89,21 +84,19 @@ object PagedStreamSpecs extends ZIOSpecDefault:
     suite("pagedStream.items extension")(
       test("flattens pages to individual items") {
         for
-          xa    <- ZIO.service[Transactor]
-          _     <- xa.run(dropTable[PagedUser](ifExists = true))
-          _     <- xa.run(createTable[PagedUser]())
-          _     <- ZIO.foreachDiscard(1 to 15)(i => xa.run(insert(PagedUser(0, s"User$i", 20 + i))))
-          items <- xa.run:
+          _     <- (dropTable[PagedUser](ifExists = true))
+          _     <- (createTable[PagedUser]())
+          _     <- ZIO.foreachDiscard(1 to 15)(i => (insert(PagedUser(0, s"User$i", 20 + i))))
+          items <-
             Query[PagedUser].all.pagedStream(_.id, pageSize = 5).items.runCollect
         yield assertTrue(items.size == 15)
       },
       test("items are emitted in order") {
         for
-          xa    <- ZIO.service[Transactor]
-          _     <- xa.run(dropTable[PagedUser](ifExists = true))
-          _     <- xa.run(createTable[PagedUser]())
-          _     <- ZIO.foreachDiscard(1 to 10)(i => xa.run(insert(PagedUser(0, s"User$i", 20 + i))))
-          items <- xa.run:
+          _     <- (dropTable[PagedUser](ifExists = true))
+          _     <- (createTable[PagedUser]())
+          _     <- ZIO.foreachDiscard(1 to 10)(i => (insert(PagedUser(0, s"User$i", 20 + i))))
+          items <-
             Query[PagedUser].all.pagedStream(_.id, pageSize = 3).items.runCollect
           ids = items.map(_.id)
         yield assertTrue(ids == ids.sorted)
@@ -112,12 +105,11 @@ object PagedStreamSpecs extends ZIOSpecDefault:
     suite("pagedStream.itemsWithCheckpoint extension")(
       test("calls checkpoint callback after each page") {
         for
-          xa          <- ZIO.service[Transactor]
-          _           <- xa.run(dropTable[PagedUser](ifExists = true))
-          _           <- xa.run(createTable[PagedUser]())
-          _           <- ZIO.foreachDiscard(1 to 15)(i => xa.run(insert(PagedUser(0, s"User$i", 20 + i))))
+          _           <- (dropTable[PagedUser](ifExists = true))
+          _           <- (createTable[PagedUser]())
+          _           <- ZIO.foreachDiscard(1 to 15)(i => (insert(PagedUser(0, s"User$i", 20 + i))))
           checkpoints <- Ref.make(Chunk.empty[Option[Int]])
-          _           <- xa.run:
+          _           <-
             Query[PagedUser].all
               .pagedStream(_.id, pageSize = 5)
               .itemsWithCheckpoint(cursor => checkpoints.update(_ :+ cursor))
@@ -129,47 +121,43 @@ object PagedStreamSpecs extends ZIOSpecDefault:
     suite("seekingStream")(
       test("streams individual rows") {
         for
-          xa    <- ZIO.service[Transactor]
-          _     <- xa.run(dropTable[PagedUser](ifExists = true))
-          _     <- xa.run(createTable[PagedUser]())
-          _     <- ZIO.foreachDiscard(1 to 25)(i => xa.run(insert(PagedUser(0, s"User$i", 20 + i))))
-          items <- xa.run:
+          _     <- (dropTable[PagedUser](ifExists = true))
+          _     <- (createTable[PagedUser]())
+          _     <- ZIO.foreachDiscard(1 to 25)(i => (insert(PagedUser(0, s"User$i", 20 + i))))
+          items <-
             Query[PagedUser].all.seekingStream(_.id, batchSize = 10).runCollect
         yield assertTrue(items.size == 25)
       },
       test("respects startAfter cursor") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[PagedUser](ifExists = true))
-          _  <- xa.run(createTable[PagedUser]())
-          _  <- ZIO.foreachDiscard(1 to 20)(i => xa.run(insert(PagedUser(0, s"User$i", 20 + i))))
+          _ <- (dropTable[PagedUser](ifExists = true))
+          _ <- (createTable[PagedUser]())
+          _ <- ZIO.foreachDiscard(1 to 20)(i => (insert(PagedUser(0, s"User$i", 20 + i))))
           // Get first 5 items to find a cursor
-          firstBatch <- xa.run:
+          firstBatch <-
             Query[PagedUser].all.orderBy(userTable.id.asc).limit(5).query[PagedUser]
           cursor = firstBatch.lastOption.map(_.id)
           // Resume from cursor
-          remaining <- xa.run:
+          remaining <-
             Query[PagedUser].all.seekingStream(_.id, batchSize = 10, startAfter = cursor).runCollect
         yield assertTrue(remaining.size == 15) && // 20 - 5 = 15
           assertTrue(remaining.forall(_.id > cursor.get))
       },
       test("works with take() for partial consumption") {
         for
-          xa    <- ZIO.service[Transactor]
-          _     <- xa.run(dropTable[PagedUser](ifExists = true))
-          _     <- xa.run(createTable[PagedUser]())
-          _     <- ZIO.foreachDiscard(1 to 100)(i => xa.run(insert(PagedUser(0, s"User$i", 20 + i))))
-          items <- xa.run:
+          _     <- (dropTable[PagedUser](ifExists = true))
+          _     <- (createTable[PagedUser]())
+          _     <- ZIO.foreachDiscard(1 to 100)(i => (insert(PagedUser(0, s"User$i", 20 + i))))
+          items <-
             Query[PagedUser].all.seekingStream(_.id, batchSize = 10).take(15).runCollect
         yield assertTrue(items.size == 15)
       },
       test("works with WHERE clauses") {
         for
-          xa    <- ZIO.service[Transactor]
-          _     <- xa.run(dropTable[PagedUser](ifExists = true))
-          _     <- xa.run(createTable[PagedUser]())
-          _     <- ZIO.foreachDiscard(1 to 30)(i => xa.run(insert(PagedUser(0, s"User$i", 20 + i))))
-          items <- xa.run:
+          _     <- (dropTable[PagedUser](ifExists = true))
+          _     <- (createTable[PagedUser]())
+          _     <- ZIO.foreachDiscard(1 to 30)(i => (insert(PagedUser(0, s"User$i", 20 + i))))
+          items <-
             Query[PagedUser]
               .where(_.age)
               .lte(35)
@@ -181,29 +169,27 @@ object PagedStreamSpecs extends ZIOSpecDefault:
     suite("Resource Safety")(
       test("connection released between pages") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[PagedUser](ifExists = true))
-          _  <- xa.run(createTable[PagedUser]())
-          _  <- ZIO.foreachDiscard(1 to 30)(i => xa.run(insert(PagedUser(0, s"User$i", 20 + i))))
+          _ <- (dropTable[PagedUser](ifExists = true))
+          _ <- (createTable[PagedUser]())
+          _ <- ZIO.foreachDiscard(1 to 30)(i => (insert(PagedUser(0, s"User$i", 20 + i))))
           // Run paged stream
-          _ <- xa.run:
+          _ <-
             Query[PagedUser].all.pagedStream(_.id, pageSize = 10).runDrain
           // If connection wasn't released, this would fail
-          count <- xa.run:
+          count <-
             Query[PagedUser].all.query[PagedUser].map(_.size)
         yield assertTrue(count == 30)
       },
       test("connection released on early termination") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[PagedUser](ifExists = true))
-          _  <- xa.run(createTable[PagedUser]())
-          _  <- ZIO.foreachDiscard(1 to 100)(i => xa.run(insert(PagedUser(0, s"User$i", 20 + i))))
+          _ <- (dropTable[PagedUser](ifExists = true))
+          _ <- (createTable[PagedUser]())
+          _ <- ZIO.foreachDiscard(1 to 100)(i => (insert(PagedUser(0, s"User$i", 20 + i))))
           // Take only first page
-          _ <- xa.run:
+          _ <-
             Query[PagedUser].all.pagedStream(_.id, pageSize = 10).take(1).runDrain
           // If connection wasn't released, this would fail
-          count <- xa.run:
+          count <-
             Query[PagedUser].all.query[PagedUser].map(_.size)
         yield assertTrue(count == 100)
       },

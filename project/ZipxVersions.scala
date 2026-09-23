@@ -38,7 +38,7 @@ object MyVersions extends ZipxVersions:
 
   private def provided(lib: Lib): Lib = lib.copy(config = Some("provided"))
 
-  def coreLib = library(provided(zio), provided(zioStreams), provided(zioJson))
+  def coreLib = library(provided(zio), provided(zioStreams), provided(zioJson), postgresql)
   def coreTest = library(
     zioLoggingSlf4j.test,
     zioTest.test,

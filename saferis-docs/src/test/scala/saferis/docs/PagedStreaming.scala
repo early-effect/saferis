@@ -1,7 +1,6 @@
 package saferis.docs
 
 import saferis.*
-import saferis.docs.DocsTransactor.xa
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.*
@@ -59,14 +58,14 @@ query.""",
     section("pagedStream - Cursor-Based Pagination")(
       md"""Use `pagedStream` to get a stream of `Page[A, K]` objects, each containing a batch of items and a cursor for checkpointing:""",
       exampleZIO {
-        xa.run(for
+        (for
           _ <- seedEvents
           // Fetch in pages of 2
           pages <- Query[PagedEvent].all
             .pagedStream(_.id, pageSize = 2)
             .runCollect
-        yield pages.map(p => s"Page ${p.pageNumber}: ${p.items.size} items, cursor=${p.cursor}"))
-          .either
+        yield pages.map(p => s"Page ${p.pageNumber}: ${p.items.size} items, cursor=${p.cursor}")).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(pages) =>
           assertTrue(
@@ -87,7 +86,7 @@ The stream ends after a partial page (fewer than `pageSize` items) or an empty f
     section("Checkpointing for Resumable Processing")(
       md"""The cursor in each page enables resumable processing - save the cursor, and if processing fails, resume from where you left off:""",
       exampleZIO {
-        xa.run(for
+        (for
           _ <- seedEvents
           // Simulate processing with checkpoint storage
           checkpoint <- Ref.make(Option.empty[Int])
@@ -100,8 +99,8 @@ The stream ends after a partial page (fewer than `pageSize` items) or an empty f
 
           // Get final checkpoint
           finalCursor <- checkpoint.get
-        yield s"Final cursor: $finalCursor")
-          .either
+        yield s"Final cursor: $finalCursor").either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(msg) => assertTrue(msg.startsWith("Final cursor: Some("))
         case Left(err)  => assertTrue(false).label(err.message)
@@ -110,7 +109,7 @@ The stream ends after a partial page (fewer than `pageSize` items) or an empty f
     section("Resuming from a Checkpoint")(
       md"""Use `startAfter` to resume processing from a saved cursor:""",
       exampleZIO {
-        xa.run(for
+        (for
           _ <- seedEvents
           // First, process first page only
           firstPage <- Query[PagedEvent].all
@@ -124,8 +123,8 @@ The stream ends after a partial page (fewer than `pageSize` items) or an empty f
           remaining <- Query[PagedEvent].all
             .pagedStream(_.id, pageSize = 2, startAfter = savedCursor)
             .runCollect
-        yield (s"Saved cursor: $savedCursor", s"Remaining pages: ${remaining.size}"))
-          .either
+        yield (s"Saved cursor: $savedCursor", s"Remaining pages: ${remaining.size}")).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right((saved, remaining)) =>
           assertTrue(saved.startsWith("Saved cursor: Some("), remaining == "Remaining pages: 2")
@@ -135,14 +134,14 @@ The stream ends after a partial page (fewer than `pageSize` items) or an empty f
     section("seekingStream - Row-by-Row with Batched Fetching")(
       md"""If you don't need page metadata, use `seekingStream` to get individual items while still releasing connections between batches:""",
       exampleZIO {
-        xa.run(for
+        (for
           _      <- seedEvents
           result <- Query[PagedEvent].all
             .seekingStream(_.id, batchSize = 2)
             .runCollect
             .map(items => s"Got ${items.size} items")
-        yield result)
-          .either
+        yield result).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(result) => assertTrue(result == "Got 5 items")
         case Left(err)     => assertTrue(false).label(err.message)
@@ -151,15 +150,15 @@ The stream ends after a partial page (fewer than `pageSize` items) or an empty f
     section("Flattening Pages to Items")(
       md"""Use the `.items` extension to flatten a paged stream to individual items:""",
       exampleZIO {
-        xa.run(for
+        (for
           _      <- seedEvents
           result <- Query[PagedEvent].all
             .pagedStream(_.id, pageSize = 2)
             .items // Flatten to individual items
             .runCollect
             .map(items => s"Got ${items.size} items")
-        yield result)
-          .either
+        yield result).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(result) => assertTrue(result == "Got 5 items")
         case Left(err)     => assertTrue(false).label(err.message)
@@ -168,7 +167,7 @@ The stream ends after a partial page (fewer than `pageSize` items) or an empty f
     section("Items with Checkpoint Callback")(
       md"""Use `.itemsWithCheckpoint` to process items individually while receiving a callback after each page completes:""",
       exampleZIO {
-        xa.run(for
+        (for
           _           <- seedEvents
           checkpoints <- Ref.make(Chunk.empty[Option[Int]])
 
@@ -178,8 +177,8 @@ The stream ends after a partial page (fewer than `pageSize` items) or an empty f
             .runCollect
 
           recorded <- checkpoints.get
-        yield (s"Processed ${items.size} items", s"Checkpoints: ${recorded.toList}"))
-          .either
+        yield (s"Processed ${items.size} items", s"Checkpoints: ${recorded.toList}")).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right((processed, checkpoints)) =>
           assertTrue(
@@ -202,7 +201,7 @@ The stream ends after a partial page (fewer than `pageSize` items) or an empty f
     section("Combining with WHERE Clauses")(
       md"""Paged streaming works with all query builder methods:""",
       exampleZIO {
-        xa.run(for
+        (for
           _      <- seedEvents
           result <- Query[PagedEvent]
             .where(_.processed)
@@ -211,8 +210,8 @@ The stream ends after a partial page (fewer than `pageSize` items) or an empty f
             .items
             .runCollect
             .map(items => s"Unprocessed: ${items.size}")
-        yield result)
-          .either
+        yield result).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(result) => assertTrue(result == "Unprocessed: 5")
         case Left(err)     => assertTrue(false).label(err.message)
@@ -223,7 +222,7 @@ The stream ends after a partial page (fewer than `pageSize` items) or an empty f
       exampleZIO {
         // The xa.run workflow fails with SaferisError; the final console print is a
         // separate effect, so we sequence it after the run with *>.
-        (xa.run(for
+        ((for
           _ <- ddl.createTable[LargeRow](ifNotExists = true)
           _ <- ddl.truncateTable[LargeRow]()
           _ <- ZIO.foreachDiscard(1 to 5)(i => dml.insert(LargeRow(-1, s"row-$i")))
@@ -234,6 +233,7 @@ The stream ends after a partial page (fewer than `pageSize` items) or an empty f
             .itemsWithCheckpoint(cursor => Console.printLine(s"Checkpoint: $cursor").orDie)
             .foreach(processRow)
         yield ()) *> Console.printLine("Processed all rows")).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(_)  => assertTrue(true)
         case Left(err) => assertTrue(false).label(err.toString)

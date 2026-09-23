@@ -2,8 +2,6 @@ package saferis.spark
 
 import saferis.*
 
-import java.sql.Types
-
 given Dialect = SparkDialect
 
 /** Spark/Databricks/Hive dialect implementation
@@ -24,52 +22,23 @@ object SparkDialect
 
   val name: String = "Spark SQL"
 
-  def columnType(jdbcType: Int): String = jdbcType match
-    // String types - Spark uses STRING instead of VARCHAR
-    case Types.VARCHAR     => "string"
-    case Types.CHAR        => "string"
-    case Types.LONGVARCHAR => "string"
-    case Types.CLOB        => "string"
-
-    // Integer types
-    case Types.TINYINT  => "tinyint"
-    case Types.SMALLINT => "smallint"
-    case Types.INTEGER  => "int"
-    case Types.BIGINT   => "bigint"
-
-    // Floating point types
-    case Types.FLOAT   => "float"
-    case Types.DOUBLE  => "double"
-    case Types.REAL    => "float"
-    case Types.DECIMAL => "decimal(10,0)"
-    case Types.NUMERIC => "decimal(10,0)"
-
-    // Boolean type
-    case Types.BOOLEAN => "boolean"
-    case Types.BIT     => "boolean"
-
-    // Date and time types
-    case Types.DATE                    => "date"
-    case Types.TIME                    => "timestamp" // Spark doesn't have separate TIME type
-    case Types.TIMESTAMP               => "timestamp"
-    case Types.TIMESTAMP_WITH_TIMEZONE => "timestamp" // Spark stores timestamps in UTC
-
-    // Binary types
-    case Types.BINARY        => "binary"
-    case Types.VARBINARY     => "binary"
-    case Types.LONGVARBINARY => "binary"
-    case Types.BLOB          => "binary"
-
-    // Complex types
-    case Types.DATALINK => "string" // URLs stored as string
-    case Types.ARRAY    => "array<string>"
-    case Types.STRUCT   => "struct<>"
-    case Types.OTHER    => "string" // Fallback
-
-    // Fallback for unknown types
-    case other =>
-      try java.sql.JDBCType.valueOf(other).getName.toLowerCase
-      catch case _: IllegalArgumentException => "string"
+  def columnType(tpe: PgType): String = tpe match
+    case PgType.Bool        => "boolean"
+    case PgType.Int2        => "smallint"
+    case PgType.Int4        => "int"
+    case PgType.Int8        => "bigint"
+    case PgType.Float4      => "float"
+    case PgType.Float8      => "double"
+    case PgType.Numeric     => "decimal(10,0)"
+    case PgType.VarChar     => "string"
+    case PgType.Text        => "string"
+    case PgType.Bytea       => "binary"
+    case PgType.Date        => "date"
+    case PgType.Time        => "timestamp"
+    case PgType.Timestamp   => "timestamp"
+    case PgType.Timestamptz => "timestamp"
+    case PgType.Jsonb       => "string"
+    case PgType.Uuid        => "string"
 
   // === Spark SQL Auto-increment and Primary Key Support ===
   // Spark SQL does not support auto-increment or primary key constraints in standard DDL

@@ -4,8 +4,6 @@ import saferis.*
 import saferis.spark.given
 import zio.test.*
 
-import java.sql.Types
-
 object SparkDialectSpecs extends ZIOSpecDefault:
 
   val spec = suite("Spark Dialect Support")(
@@ -29,23 +27,18 @@ object SparkDialectSpecs extends ZIOSpecDefault:
     test("Spark type mappings") {
       val dialect = summon[Dialect]
       assertTrue(
-        // String types map to STRING
-        dialect.columnType(Types.VARCHAR) == "string" &&
-          dialect.columnType(Types.CHAR) == "string" &&
-          dialect.columnType(Types.LONGVARCHAR) == "string" &&
-          // Integer types
-          dialect.columnType(Types.TINYINT) == "tinyint" &&
-          dialect.columnType(Types.SMALLINT) == "smallint" &&
-          dialect.columnType(Types.INTEGER) == "int" &&
-          dialect.columnType(Types.BIGINT) == "bigint" &&
-          // Floating point
-          dialect.columnType(Types.FLOAT) == "float" &&
-          dialect.columnType(Types.DOUBLE) == "double" &&
-          // Boolean
-          dialect.columnType(Types.BOOLEAN) == "boolean" &&
-          // Date/Time
-          dialect.columnType(Types.DATE) == "date" &&
-          dialect.columnType(Types.TIMESTAMP) == "timestamp"
+        dialect.columnType(PgType.VarChar) == "string" &&
+          dialect.columnType(PgType.Text) == "string" &&
+          dialect.columnType(PgType.Int2) == "smallint" &&
+          dialect.columnType(PgType.Int4) == "int" &&
+          dialect.columnType(PgType.Int8) == "bigint" &&
+          dialect.columnType(PgType.Float4) == "float" &&
+          dialect.columnType(PgType.Float8) == "double" &&
+          dialect.columnType(PgType.Bool) == "boolean" &&
+          dialect.columnType(PgType.Date) == "date" &&
+          dialect.columnType(PgType.Timestamp) == "timestamp" &&
+          dialect.columnType(PgType.Bytea) == "binary" &&
+          dialect.columnType(PgType.Uuid) == "string"
       )
     },
     test("Spark DDL uses IF NOT EXISTS") {

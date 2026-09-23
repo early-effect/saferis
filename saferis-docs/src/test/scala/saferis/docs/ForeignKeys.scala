@@ -2,7 +2,6 @@ package saferis.docs
 
 import saferis.*
 import saferis.Schema.*
-import saferis.docs.DocsTransactor.xa
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.*
@@ -83,14 +82,14 @@ object ForeignKeys extends SaferisDocSpecSuite:
           .build
 
         // Create tables with foreign key constraint
-        xa.run(for
+        (for
           _      <- ddl.createTable[FkUser](ifNotExists = true)
           _      <- ddl.createTable(orders)
           _      <- dml.insert(FkUser(-1, "Alice"))
           _      <- dml.insert(FkOrder(-1, 1, BigDecimal(99.99)))
           result <- sql"SELECT * FROM ${Table[FkOrder]}".query[FkOrder]
-        yield result)
-          .either
+        yield result).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(orders) => assertTrue(orders.exists(_.amount == BigDecimal(99.99)))
         case Left(err)     => assertTrue(false).label(err.message)
@@ -166,14 +165,14 @@ object ForeignKeys extends SaferisDocSpecSuite:
           .onDelete(Cascade)
           .build
 
-        xa.run(for
+        (for
           _      <- ddl.createTable[CompoundProduct](ifNotExists = true)
           _      <- ddl.createTable(inventory)
           _      <- dml.insert(CompoundProduct("tenant1", "SKU-001", "Widget"))
           _      <- dml.insert(CompoundInventory(-1, "tenant1", "SKU-001", 100))
           result <- sql"SELECT * FROM ${Table[CompoundInventory]}".query[CompoundInventory]
-        yield result)
-          .either
+        yield result).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(rows) => assertTrue(rows.exists(r => r.productSku == "SKU-001" && r.quantity == 100))
         case Left(err)   => assertTrue(false).label(err.message)

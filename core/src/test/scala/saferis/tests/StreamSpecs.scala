@@ -12,7 +12,7 @@ import zio.test.*
 import java.util.concurrent.atomic.AtomicInteger
 
 object StreamSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default >>> Transactor.default
+  val xaLayer = DataSourceProvider.default
 
   @tableName("stream_test_users")
   final case class StreamUser(@generated @key id: Int, name: String, age: Int) derives Table
@@ -28,34 +28,31 @@ object StreamSpecs extends ZIOSpecDefault:
     suite("Basic Streaming")(
       test("queryStream returns same results as query for small datasets") {
         for
-          xa          <- ZIO.service[Transactor]
-          _           <- xa.run(dropTable[StreamUser](ifExists = true))
-          _           <- xa.run(createTable[StreamUser]())
-          _           <- xa.run(insert(StreamUser(0, "Alice", 30)))
-          _           <- xa.run(insert(StreamUser(0, "Bob", 25)))
-          _           <- xa.run(insert(StreamUser(0, "Charlie", 35)))
-          eagerResult <- xa.run:
+          _           <- (dropTable[StreamUser](ifExists = true))
+          _           <- (createTable[StreamUser]())
+          _           <- (insert(StreamUser(0, "Alice", 30)))
+          _           <- (insert(StreamUser(0, "Bob", 25)))
+          _           <- (insert(StreamUser(0, "Charlie", 35)))
+          eagerResult <-
             Query[StreamUser].all.orderBy(userTable.id.asc).query[StreamUser]
-          streamResult <- xa.run:
+          streamResult <-
             Query[StreamUser].all.orderBy(userTable.id.asc).queryStream[StreamUser].runCollect
         yield assertTrue(eagerResult == streamResult)
       },
       test("queryStream correctly iterates all rows") {
         for
-          xa    <- ZIO.service[Transactor]
-          _     <- xa.run(dropTable[StreamItem](ifExists = true))
-          _     <- xa.run(createTable[StreamItem]())
-          _     <- ZIO.foreachDiscard(1 to 100)(i => xa.run(insert(StreamItem(0, s"Item $i"))))
-          count <- xa.run:
+          _     <- (dropTable[StreamItem](ifExists = true))
+          _     <- (createTable[StreamItem]())
+          _     <- ZIO.foreachDiscard(1 to 100)(i => (insert(StreamItem(0, s"Item $i"))))
+          count <-
             Query[StreamItem].all.queryStream[StreamItem].runCount
         yield assertTrue(count == 100L)
       },
       test("empty result set returns empty stream") {
         for
-          xa    <- ZIO.service[Transactor]
-          _     <- xa.run(dropTable[StreamItem](ifExists = true))
-          _     <- xa.run(createTable[StreamItem]())
-          count <- xa.run:
+          _     <- (dropTable[StreamItem](ifExists = true))
+          _     <- (createTable[StreamItem]())
+          count <-
             Query[StreamItem].all.queryStream[StreamItem].runCount
         yield assertTrue(count == 0L)
       },
@@ -64,11 +61,10 @@ object StreamSpecs extends ZIOSpecDefault:
       test("take(n) only processes n rows") {
         val rowsProcessed = new AtomicInteger(0)
         for
-          xa     <- ZIO.service[Transactor]
-          _      <- xa.run(dropTable[StreamItem](ifExists = true))
-          _      <- xa.run(createTable[StreamItem]())
-          _      <- ZIO.foreachDiscard(1 to 100)(i => xa.run(insert(StreamItem(0, s"Item $i"))))
-          result <- xa.run:
+          _      <- (dropTable[StreamItem](ifExists = true))
+          _      <- (createTable[StreamItem]())
+          _      <- ZIO.foreachDiscard(1 to 100)(i => (insert(StreamItem(0, s"Item $i"))))
+          result <-
             Query[StreamItem].all
               .queryStream[StreamItem]
               .tap(_ => ZIO.succeed(rowsProcessed.incrementAndGet()))
@@ -80,13 +76,12 @@ object StreamSpecs extends ZIOSpecDefault:
       },
       test("takeWhile stops iteration when condition fails") {
         for
-          xa     <- ZIO.service[Transactor]
-          _      <- xa.run(dropTable[StreamUser](ifExists = true))
-          _      <- xa.run(createTable[StreamUser]())
-          _      <- xa.run(insert(StreamUser(0, "Alice", 30)))
-          _      <- xa.run(insert(StreamUser(0, "Bob", 25)))
-          _      <- xa.run(insert(StreamUser(0, "Charlie", 35)))
-          result <- xa.run:
+          _      <- (dropTable[StreamUser](ifExists = true))
+          _      <- (createTable[StreamUser]())
+          _      <- (insert(StreamUser(0, "Alice", 30)))
+          _      <- (insert(StreamUser(0, "Bob", 25)))
+          _      <- (insert(StreamUser(0, "Charlie", 35)))
+          result <-
             Query[StreamUser].all
               .orderBy(userTable.age.asc)
               .queryStream[StreamUser]
@@ -97,13 +92,12 @@ object StreamSpecs extends ZIOSpecDefault:
       },
       test("takeUntil stops at first match") {
         for
-          xa     <- ZIO.service[Transactor]
-          _      <- xa.run(dropTable[StreamUser](ifExists = true))
-          _      <- xa.run(createTable[StreamUser]())
-          _      <- xa.run(insert(StreamUser(0, "Alice", 30)))
-          _      <- xa.run(insert(StreamUser(0, "Bob", 25)))
-          _      <- xa.run(insert(StreamUser(0, "Charlie", 35)))
-          result <- xa.run:
+          _      <- (dropTable[StreamUser](ifExists = true))
+          _      <- (createTable[StreamUser]())
+          _      <- (insert(StreamUser(0, "Alice", 30)))
+          _      <- (insert(StreamUser(0, "Bob", 25)))
+          _      <- (insert(StreamUser(0, "Charlie", 35)))
+          result <-
             Query[StreamUser].all
               .orderBy(userTable.age.asc)
               .queryStream[StreamUser]
@@ -115,61 +109,54 @@ object StreamSpecs extends ZIOSpecDefault:
     suite("Resource Safety")(
       test("connection released after stream fully consumed") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[StreamItem](ifExists = true))
-          _  <- xa.run(createTable[StreamItem]())
-          _  <- ZIO.foreachDiscard(1 to 10)(i => xa.run(insert(StreamItem(0, s"Item $i"))))
-          _  <- xa.run:
+          _ <- (dropTable[StreamItem](ifExists = true))
+          _ <- (createTable[StreamItem]())
+          _ <- ZIO.foreachDiscard(1 to 10)(i => (insert(StreamItem(0, s"Item $i"))))
+          _ <-
             Query[StreamItem].all.queryStream[StreamItem].runDrain
           // If connection not released, this would fail
-          count <- xa.run:
+          count <-
             Query[StreamItem].all.query[StreamItem].map(_.size)
         yield assertTrue(count == 10)
       },
       test("connection released after take(n) partial consumption") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[StreamItem](ifExists = true))
-          _  <- xa.run(createTable[StreamItem]())
-          _  <- ZIO.foreachDiscard(1 to 100)(i => xa.run(insert(StreamItem(0, s"Item $i"))))
-          _  <- xa.run:
+          _ <- (dropTable[StreamItem](ifExists = true))
+          _ <- (createTable[StreamItem]())
+          _ <- ZIO.foreachDiscard(1 to 100)(i => (insert(StreamItem(0, s"Item $i"))))
+          _ <-
             Query[StreamItem].all.queryStream[StreamItem].take(5).runDrain
           // If connection not released, this would fail
-          count <- xa.run:
+          count <-
             Query[StreamItem].all.query[StreamItem].map(_.size)
         yield assertTrue(count == 100)
       },
       test("connection released on stream interruption") {
         for
-          xa    <- ZIO.service[Transactor]
-          _     <- xa.run(dropTable[StreamItem](ifExists = true))
-          _     <- xa.run(createTable[StreamItem]())
-          _     <- ZIO.foreachDiscard(1 to 100)(i => xa.run(insert(StreamItem(0, s"Item $i"))))
-          fiber <- xa
-            .run:
-              Query[StreamItem].all
-                .queryStream[StreamItem]
-                .tap(_ => ZIO.sleep(10.millis))
-                .runDrain
+          _     <- (dropTable[StreamItem](ifExists = true))
+          _     <- (createTable[StreamItem]())
+          _     <- ZIO.foreachDiscard(1 to 100)(i => (insert(StreamItem(0, s"Item $i"))))
+          fiber <- Query[StreamItem].all
+            .queryStream[StreamItem]
+            .tap(_ => ZIO.sleep(10.millis))
+            .runDrain
             .fork
           _     <- ZIO.sleep(50.millis)
           _     <- fiber.interrupt
-          count <- xa.run:
+          count <-
             Query[StreamItem].all.query[StreamItem].map(_.size)
         yield assertTrue(count == 100)
       } @@ TestAspect.withLiveClock,
       test("multiple concurrent streams don't leak connections") {
         for
-          xa      <- ZIO.service[Transactor]
-          _       <- xa.run(dropTable[StreamItem](ifExists = true))
-          _       <- xa.run(createTable[StreamItem]())
-          _       <- ZIO.foreachDiscard(1 to 50)(i => xa.run(insert(StreamItem(0, s"Item $i"))))
+          _       <- (dropTable[StreamItem](ifExists = true))
+          _       <- (createTable[StreamItem]())
+          _       <- ZIO.foreachDiscard(1 to 50)(i => (insert(StreamItem(0, s"Item $i"))))
           results <- ZIO.collectAllPar:
             (1 to 5).map: _ =>
-              xa.run:
-                Query[StreamItem].all.queryStream[StreamItem].take(10).runCollect
+              Query[StreamItem].all.queryStream[StreamItem].take(10).runCollect
           // All streams should succeed and connections should be released
-          count <- xa.run:
+          count <-
             Query[StreamItem].all.query[StreamItem].map(_.size)
         yield assertTrue(results.forall(_.size == 10)) &&
           assertTrue(count == 50)
@@ -178,27 +165,23 @@ object StreamSpecs extends ZIOSpecDefault:
     suite("Error Handling")(
       test("SQL syntax error propagates as SaferisError.SyntaxError") {
         for
-          xa    <- ZIO.service[Transactor]
-          error <- xa
-            .run:
-              // Intentionally invalid SQL to test error handling
-              sql"SELECT * FORM invalid_syntax".queryStream[StreamItem].runDrain
-            .flip
+          error <-
+            // Intentionally invalid SQL to test error handling
+            sql"SELECT * FORM invalid_syntax".queryStream[StreamItem].runDrain.flip
           isSyntaxError = error match
-            case SaferisError.SyntaxError(_, _) => true
-            case _                              => false
+            case SaferisError.SyntaxError(_, _, _) => true
+            case _                                 => false
         yield assertTrue(isSyntaxError)
       }
     ),
     suite("Stream Composition")(
       test("stream.map transforms elements correctly") {
         for
-          xa    <- ZIO.service[Transactor]
-          _     <- xa.run(dropTable[StreamUser](ifExists = true))
-          _     <- xa.run(createTable[StreamUser]())
-          _     <- xa.run(insert(StreamUser(0, "Alice", 30)))
-          _     <- xa.run(insert(StreamUser(0, "Bob", 25)))
-          names <- xa.run:
+          _     <- (dropTable[StreamUser](ifExists = true))
+          _     <- (createTable[StreamUser]())
+          _     <- (insert(StreamUser(0, "Alice", 30)))
+          _     <- (insert(StreamUser(0, "Bob", 25)))
+          names <-
             Query[StreamUser].all
               .orderBy(userTable.name.asc)
               .queryStream[StreamUser]
@@ -208,13 +191,12 @@ object StreamSpecs extends ZIOSpecDefault:
       },
       test("stream.filter filters elements correctly") {
         for
-          xa     <- ZIO.service[Transactor]
-          _      <- xa.run(dropTable[StreamUser](ifExists = true))
-          _      <- xa.run(createTable[StreamUser]())
-          _      <- xa.run(insert(StreamUser(0, "Alice", 30)))
-          _      <- xa.run(insert(StreamUser(0, "Bob", 25)))
-          _      <- xa.run(insert(StreamUser(0, "Charlie", 35)))
-          result <- xa.run:
+          _      <- (dropTable[StreamUser](ifExists = true))
+          _      <- (createTable[StreamUser]())
+          _      <- (insert(StreamUser(0, "Alice", 30)))
+          _      <- (insert(StreamUser(0, "Bob", 25)))
+          _      <- (insert(StreamUser(0, "Charlie", 35)))
+          result <-
             Query[StreamUser].all
               .queryStream[StreamUser]
               .filter(_.age >= 30)
@@ -225,13 +207,12 @@ object StreamSpecs extends ZIOSpecDefault:
       test("stream.tap side-effects execute for each element") {
         val counter = new AtomicInteger(0)
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[StreamUser](ifExists = true))
-          _  <- xa.run(createTable[StreamUser]())
-          _  <- xa.run(insert(StreamUser(0, "Alice", 30)))
-          _  <- xa.run(insert(StreamUser(0, "Bob", 25)))
-          _  <- xa.run(insert(StreamUser(0, "Charlie", 35)))
-          _  <- xa.run:
+          _ <- (dropTable[StreamUser](ifExists = true))
+          _ <- (createTable[StreamUser]())
+          _ <- (insert(StreamUser(0, "Alice", 30)))
+          _ <- (insert(StreamUser(0, "Bob", 25)))
+          _ <- (insert(StreamUser(0, "Charlie", 35)))
+          _ <-
             Query[StreamUser].all
               .queryStream[StreamUser]
               .tap(_ => ZIO.succeed(counter.incrementAndGet()))
@@ -241,13 +222,12 @@ object StreamSpecs extends ZIOSpecDefault:
       },
       test("stream.zipWithIndex provides correct indices") {
         for
-          xa     <- ZIO.service[Transactor]
-          _      <- xa.run(dropTable[StreamUser](ifExists = true))
-          _      <- xa.run(createTable[StreamUser]())
-          _      <- xa.run(insert(StreamUser(0, "Alice", 30)))
-          _      <- xa.run(insert(StreamUser(0, "Bob", 25)))
-          _      <- xa.run(insert(StreamUser(0, "Charlie", 35)))
-          result <- xa.run:
+          _      <- (dropTable[StreamUser](ifExists = true))
+          _      <- (createTable[StreamUser]())
+          _      <- (insert(StreamUser(0, "Alice", 30)))
+          _      <- (insert(StreamUser(0, "Bob", 25)))
+          _      <- (insert(StreamUser(0, "Charlie", 35)))
+          result <-
             Query[StreamUser].all
               .orderBy(userTable.name.asc)
               .queryStream[StreamUser]
@@ -257,11 +237,10 @@ object StreamSpecs extends ZIOSpecDefault:
       },
       test("stream.grouped batches elements correctly") {
         for
-          xa      <- ZIO.service[Transactor]
-          _       <- xa.run(dropTable[StreamItem](ifExists = true))
-          _       <- xa.run(createTable[StreamItem]())
-          _       <- ZIO.foreachDiscard(1 to 10)(i => xa.run(insert(StreamItem(0, s"Item $i"))))
-          batches <- xa.run:
+          _       <- (dropTable[StreamItem](ifExists = true))
+          _       <- (createTable[StreamItem]())
+          _       <- ZIO.foreachDiscard(1 to 10)(i => (insert(StreamItem(0, s"Item $i"))))
+          batches <-
             Query[StreamItem].all
               .queryStream[StreamItem]
               .grouped(3)
@@ -272,18 +251,17 @@ object StreamSpecs extends ZIOSpecDefault:
       },
       test("zip streams from different queries") {
         for
-          xa     <- ZIO.service[Transactor]
-          _      <- xa.run(dropTable[StreamUser](ifExists = true))
-          _      <- xa.run(dropTable[StreamItem](ifExists = true))
-          _      <- xa.run(createTable[StreamUser]())
-          _      <- xa.run(createTable[StreamItem]())
-          _      <- xa.run(insert(StreamUser(0, "Alice", 30)))
-          _      <- xa.run(insert(StreamUser(0, "Bob", 25)))
-          _      <- xa.run(insert(StreamUser(0, "Charlie", 35)))
-          _      <- xa.run(insert(StreamItem(0, "Item A")))
-          _      <- xa.run(insert(StreamItem(0, "Item B")))
-          _      <- xa.run(insert(StreamItem(0, "Item C")))
-          result <- xa.run:
+          _      <- (dropTable[StreamUser](ifExists = true))
+          _      <- (dropTable[StreamItem](ifExists = true))
+          _      <- (createTable[StreamUser]())
+          _      <- (createTable[StreamItem]())
+          _      <- (insert(StreamUser(0, "Alice", 30)))
+          _      <- (insert(StreamUser(0, "Bob", 25)))
+          _      <- (insert(StreamUser(0, "Charlie", 35)))
+          _      <- (insert(StreamItem(0, "Item A")))
+          _      <- (insert(StreamItem(0, "Item B")))
+          _      <- (insert(StreamItem(0, "Item C")))
+          result <-
             val users = Query[StreamUser].all.orderBy(userTable.name.asc).queryStream[StreamUser]
             val items = Query[StreamItem].all.orderBy(itemTable.value.asc).queryStream[StreamItem]
             users.zip(items).runCollect
@@ -295,36 +273,33 @@ object StreamSpecs extends ZIOSpecDefault:
     suite("Integration")(
       test("Query builder queryStream works") {
         for
-          xa     <- ZIO.service[Transactor]
-          _      <- xa.run(dropTable[StreamUser](ifExists = true))
-          _      <- xa.run(createTable[StreamUser]())
-          _      <- xa.run(insert(StreamUser(0, "Alice", 30)))
-          _      <- xa.run(insert(StreamUser(0, "Bob", 25)))
-          result <- xa.run:
+          _      <- (dropTable[StreamUser](ifExists = true))
+          _      <- (createTable[StreamUser]())
+          _      <- (insert(StreamUser(0, "Alice", 30)))
+          _      <- (insert(StreamUser(0, "Bob", 25)))
+          result <-
             Query[StreamUser].where(_.age).gt(20).queryStream[StreamUser].runCollect
         yield assertTrue(result.size == 2)
       },
       test("queryStream works within transact block") {
         for
-          xa     <- ZIO.service[Transactor]
-          _      <- xa.run(dropTable[StreamUser](ifExists = true))
-          _      <- xa.run(createTable[StreamUser]())
-          _      <- xa.run(insert(StreamUser(0, "Alice", 30)))
-          _      <- xa.run(insert(StreamUser(0, "Bob", 25)))
-          result <- xa.transact:
+          _      <- (dropTable[StreamUser](ifExists = true))
+          _      <- (createTable[StreamUser]())
+          _      <- (insert(StreamUser(0, "Alice", 30)))
+          _      <- (insert(StreamUser(0, "Bob", 25)))
+          result <- transact:
             Query[StreamUser].all.queryStream[StreamUser].runCollect
         yield assertTrue(result.size == 2)
       },
       test("stream 10,000 rows without OOM") {
         for
-          xa <- ZIO.service[Transactor]
-          _  <- xa.run(dropTable[StreamItem](ifExists = true))
-          _  <- xa.run(createTable[StreamItem]())
+          _ <- (dropTable[StreamItem](ifExists = true))
+          _ <- (createTable[StreamItem]())
           // Batch insert for efficiency
           _ <- ZIO.foreachDiscard((1 to 100).grouped(10).toList): batch =>
-            ZIO.foreachDiscard(batch)(i => xa.run(insert(StreamItem(0, s"Item $i"))))
+            ZIO.foreachDiscard(batch)(i => (insert(StreamItem(0, s"Item $i"))))
           // This would OOM with eager query on truly large datasets
-          count <- xa.run:
+          count <-
             Query[StreamItem].all
               .queryStream[StreamItem]
               .runCount

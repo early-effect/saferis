@@ -1,10 +1,7 @@
 package saferis.mysql
 
 import saferis.*
-import zio.*
 
-import java.sql.PreparedStatement
-import java.sql.ResultSet
 import java.util.UUID
 
 /** MySQL-specific codecs for types that require different handling than PostgreSQL.
@@ -12,28 +9,21 @@ import java.util.UUID
   * Import these with `import saferis.mysql.{given}` to override the default PostgreSQL codecs.
   */
 
-/** UUID encoder for MySQL - stores UUIDs as CHAR(36) strings.
-  *
-  * MySQL doesn't have a native UUID type, so we store them as fixed-length CHAR(36) strings in the standard UUID format
-  * (e.g., "550e8400-e29b-41d4-a716-446655440000").
-  */
+/** UUID encoder for MySQL. The bound value is text. Column DDL is `char(36)`, not `longtext`. */
 given uuidEncoder: Encoder[UUID] with
-  override val jdbcType = java.sql.Types.CHAR
+  def pgType: PgType                             = PgType.Text
+  def encode(uuid: UUID): SqlValue               = SqlValue.Text(uuid.toString)
+  override def columnType(using Dialect): String = "char(36)"
 
-  def encode(uuid: UUID, stmt: PreparedStatement, idx: Int)(using Trace): Task[Unit] =
-    ZIO.attempt(stmt.setString(idx, uuid.toString))
-
-  override def columnType(using dialect: Dialect): String = "char(36)"
-
-  override def literal(uuid: UUID): String =
-    s"'${uuid.toString}'"
-end uuidEncoder
-
-/** UUID decoder for MySQL - reads UUIDs from CHAR(36) string columns.
-  */
+/** UUID decoder for MySQL. Reads the text form, not `SqlValue.Uuid`. */
 given uuidDecoder: Decoder[UUID] with
-  def decode(rs: ResultSet, name: String)(using Trace): Task[UUID] =
-    ZIO.attempt:
-      val str = rs.getString(name)
-      if str == null then null
-      else UUID.fromString(str)
+  def decode(value: SqlValue): Either[DecodeError, UUID] =
+    def parse(text: String): Either[DecodeError, UUID] =
+      try Right(UUID.fromString(text))
+      catch case _: IllegalArgumentException => Left(DecodeError(s"invalid uuid text: $text"))
+    value match
+      case SqlValue.Text(text)    => parse(text)
+      case SqlValue.VarChar(text) => parse(text)
+      case SqlValue.Null(_)       => Left(DecodeError("null value"))
+      case other                  => Left(DecodeError(s"expected uuid text, found ${other.productPrefix}"))
+end uuidDecoder

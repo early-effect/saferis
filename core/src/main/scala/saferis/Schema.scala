@@ -106,14 +106,14 @@ final case class Schema[A](instance: Instance[A]):
 
     // Combine all statements
     val allStatements = Seq(createTableSql) ++ indexStatements ++ compoundKeyIndex.toSeq
-    SqlFragment(allStatements.mkString(";\n"), Seq.empty)
+    SqlFragment.text(allStatements.mkString(";\n"))
   end ddl
 
   /** Verify this schema against the actual database schema.
     *
     * Succeeds with Unit if schema matches, fails with SaferisError.SchemaValidation containing all issues found.
     */
-  def verify(using dialect: Dialect)(using Trace): ZIO[ConnectionProvider & Scope, SaferisError, Unit] =
+  def verify(using dialect: Dialect)(using Trace): ZIO[SqlSession, SaferisError, Unit] =
     SchemaIntrospection.verify(instance)
 
   /** Verify this schema against the actual database schema with custom options. */
@@ -121,7 +121,7 @@ final case class Schema[A](instance: Instance[A]):
       dialect: Dialect
   )(using
       Trace
-  ): ZIO[ConnectionProvider & Scope, SaferisError, Unit] =
+  ): ZIO[SqlSession, SaferisError, Unit] =
     SchemaIntrospection.verifyWith(instance, options)
 end Schema
 

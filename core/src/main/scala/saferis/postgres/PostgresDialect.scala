@@ -2,8 +2,6 @@ package saferis.postgres
 
 import saferis.*
 
-import java.sql.Types
-
 // Export PostgresDialect with its singleton type so all capability intersections are satisfied
 given PostgresDialect.type = PostgresDialect
 
@@ -21,44 +19,23 @@ object PostgresDialect
 
   val name: String = "PostgreSQL"
 
-  def columnType(jdbcType: Int): String = jdbcType match
-    case Types.VARCHAR     => s"varchar($DefaultVarcharLength)"
-    case Types.CHAR        => "char"
-    case Types.LONGVARCHAR => "text"
-    case Types.CLOB        => "text"
-
-    case Types.SMALLINT => "smallint"
-    case Types.INTEGER  => "integer"
-    case Types.BIGINT   => "bigint"
-
-    case Types.FLOAT   => "real"
-    case Types.DOUBLE  => "double precision"
-    case Types.REAL    => "real"
-    case Types.DECIMAL => "numeric"
-    case Types.NUMERIC => "numeric"
-
-    case Types.BOOLEAN => "boolean"
-    case Types.BIT     => "boolean"
-
-    case Types.DATE                    => "date"
-    case Types.TIME                    => "time"
-    case Types.TIMESTAMP               => "timestamp"
-    case Types.TIMESTAMP_WITH_TIMEZONE => "timestamptz"
-
-    case Types.BINARY        => "bytea"
-    case Types.VARBINARY     => "bytea"
-    case Types.LONGVARBINARY => "bytea"
-    case Types.BLOB          => "bytea"
-
-    case Types.DATALINK => "text"  // URLs stored as text in PostgreSQL
-    case Types.ARRAY    => "array"
-    case Types.STRUCT   => "jsonb"
-    case Types.OTHER    => "jsonb" // Fallback - UUID and other types override columnType
-
-    // Fallback to JDBC standard name for unknown types
-    case other =>
-      try java.sql.JDBCType.valueOf(other).getName.toLowerCase
-      catch case _: IllegalArgumentException => "text"
+  def columnType(tpe: PgType): String = tpe match
+    case PgType.Bool        => "boolean"
+    case PgType.Int2        => "smallint"
+    case PgType.Int4        => "integer"
+    case PgType.Int8        => "bigint"
+    case PgType.Float4      => "real"
+    case PgType.Float8      => "double precision"
+    case PgType.Numeric     => "numeric"
+    case PgType.VarChar     => s"varchar($DefaultVarcharLength)"
+    case PgType.Text        => "text"
+    case PgType.Bytea       => "bytea"
+    case PgType.Date        => "date"
+    case PgType.Time        => "time"
+    case PgType.Timestamp   => "timestamp"
+    case PgType.Timestamptz => "timestamptz"
+    case PgType.Jsonb       => "jsonb"
+    case PgType.Uuid        => "uuid"
 
   // === PostgreSQL-specific Auto-increment and Primary Key Support ===
 
@@ -90,8 +67,7 @@ object PostgresDialect
     val escaped = jsonValue.replace("'", "''")
     s"$columnName @> '$escaped'"
 
-  // Note: We use function equivalents instead of ? / ?| / ?& operators because
-  // the ? character is interpreted as a JDBC parameter placeholder in PreparedStatements
+  // Function equivalents of ? / ?| / ?&. The operators stay out of generated SQL.
   def jsonHasKeySql(columnName: String, key: String): String =
     val escaped = key.replace("'", "''")
     s"jsonb_exists($columnName, '$escaped')"

@@ -1,7 +1,6 @@
 package saferis.docs
 
 import saferis.*
-import saferis.docs.DocsTransactor.xa
 import saferis.postgres.given
 import specular.*
 import specular.ziotest.DocSpecSuite
@@ -50,13 +49,13 @@ flowchart LR
 
 The `SpecializedDML` object provides type-safe operations that only compile when the dialect supports them:""",
     exampleZIO {
-      xa.run(for
+      (for
         _        <- ddl.createTable[SpecializedItem](ifNotExists = true)
         inserted <- dml.insertReturning(SpecializedItem(-1, "Widget", "hardware"))
         _        <- dml.insert(SpecializedItem(-1, "Gadget", "electronics"))
         all      <- sql"SELECT * FROM ${Table[SpecializedItem]}".query[SpecializedItem]
-      yield (inserted, all))
-        .either
+      yield (inserted, all)).either
+        .provideLayer(DocsTransactor.layer)
     }.assert {
       case Right((inserted, all)) => assertTrue(inserted.name == "Widget" && all.size >= 2)
       case Left(err)              => assertTrue(false).label(err.message)
@@ -95,11 +94,11 @@ Write functions that require specific capabilities via `using` constraints. The 
       .assert(sql => assertTrue(sql.toLowerCase.contains("returning"))),
     md"""We've already seen this in action: `insertReturning` works because PostgreSQL provides `ReturningSupport`:""",
     exampleZIO {
-      xa.run(for
+      (for
         _        <- ddl.createTable[SpecializedItem](ifNotExists = true)
         returned <- dml.insertReturning(SpecializedItem(-1, "Capability Demo", "demo"))
-      yield returned)
-        .either
+      yield returned).either
+        .provideLayer(DocsTransactor.layer)
     }.assert {
       case Right(returned) => assertTrue(returned.name == "Capability Demo")
       case Left(err)       => assertTrue(false).label(err.message)

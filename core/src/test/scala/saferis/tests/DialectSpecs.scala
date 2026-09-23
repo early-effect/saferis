@@ -32,14 +32,13 @@ object DialectSpecs extends ZIOSpecDefault:
       assertTrue(SQLiteDialect.autoIncrementClause(false, false, false) == "")
     },
     test("Dialects have different column type mappings") {
-      import java.sql.Types
       val pgDialect = summon[Dialect]
-      assertTrue(pgDialect.columnType(Types.VARCHAR) == "varchar(255)") &&
-      assertTrue(MySQLDialect.columnType(Types.VARCHAR) == "varchar(255)") &&
-      assertTrue(SQLiteDialect.columnType(Types.VARCHAR) == "text") &&
-      assertTrue(pgDialect.columnType(Types.INTEGER) == "integer") &&
-      assertTrue(MySQLDialect.columnType(Types.INTEGER) == "int") &&
-      assertTrue(SQLiteDialect.columnType(Types.INTEGER) == "integer")
+      assertTrue(pgDialect.columnType(PgType.VarChar) == "varchar(255)") &&
+      assertTrue(MySQLDialect.columnType(PgType.VarChar) == "varchar(255)") &&
+      assertTrue(SQLiteDialect.columnType(PgType.VarChar) == "text") &&
+      assertTrue(pgDialect.columnType(PgType.Int4) == "integer") &&
+      assertTrue(MySQLDialect.columnType(PgType.Int4) == "int") &&
+      assertTrue(SQLiteDialect.columnType(PgType.Int4) == "integer")
     },
     test("Dialects have different identifier quoting") {
       val pgDialect = summon[Dialect]

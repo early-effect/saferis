@@ -8,31 +8,14 @@ package saferis
   */
 trait Dialect:
 
-  /** Returns the database-specific type string for the given JDBC type.
-    *
-    * @param jdbcType
-    *   The JDBC SQL type constant
-    * @return
-    *   Database-specific type string
-    */
-  def columnType(jdbcType: Int): String
+  /** Database-specific DDL spelling for a Postgres type. Lossy on dialects that are not Postgres. */
+  def columnType(tpe: PgType): String
 
   /** Database name/identifier */
   def name: String
 
   /** Default length for variable-length types like VARCHAR */
   val DefaultVarcharLength: Int = 255
-
-  /** Per-dialect classifier for transient, retryable failures.
-    *
-    * Defaults to [[SaferisError.defaultRetryClassifier]], which recognizes standard transient SQLState classes
-    * (`08xxx`, `40001`, `40P01`). Override in dialect implementations to add driver-specific quirks — for example, the
-    * Databricks JDBC driver tunnels over HTTP and can surface transient transport errors as vendor-specific codes that
-    * the standards-based default does not catch.
-    *
-    * Users can override the dialect default per-Transactor via `Transactor.layer(retryClassifier = ...)`.
-    */
-  def retryClassifier: SaferisError.RetryClassifier = SaferisError.defaultRetryClassifier
 
   // === Auto-increment and Primary Key Support ===
 
@@ -220,14 +203,6 @@ trait Dialect:
 end Dialect
 
 object Dialect:
-  /** Get the database-specific type string for a column type A using the current dialect */
-  def columnType[A](using encoder: Encoder[A], dialect: Dialect): String =
-    dialect.columnType(encoder.jdbcType)
-
-  /** Get the database-specific type string for a JDBC type using the current dialect */
-  def columnType(jdbcType: Int)(using dialect: Dialect): String =
-    dialect.columnType(jdbcType)
-
   /** Default PostgreSQL dialect - provided as a low priority given. This allows users to work with Postgres out of the
     * box with just `import saferis.*` Users can override this by providing their own given Dialect with higher
     * priority.

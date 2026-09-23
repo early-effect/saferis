@@ -2,8 +2,6 @@ package saferis.mysql
 
 import saferis.*
 
-import java.sql.Types
-
 given Dialect = MySQLDialect
 
 /** MySQL dialect implementation providing MySQL-specific type mappings and SQL generation.
@@ -18,44 +16,23 @@ object MySQLDialect extends Dialect with JsonSupport with WindowFunctionSupport 
 
   val name: String = "MySQL"
 
-  def columnType(jdbcType: Int): String = jdbcType match
-    case Types.VARCHAR     => s"varchar($DefaultVarcharLength)"
-    case Types.CHAR        => "char"
-    case Types.LONGVARCHAR => "longtext"
-    case Types.CLOB        => "longtext"
-
-    case Types.SMALLINT => "smallint"
-    case Types.INTEGER  => "int"
-    case Types.BIGINT   => "bigint"
-
-    case Types.FLOAT   => "float"
-    case Types.DOUBLE  => "double"
-    case Types.REAL    => "float"
-    case Types.DECIMAL => "decimal"
-    case Types.NUMERIC => "decimal"
-
-    case Types.BOOLEAN => "boolean"
-    case Types.BIT     => "bit"
-
-    case Types.DATE                    => "date"
-    case Types.TIME                    => "time"
-    case Types.TIMESTAMP               => "timestamp"
-    case Types.TIMESTAMP_WITH_TIMEZONE => "timestamp" // MySQL doesn't have separate timezone type
-
-    case Types.BINARY        => "binary"
-    case Types.VARBINARY     => "varbinary(255)"
-    case Types.LONGVARBINARY => "longblob"
-    case Types.BLOB          => "blob"
-
-    case Types.DATALINK => "text" // URLs stored as text
-    case Types.ARRAY    => "json" // MySQL 5.7+ supports JSON
-    case Types.STRUCT   => "json"
-    case Types.OTHER    => "json"
-
-    // Fallback to JDBC standard name for unknown types
-    case other =>
-      try java.sql.JDBCType.valueOf(other).getName.toLowerCase
-      catch case _: IllegalArgumentException => "text"
+  def columnType(tpe: PgType): String = tpe match
+    case PgType.Bool        => "boolean"
+    case PgType.Int2        => "smallint"
+    case PgType.Int4        => "int"
+    case PgType.Int8        => "bigint"
+    case PgType.Float4      => "float"
+    case PgType.Float8      => "double"
+    case PgType.Numeric     => "decimal"
+    case PgType.VarChar     => s"varchar($DefaultVarcharLength)"
+    case PgType.Text        => "longtext"
+    case PgType.Bytea       => "blob"
+    case PgType.Date        => "date"
+    case PgType.Time        => "time"
+    case PgType.Timestamp   => "timestamp"
+    case PgType.Timestamptz => "timestamp"
+    case PgType.Jsonb       => "json"
+    case PgType.Uuid        => "char(36)"
 
   // === MySQL-specific Auto-increment and Primary Key Support ===
 

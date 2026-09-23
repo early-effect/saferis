@@ -7,7 +7,7 @@ import zio.*
 import zio.test.*
 
 object DataManipulationLayerSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default >>> Transactor.default
+  val xaLayer = DataSourceProvider.default
 
   val dmlTests = suiteAll("should handle DML operations"):
 
@@ -17,21 +17,20 @@ object DataManipulationLayerSpecs extends ZIOSpecDefault:
       final case class TestTable(@key id: Int, name: String, age: Option[Int]) derives Table
 
       for
-        xa <- ZIO.service[Transactor]
         // Create table first
-        _ <- xa.run:
+        _ <-
           sql"drop table if exists test_dml_insert_basic".dml
-        _ <- xa.run:
+        _ <-
           sql"""create table test_dml_insert_basic (
                   id integer primary key,
                   name varchar(255) not null,
                   age integer
                 )""".dml
         // Test basic insert
-        insertResult <- xa.run:
+        insertResult <-
           insert(TestTable(1, "Test User", Some(30)))
         // Verify the record was inserted
-        queryResult <- xa.run:
+        queryResult <-
           sql"select * from test_dml_insert_basic where id = 1".queryOne[TestTable]
       yield assertTrue(insertResult == 1) &&
         assertTrue(queryResult.contains(TestTable(1, "Test User", Some(30))))
@@ -42,16 +41,15 @@ object DataManipulationLayerSpecs extends ZIOSpecDefault:
       final case class GeneratedTable(@generated @key id: Int, name: String) derives Table
 
       for
-        xa <- ZIO.service[Transactor]
-        _  <- xa.run:
+        _ <-
           sql"drop table if exists test_dml_insert_generated".dml
-        _ <- xa.run:
+        _ <-
           sql"""create table test_dml_insert_generated (
                   id integer generated always as identity primary key,
                   name varchar(255) not null
                 )""".dml
         // Test insertReturning with generated key
-        insertedRecord <- xa.run:
+        insertedRecord <-
           insertReturning(GeneratedTable(-1, "Generated Test"))
       yield assertTrue(insertedRecord.name == "Generated Test") &&
         assertTrue(insertedRecord.id > 0)
@@ -62,25 +60,24 @@ object DataManipulationLayerSpecs extends ZIOSpecDefault:
       final case class OptionalTable(@key id: Int, name: String, email: Option[String]) derives Table
 
       for
-        xa <- ZIO.service[Transactor]
-        _  <- xa.run:
+        _ <-
           sql"drop table if exists test_dml_insert_optional".dml
-        _ <- xa.run:
+        _ <-
           sql"""create table test_dml_insert_optional (
                   id integer primary key,
                   name varchar(255) not null,
                   email varchar(255)
                 )""".dml
         // Insert with Some value
-        result1 <- xa.run:
+        result1 <-
           insert(OptionalTable(1, "John", Some("john@example.com")))
         // Insert with None value
-        result2 <- xa.run:
+        result2 <-
           insert(OptionalTable(2, "Jane", None))
         // Verify both records
-        query1 <- xa.run:
+        query1 <-
           sql"select * from test_dml_insert_optional where id = 1".queryOne[OptionalTable]
-        query2 <- xa.run:
+        query2 <-
           sql"select * from test_dml_insert_optional where id = 2".queryOne[OptionalTable]
       yield assertTrue(result1 == 1) &&
         assertTrue(result2 == 1) &&
@@ -93,23 +90,22 @@ object DataManipulationLayerSpecs extends ZIOSpecDefault:
       final case class UpdateTable(@key id: Int, name: String, age: Int) derives Table
 
       for
-        xa <- ZIO.service[Transactor]
-        _  <- xa.run:
+        _ <-
           sql"drop table if exists test_dml_update_key".dml
-        _ <- xa.run:
+        _ <-
           sql"""create table test_dml_update_key (
                   id integer primary key,
                   name varchar(255) not null,
                   age integer not null
                 )""".dml
         // Insert initial record
-        _ <- xa.run:
+        _ <-
           insert(UpdateTable(1, "Original Name", 25))
         // Update the record
-        updateResult <- xa.run:
+        updateResult <-
           update(UpdateTable(1, "Updated Name", 30))
         // Verify the update
-        queryResult <- xa.run:
+        queryResult <-
           sql"select * from test_dml_update_key where id = 1".queryOne[UpdateTable]
       yield assertTrue(updateResult == 1) &&
         assertTrue(queryResult.contains(UpdateTable(1, "Updated Name", 30)))
@@ -120,29 +116,28 @@ object DataManipulationLayerSpecs extends ZIOSpecDefault:
       final case class UpdateWhereTable(@key id: Int, name: String, category: String) derives Table
 
       for
-        xa <- ZIO.service[Transactor]
-        _  <- xa.run:
+        _ <-
           sql"drop table if exists test_dml_update_where".dml
-        _ <- xa.run:
+        _ <-
           sql"""create table test_dml_update_where (
                   id integer primary key,
                   name varchar(255) not null,
                   category varchar(255) not null
                 )""".dml
         // Insert test records
-        _ <- xa.run:
+        _ <-
           insert(UpdateWhereTable(1, "Item 1", "A"))
-        _ <- xa.run:
+        _ <-
           insert(UpdateWhereTable(2, "Item 2", "A"))
-        _ <- xa.run:
+        _ <-
           insert(UpdateWhereTable(3, "Item 3", "B"))
         // Update all records in category A
-        updateResult <- xa.run:
+        updateResult <-
           updateWhere(UpdateWhereTable(0, "Updated Item", "A"), sql"category = ${"A"}")
         // Verify updates
-        countA <- xa.run:
+        countA <-
           sql"select count(*) as count from test_dml_update_where where name = ${"Updated Item"}".queryOne[CountResult]
-        countB <- xa.run:
+        countB <-
           sql"select count(*) as count from test_dml_update_where where category = ${"B"} and name != ${"Updated Item"}"
             .queryOne[CountResult]
       yield assertTrue(updateResult == 2) && // Should update 2 records
@@ -155,20 +150,19 @@ object DataManipulationLayerSpecs extends ZIOSpecDefault:
       final case class UpdateReturningTable(@key id: Int, name: String, version: Int) derives Table
 
       for
-        xa <- ZIO.service[Transactor]
-        _  <- xa.run:
+        _ <-
           sql"drop table if exists test_dml_update_returning".dml
-        _ <- xa.run:
+        _ <-
           sql"""create table test_dml_update_returning (
                   id integer primary key,
                   name varchar(255) not null,
                   version integer not null
                 )""".dml
         // Insert initial record
-        _ <- xa.run:
+        _ <-
           insert(UpdateReturningTable(1, "Test", 1))
         // Update and return the updated record
-        updatedRecord <- xa.run:
+        updatedRecord <-
           updateReturning(UpdateReturningTable(1, "Updated Test", 2))
       yield assertTrue(updatedRecord.name == "Updated Test") &&
         assertTrue(updatedRecord.version == 2)
@@ -179,22 +173,21 @@ object DataManipulationLayerSpecs extends ZIOSpecDefault:
       final case class DeleteTable(@key id: Int, name: String) derives Table
 
       for
-        xa <- ZIO.service[Transactor]
-        _  <- xa.run:
+        _ <-
           sql"drop table if exists test_dml_delete_key".dml
-        _ <- xa.run:
+        _ <-
           sql"""create table test_dml_delete_key (
                   id integer primary key,
                   name varchar(255) not null
                 )""".dml
         // Insert test record
-        _ <- xa.run:
+        _ <-
           insert(DeleteTable(1, "To be deleted"))
         // Delete the record
-        deleteResult <- xa.run:
+        deleteResult <-
           delete(DeleteTable(1, "To be deleted"))
         // Verify deletion
-        queryResult <- xa.run:
+        queryResult <-
           sql"select * from test_dml_delete_key where id = 1".queryOne[DeleteTable]
       yield assertTrue(deleteResult == 1) &&
         assertTrue(queryResult.isEmpty)
@@ -205,27 +198,26 @@ object DataManipulationLayerSpecs extends ZIOSpecDefault:
       final case class DeleteWhereTable(@key id: Int, name: String, status: String) derives Table
 
       for
-        xa <- ZIO.service[Transactor]
-        _  <- xa.run:
+        _ <-
           sql"drop table if exists test_dml_delete_where".dml
-        _ <- xa.run:
+        _ <-
           sql"""create table test_dml_delete_where (
                   id integer primary key,
                   name varchar(255) not null,
                   status varchar(255) not null
                 )""".dml
         // Insert test records
-        _ <- xa.run:
+        _ <-
           insert(DeleteWhereTable(1, "Item 1", "active"))
-        _ <- xa.run:
+        _ <-
           insert(DeleteWhereTable(2, "Item 2", "inactive"))
-        _ <- xa.run:
+        _ <-
           insert(DeleteWhereTable(3, "Item 3", "inactive"))
         // Delete all inactive records
-        deleteResult <- xa.run:
+        deleteResult <-
           deleteWhere[DeleteWhereTable](sql"status = ${"inactive"}")
         // Verify deletion
-        remainingCount <- xa.run:
+        remainingCount <-
           sql"select count(*) as count from test_dml_delete_where".queryOne[CountResult]
       yield assertTrue(deleteResult == 2) &&
         assertTrue(remainingCount.map(_.count).contains(1))
@@ -236,10 +228,9 @@ object DataManipulationLayerSpecs extends ZIOSpecDefault:
       final case class DeleteReturningTable(@key id: Int, name: String, value: Int) derives Table
 
       for
-        xa <- ZIO.service[Transactor]
-        _  <- xa.run:
+        _ <-
           sql"drop table if exists test_dml_delete_returning".dml
-        _ <- xa.run:
+        _ <-
           sql"""create table test_dml_delete_returning (
                   id integer primary key,
                   name varchar(255) not null,
@@ -247,10 +238,10 @@ object DataManipulationLayerSpecs extends ZIOSpecDefault:
                 )""".dml
         // Insert test record
         testRecord = DeleteReturningTable(1, "Test Record", 42)
-        _ <- xa.run:
+        _ <-
           insert(testRecord)
         // Delete and return the deleted record
-        deletedRecord <- xa.run:
+        deletedRecord <-
           deleteReturning(testRecord)
       yield assertTrue(deletedRecord.name == "Test Record") &&
         assertTrue(deletedRecord.value == 42)
@@ -261,24 +252,23 @@ object DataManipulationLayerSpecs extends ZIOSpecDefault:
       final case class DeleteWhereReturningTable(@key id: Int, name: String, category: String) derives Table
 
       for
-        xa <- ZIO.service[Transactor]
-        _  <- xa.run:
+        _ <-
           sql"drop table if exists test_dml_delete_where_returning".dml
-        _ <- xa.run:
+        _ <-
           sql"""create table test_dml_delete_where_returning (
                   id integer primary key,
                   name varchar(255) not null,
                   category varchar(255) not null
                 )""".dml
         // Insert test records
-        _ <- xa.run:
+        _ <-
           insert(DeleteWhereReturningTable(1, "Item 1", "A"))
-        _ <- xa.run:
+        _ <-
           insert(DeleteWhereReturningTable(2, "Item 2", "A"))
-        _ <- xa.run:
+        _ <-
           insert(DeleteWhereReturningTable(3, "Item 3", "B"))
         // Delete all records in category A and return them
-        deletedRecords <- xa.run:
+        deletedRecords <-
           deleteWhereReturning[DeleteWhereReturningTable](sql"category = ${"A"}")
       yield assertTrue(deletedRecords.length == 2) &&
         assertTrue(deletedRecords.forall(_.category == "A"))
@@ -289,10 +279,9 @@ object DataManipulationLayerSpecs extends ZIOSpecDefault:
       final case class CompoundKeyTable(@key userId: Int, @key roleId: Int, grantedAt: String) derives Table
 
       for
-        xa <- ZIO.service[Transactor]
-        _  <- xa.run:
+        _ <-
           sql"drop table if exists test_dml_compound_key".dml
-        _ <- xa.run:
+        _ <-
           sql"""create table test_dml_compound_key (
                   userid integer not null,
                   roleid integer not null,
@@ -302,21 +291,21 @@ object DataManipulationLayerSpecs extends ZIOSpecDefault:
         // Insert test data
         record1 = CompoundKeyTable(1, 2, "2023-01-01")
         record2 = CompoundKeyTable(1, 3, "2023-01-02")
-        _ <- xa.run:
+        _ <-
           insert(record1)
-        _ <- xa.run:
+        _ <-
           insert(record2)
         // Update using compound key
         updatedRecord = CompoundKeyTable(1, 2, "2023-01-15")
-        updateResult <- xa.run:
+        updateResult <-
           update(updatedRecord)
         // Delete using compound key
-        deleteResult <- xa.run:
+        deleteResult <-
           delete(CompoundKeyTable(1, 3, "2023-01-02"))
         // Verify operations
-        queryResult <- xa.run:
+        queryResult <-
           sql"select * from test_dml_compound_key where userid = 1 and roleid = 2".queryOne[CompoundKeyTable]
-        countResult <- xa.run:
+        countResult <-
           sql"select count(*) as count from test_dml_compound_key".queryOne[CountResult]
       yield assertTrue(updateResult == 1) &&
         assertTrue(deleteResult == 1) &&
@@ -324,7 +313,7 @@ object DataManipulationLayerSpecs extends ZIOSpecDefault:
         assertTrue(countResult.map(_.count).contains(1))
       end for
 
-  final case class CountResult(count: Int) derives Table
+  final case class CountResult(count: Long) derives Table
 
   val spec = suite("DML Operations")(dmlTests).provideShared(xaLayer) @@ TestAspect.sequential
 end DataManipulationLayerSpecs

@@ -13,9 +13,9 @@ sealed trait Table[A]:
     val _ = Alias(alias) // Compile-time validation that alias is a string literal
     Macros.instanceOf[A](alias = Some(alias))
   private[saferis] def insertColumnsSql: SqlFragment =
-    SqlFragment(columns.filterNot(_.isGenerated).map(_.sql).mkString("(", ", ", ")"), Seq.empty)
+    SqlFragment.text(columns.filterNot(_.isGenerated).map(_.sql).mkString("(", ", ", ")"))
   private[saferis] def returningColumnsSql: SqlFragment =
-    SqlFragment(columns.map(_.sql).mkString(", "), Seq.empty)
+    SqlFragment.text(columns.map(_.sql).mkString(", "))
   private[saferis] inline def insertPlaceholders(a: A): Seq[Placeholder] =
     Macros
       .columnPlaceholders(a)
@@ -25,7 +25,12 @@ sealed trait Table[A]:
         p
   private[saferis] inline def insertPlaceholdersSql(a: A): SqlFragment =
     val placeholders = insertPlaceholders(a)
-    SqlFragment(placeholders.map(_.sql).mkString("(", ", ", ")"), placeholders.flatMap(_.writes))
+    if placeholders.isEmpty then SqlFragment.text("()")
+    else
+      SqlFragment
+        .text("(")
+        .append(SqlFragment(Placeholder.join(placeholders, ", ")))
+        .append(SqlFragment.text(")"))
 
   private[saferis] inline def updateSetClause(a: A): SqlFragment =
     val placeholders = Macros
@@ -35,8 +40,9 @@ sealed trait Table[A]:
         col.isGenerated || col.isKey
     val setClauses = placeholders.map: (name, placeholder) =>
       val column = columnMap(name)
-      SqlFragment(s"${column.sql} = ${placeholder.sql}", placeholder.writes)
-    SqlFragment(setClauses.map(_.sql).mkString(", "), setClauses.flatMap(_.writes))
+      SqlFragment.text(s"${column.sql} = ").append(SqlFragment(placeholder))
+    if setClauses.isEmpty then SqlFragment.empty
+    else setClauses.reduce((left, right) => left.append(SqlFragment.text(", ")).append(right))
   end updateSetClause
 
   private[saferis] inline def updateWhereClause(a: A): SqlFragment =
@@ -46,10 +52,14 @@ sealed trait Table[A]:
         columnMap(name).isKey
     val whereClauses = keyPlaceholders.map: (name, placeholder) =>
       val column = columnMap(name)
-      SqlFragment(s"${column.sql} = ${placeholder.sql}", placeholder.writes)
+      SqlFragment.text(s"${column.sql} = ").append(SqlFragment(placeholder))
     if whereClauses.nonEmpty then
-      SqlFragment(s" where ${whereClauses.map(_.sql).mkString(" and ")}", whereClauses.flatMap(_.writes))
-    else SqlFragment("", Seq.empty)
+      SqlFragment
+        .text(" where ")
+        .append(
+          whereClauses.reduce((left, right) => left.append(SqlFragment.text(" and ")).append(right))
+        )
+    else SqlFragment.empty
   end updateWhereClause
 
 end Table
