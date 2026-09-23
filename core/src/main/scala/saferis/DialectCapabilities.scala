@@ -313,10 +313,10 @@ trait CommonTableExpressionSupport:
     s"with $recursiveClause$cteName as ($cteQuery)"
 end CommonTableExpressionSupport
 
-/** Trait for dialects that provide enhanced schema introspection beyond JDBC metadata.
+/** A dialect that can read its own catalogs through `SqlSession`.
   *
-  * The core SchemaIntrospection uses JDBC DatabaseMetaData which works across all databases. Dialects can implement
-  * this trait to provide richer metadata (e.g., partial index WHERE clauses).
+  * MySQL, SQLite, and Spark do not implement this. `Schema.verify` on those dialects fails with
+  * `SaferisError.Unsupported`.
   */
 trait SchemaIntrospectionSupport:
   self: Dialect =>

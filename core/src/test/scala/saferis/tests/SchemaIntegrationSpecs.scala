@@ -65,6 +65,13 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
   // Helper for name extraction
   final case class NameResult(name: String) derives Table
 
+  /** Class name `User` with no `@tableName`, so the catalog name is the folded `user`. */
+  object FoldedUser:
+    final case class User(@key id: Int, name: String) derives Table
+
+  @tableName("Prd.Foo")
+  final case class PrdFoo(@key id: Int, name: String) derives Table
+
   val spec = suite("Schema Integration Tests")(
     // === Partial Index Creation ===
     suite("Partial index creation")(
@@ -503,7 +510,8 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
         for
           _ <- (sql"create schema if not exists prd".insert)
           _ <- (dropTable[QualifiedRow](ifExists = true))
-          _ <- (sql"create table prd.schema_int_qualified (id bigint primary key, name text)".insert)
+          _ <- (sql"create table prd.schema_int_qualified (id bigint primary key, name text not null)".insert)
+          _ <- (Schema[QualifiedRow].verify)
           _ <- (sql"insert into prd.schema_int_qualified (id, name) values (1, 'alice')".insert)
           _ <- (sql"insert into prd.schema_int_qualified (id, name) values (2, 'bob')".insert)
           // Typed Query DSL — exercises both the FROM-clause alias and the WHERE column reference.
@@ -554,6 +562,68 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
         )
         end for
       }
+    ),
+    suite("Catalog name lookup")(
+      test("class User verifies against the folded table user") {
+        for
+          _     <- (sql"""drop table if exists "User"""".execute)
+          _     <- (sql"""drop table if exists "user"""".execute)
+          _     <- (sql"""create table "user" (id integer primary key, name varchar(255) not null)""".execute)
+          found <- (SchemaIntrospection.introspect("User"))
+          _     <- (Schema[FoldedUser.User].verify)
+          _     <- (sql"""drop table if exists "user"""".execute)
+        yield assertTrue(found.exists(_.tableName == "user"))
+      },
+      test("quoted User is TableNotFound for class User") {
+        for
+          _      <- (sql"""drop table if exists "user"""".execute)
+          _      <- (sql"""drop table if exists "User"""".execute)
+          _      <- (sql"""create table "User" (id integer primary key, name varchar(255) not null)""".execute)
+          found  <- (SchemaIntrospection.introspect("User"))
+          result <- (Schema[FoldedUser.User].verify.either)
+          _      <- (sql"""drop table if exists "User"""".execute)
+          missing = result match
+            case Left(SaferisError.SchemaValidation(issues)) =>
+              issues.exists:
+                case SchemaIssue.TableNotFound("User") => true
+                case _                                 => false
+            case _ => false
+        yield assertTrue(found.isEmpty, missing)
+      },
+      test("@tableName Prd.Foo verifies against prd.foo") {
+        for
+          _ <- (sql"create schema if not exists prd".execute)
+          _ <- (sql"drop table if exists foo".execute)
+          _ <- (sql"drop table if exists prd.foo".execute)
+          // Wrong shape in public. A lookup that ignores the schema prefix must not accept this table.
+          _     <- (sql"create table foo (id integer primary key, name integer not null)".execute)
+          _     <- (sql"create table prd.foo (id integer primary key, name varchar(255) not null)".execute)
+          found <- (SchemaIntrospection.introspect("Prd.Foo"))
+          _     <- (Schema[PrdFoo].verify)
+          _     <- (sql"drop table if exists prd.foo".execute)
+          _     <- (sql"drop table if exists foo".execute)
+        yield assertTrue(found.exists(_.tableName == "foo"))
+      },
+      test("a different partial index predicate is stored and does not fail verify") {
+        val schema = Schema[User]
+          .withIndex(_.status)
+          .where(_.status)
+          .eql("active")
+          .named("idx_status_partial")
+          .build
+        for
+          _ <- (dropTable[Profile](ifExists = true))
+          _ <- (dropTable[User](ifExists = true))
+          _ <- (createTable[User]())
+          _ <- (
+            sql"create index idx_status_partial on schema_int_users (status) where status = 'inactive'".execute
+          )
+          _     <- (Schema(schema).verify)
+          found <- (SchemaIntrospection.introspect(schema.tableName))
+          predicate = found.toList.flatMap(_.indexes).find(_.indexName == "idx_status_partial").flatMap(_.whereClause)
+        yield assertTrue(predicate.exists(text => text.contains("inactive") && !text.contains("'active'")))
+        end for
+      },
     ),
   ).provideShared(xaLayer) @@ TestAspect.sequential
 

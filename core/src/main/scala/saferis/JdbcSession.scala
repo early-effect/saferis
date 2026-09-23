@@ -31,7 +31,6 @@ import java.time.ZoneOffset
 import java.util.Locale
 import java.util.UUID
 import javax.sql.DataSource
-import scala.collection.mutable.ListBuffer
 
 /** JDBC driver settings. `configure` runs once per checkout, before `BEGIN` or any user statement. */
 final case class JdbcSessionConfig(
@@ -40,10 +39,6 @@ final case class JdbcSessionConfig(
     retry: SQLException => Boolean = e => SqlState.defaultRetryable(Option(e.getSQLState)),
     listener: SqlListener = SqlListener.noop,
 )
-
-/** JDBC `DatabaseMetaData` lookup. Not a method on `SqlSession`. PR 2 deletes this. */
-private[saferis] trait JdbcMetadataProbe:
-  def introspect(table: String)(using Trace): IO[SaferisError, Option[DatabaseTable]]
 
 object JdbcSession:
   def layer(config: JdbcSessionConfig = JdbcSessionConfig()): URLayer[DataSource, SqlSession] =
@@ -90,8 +85,7 @@ private final class JdbcSession(
     dataSource: DataSource,
     config: JdbcSessionConfig,
     txn: Option[Txn],
-) extends SqlSession
-    with JdbcMetadataProbe:
+) extends SqlSession:
 
   import JdbcSession.*
 
@@ -151,11 +145,6 @@ private final class JdbcSession(
                       committed.set(true).as(value)
               case Exit.Failure(cause) => ZIO.failCause(cause)
           yield result
-
-  def introspect(table: String)(using Trace): IO[SaferisError, Option[DatabaseTable]] =
-    val sql = s"introspect $table"
-    guard(sql) *> withConnection: conn =>
-      driver(sql, ZIO.attemptBlocking(JdbcMetadata.introspect(conn, table)))
 
   private def runExec(command: SqlCommand, sql: String, timeout: Option[Duration])(using
       Trace
@@ -557,130 +546,3 @@ private object JdbcReads:
     end match
   end readCell
 end JdbcReads
-
-private object JdbcMetadata:
-  def introspect(conn: Connection, tableName: String): Option[DatabaseTable] =
-    val meta   = conn.getMetaData
-    val schema = conn.getSchema
-    val tables = meta.getTables(null, schema, tableName, Array("TABLE"))
-    try
-      if !tables.next() then
-        val tablesLower = meta.getTables(null, schema, tableName.toLowerCase, Array("TABLE"))
-        try
-          if !tablesLower.next() then
-            val tablesUpper = meta.getTables(null, schema, tableName.toUpperCase, Array("TABLE"))
-            try
-              if !tablesUpper.next() then None
-              else Some(buildTable(meta, schema, tableName.toUpperCase))
-            finally tablesUpper.close()
-          else Some(buildTable(meta, schema, tableName.toLowerCase))
-        finally tablesLower.close()
-      else Some(buildTable(meta, schema, tableName))
-    finally tables.close()
-    end try
-  end introspect
-
-  private def buildTable(meta: java.sql.DatabaseMetaData, schema: String, tableName: String): DatabaseTable =
-    DatabaseTable(
-      tableName,
-      columns(meta, schema, tableName),
-      primaryKeys(meta, schema, tableName),
-      indexes(meta, schema, tableName, primaryKeys(meta, schema, tableName)),
-      Nil,
-      foreignKeys(meta, schema, tableName),
-    )
-
-  private def columns(meta: java.sql.DatabaseMetaData, schema: String, tableName: String): Seq[DatabaseColumn] =
-    val rs    = meta.getColumns(null, schema, tableName, null)
-    val found = ListBuffer.empty[DatabaseColumn]
-    try
-      while rs.next() do
-        found += DatabaseColumn(
-          name = rs.getString("COLUMN_NAME"),
-          dataType = rs.getString("TYPE_NAME"),
-          isNullable = rs.getString("IS_NULLABLE") == "YES",
-          isPrimaryKey = false,
-          defaultValue = Option(rs.getString("COLUMN_DEF")),
-          ordinalPosition = rs.getInt("ORDINAL_POSITION"),
-        )
-    finally rs.close()
-    end try
-    found.toSeq
-  end columns
-
-  private def primaryKeys(meta: java.sql.DatabaseMetaData, schema: String, tableName: String): Seq[String] =
-    val rs   = meta.getPrimaryKeys(null, schema, tableName)
-    val keys = ListBuffer.empty[(String, Int)]
-    try while rs.next() do keys += (rs.getString("COLUMN_NAME") -> rs.getInt("KEY_SEQ"))
-    finally rs.close()
-    keys.sortBy(_._2).map(_._1).toSeq
-
-  private def indexes(
-      meta: java.sql.DatabaseMetaData,
-      schema: String,
-      tableName: String,
-      keys: Seq[String],
-  ): Seq[DatabaseIndex] =
-    val rs    = meta.getIndexInfo(null, schema, tableName, false, false)
-    val found = ListBuffer.empty[(String, String, Boolean, Int)]
-    try
-      while rs.next() do
-        val indexName = rs.getString("INDEX_NAME")
-        val colName   = rs.getString("COLUMN_NAME")
-        if indexName != null && colName != null then
-          found += ((indexName, colName, !rs.getBoolean("NON_UNIQUE"), rs.getInt("ORDINAL_POSITION")))
-    finally rs.close()
-    found
-      .groupBy(_._1)
-      .map { case (name, cols) =>
-        val sorted = cols.sortBy(_._4).map(_._2).toSeq
-        val unique = cols.headOption.exists(_._3)
-        DatabaseIndex(name, sorted, unique, None)
-      }
-      .toSeq
-      .filterNot(idx => idx.columns.map(_.toLowerCase) == keys.map(_.toLowerCase))
-  end indexes
-
-  private def foreignKeys(
-      meta: java.sql.DatabaseMetaData,
-      schema: String,
-      tableName: String,
-  ): Seq[DatabaseForeignKey] =
-    val rs    = meta.getImportedKeys(null, schema, tableName)
-    val found = ListBuffer.empty[(String, String, String, String, String, Int, String)]
-    try
-      while rs.next() do
-        found += (
-          (
-            rs.getString("FK_NAME"),
-            rs.getString("FKCOLUMN_NAME"),
-            rs.getString("PKTABLE_NAME"),
-            rs.getString("PKCOLUMN_NAME"),
-            rule(rs.getShort("DELETE_RULE")),
-            rs.getInt("KEY_SEQ"),
-            rule(rs.getShort("UPDATE_RULE")),
-          )
-        )
-    finally rs.close()
-    end try
-    found
-      .groupBy(_._1)
-      .map { case (name, cols) =>
-        val sorted   = cols.sortBy(_._6)
-        val fromCols = sorted.map(_._2).toSeq
-        val toTable  = sorted.headOption.map(_._3).getOrElse("")
-        val toCols   = sorted.map(_._4).toSeq
-        val onDelete = sorted.headOption.map(_._5).getOrElse("NO ACTION")
-        val onUpdate = sorted.headOption.map(_._7).getOrElse("NO ACTION")
-        DatabaseForeignKey(name, fromCols, toTable, toCols, onDelete, onUpdate)
-      }
-      .toSeq
-  end foreignKeys
-
-  private def rule(value: Short): String = value match
-    case java.sql.DatabaseMetaData.importedKeyCascade    => "CASCADE"
-    case java.sql.DatabaseMetaData.importedKeySetNull    => "SET NULL"
-    case java.sql.DatabaseMetaData.importedKeySetDefault => "SET DEFAULT"
-    case java.sql.DatabaseMetaData.importedKeyRestrict   => "RESTRICT"
-    case _                                               => "NO ACTION"
-end JdbcMetadata

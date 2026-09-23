@@ -6,8 +6,8 @@ import scala.collection.mutable.ListBuffer
 
 /** Schema introspection and validation.
   *
-  * JDBC metadata is reached only through `JdbcMetadataProbe`, implemented by `JdbcSession`. Dialects can implement
-  * SchemaIntrospectionSupport for richer metadata.
+  * Postgres reads `information_schema` and `pg_catalog` through `SqlSession`. A dialect without a catalog interpreter
+  * fails with `SaferisError.Unsupported`.
   */
 object SchemaIntrospection:
 
@@ -18,12 +18,9 @@ object SchemaIntrospection:
       Trace
   ): ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
     dialect match
-      case d: SchemaIntrospectionSupport => d.introspectTable(tableName)
-      case _                             =>
-        ZIO.serviceWithZIO[SqlSession]:
-          case probe: JdbcMetadataProbe => probe.introspect(tableName)
-          case _                        =>
-            ZIO.fail(SaferisError.Unsupported(s"${dialect.name} schema introspection requires a JDBC session"))
+      case support: SchemaIntrospectionSupport => support.introspectTable(tableName)
+      case other                               =>
+        ZIO.fail(SaferisError.Unsupported(s"${other.name} schema verification is not supported"))
 
   /** Verify a schema against the database using default options. */
   def verify[A](instance: Instance[A])(using
@@ -105,9 +102,7 @@ object SchemaIntrospection:
       }
     end if
 
-    // Check unique constraints
-    // Note: JDBC doesn't expose unique constraints separately - they appear as unique indexes.
-    // So we check both uniqueConstraints and unique indexes.
+    // Unique constraints come from the catalog. A unique index that is not a constraint still matches.
     if options.checkUniqueConstraints then
       instance.uniqueConstraints.foreach { ucSpec =>
         val columnLabels = ucSpec.columns.map(instance.fieldToLabel)

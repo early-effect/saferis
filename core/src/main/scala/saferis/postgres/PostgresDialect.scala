@@ -1,11 +1,13 @@
 package saferis.postgres
 
 import saferis.*
+import zio.Trace
+import zio.ZIO
 
 // Export PostgresDialect with its singleton type so all capability intersections are satisfied
 given PostgresDialect.type = PostgresDialect
 
-/** PostgreSQL dialect implementation providing PostgreSQL-specific type mappings and SQL generation */
+/** PostgreSQL dialect implementation providing PostgreSQL-specific type mappings, SQL generation, and catalog reads. */
 object PostgresDialect
     extends Dialect
     with ReturningSupport
@@ -15,9 +17,13 @@ object PostgresDialect
     with JsonSupport
     with ArraySupport
     with WindowFunctionSupport
-    with CommonTableExpressionSupport:
+    with CommonTableExpressionSupport
+    with SchemaIntrospectionSupport:
 
   val name: String = "PostgreSQL"
+
+  def introspectTable(tableName: String)(using Trace): ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
+    PostgresCatalog.introspect(tableName)
 
   def columnType(tpe: SqlType): String = tpe match
     case SqlType.Bool            => "boolean"

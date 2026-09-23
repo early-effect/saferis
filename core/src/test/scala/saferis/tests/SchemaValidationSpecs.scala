@@ -3,7 +3,10 @@ package saferis.tests
 import saferis.*
 import saferis.Schema.*
 import saferis.ddl.*
+import saferis.mysql.MySQLDialect
 import saferis.postgres.PostgresDialect
+import saferis.spark.SparkDialect
+import saferis.sqlite.SQLiteDialect
 import saferis.tests.PostgresTestContainer.DataSourceProvider
 import zio.*
 import zio.test.*
@@ -110,6 +113,45 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
           case _                                                      => false
         })
       },
+      test("verify fails with TypeMismatch when the catalog type differs") {
+        for
+          _ <- (sql"DROP TABLE IF EXISTS validation_orders".execute)
+          _ <- (sql"DROP TABLE IF EXISTS validation_users".execute)
+          _ <- (
+            sql"""CREATE TABLE validation_users (
+                  id SERIAL PRIMARY KEY,
+                  name INTEGER NOT NULL,
+                  email VARCHAR(255) NOT NULL,
+                  age INT
+                )""".execute
+          )
+          schema = Schema[User].build
+          issues <- (Schema(schema).verify).schemaValidationIssues
+        yield assertTrue(issues.exists {
+          case SchemaIssue.TypeMismatch(_, "name", _, "int4") => true
+          case _                                              => false
+        })
+      },
+      test("verify fails with PrimaryKeyMismatch when the primary key differs") {
+        for
+          _ <- (sql"DROP TABLE IF EXISTS validation_orders".execute)
+          _ <- (sql"DROP TABLE IF EXISTS validation_users".execute)
+          _ <- (
+            sql"""CREATE TABLE validation_users (
+                  id INT NOT NULL,
+                  name VARCHAR(255) NOT NULL,
+                  email VARCHAR(255) NOT NULL PRIMARY KEY,
+                  age INT
+                )""".execute
+          )
+          schema = Schema[User].build
+          issues <- (Schema(schema).verify).schemaValidationIssues
+        yield assertTrue(issues.exists {
+          case SchemaIssue.PrimaryKeyMismatch(_, expected, actual) =>
+            expected.map(_.toLowerCase) == Seq("id") && actual.map(_.toLowerCase) == Seq("email")
+          case _ => false
+        })
+      },
     ),
     suite("Index verification")(
       test("verify fails with MissingIndex when expected index missing") {
@@ -196,11 +238,14 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
           .named("uq_users_email")
           .build
         for
-          _ <- (dropTable[Order](ifExists = true))
-          _ <- (dropTable[User](ifExists = true))
-          _ <- (createTable(schema))
-          _ <- (Schema(schema).verify)
-        yield assertCompletes
+          _     <- (dropTable[Order](ifExists = true))
+          _     <- (dropTable[User](ifExists = true))
+          _     <- (createTable(schema))
+          _     <- (Schema(schema).verify)
+          found <- (SchemaIntrospection.introspect("validation_users"))
+        yield assertTrue(
+          found.exists(_.uniqueConstraints.exists(_.columns.map(_.toLowerCase) == Seq("email")))
+        )
       },
     ),
     suite("VerifyOptions presets")(
@@ -218,6 +263,27 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
           _ <- (Schema(schema).verifyWith(VerifyOptions.minimal))
         yield assertCompletes
         end for
+      }
+    ),
+    suite("Dialects without catalogs")(
+      test("MySQL, SQLite, and Spark verify fail with Unsupported") {
+        def unsupported(dialect: Dialect) =
+          Schema[User]
+            .verify(using dialect)
+            .exit
+            .map: exit =>
+              assertTrue:
+                exit match
+                  case Exit.Failure(cause) =>
+                    cause.failureOption match
+                      case Some(SaferisError.Unsupported(message)) => message.contains(dialect.name)
+                      case _                                       => false
+                  case Exit.Success(_) => false
+        for
+          mysql  <- unsupported(MySQLDialect)
+          sqlite <- unsupported(SQLiteDialect)
+          spark  <- unsupported(SparkDialect)
+        yield mysql && sqlite && spark
       }
     ),
   ).provideShared(xaLayer) @@ TestAspect.sequential
