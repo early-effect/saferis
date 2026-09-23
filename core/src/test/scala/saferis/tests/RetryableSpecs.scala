@@ -1,12 +1,7 @@
 package saferis.tests
 
 import saferis.*
-import saferis.tests.PostgresTestContainer.DataSourceProvider
-import zio.*
 import zio.test.*
-import zio.test.Assertion.*
-
-import java.sql.SQLException
 
 object RetryableSpecs extends ZIOSpecDefault:
 
@@ -67,35 +62,8 @@ object RetryableSpecs extends ZIOSpecDefault:
       assertTrue(classified("8000", vendor = true).isInstanceOf[SaferisError.Retryable]),
   )
 
-  private val syntaxIsRetryable: SQLException => Boolean =
-    e => Option(e.getSQLState).exists(_.startsWith("42"))
-
-  private val customClassifierLayer =
-    DataSourceProvider.configured(JdbcSessionConfig(retry = syntaxIsRetryable))
-
-  private val defaultClassifierLayer =
-    DataSourceProvider.default
-
-  private val brokenQuery = sql"deli meat from nowhere".dml
-
-  private val wiringTests = suite("JdbcSession retry hook")(
-    test("a syntax error stays SyntaxError even when the hook matches class 42"):
-      for result <- brokenQuery.exit
-      yield assert(result)(fails(isSubtype[SaferisError.SyntaxError](anything)))
-    .provideShared(customClassifierLayer),
-    test("default hook leaves syntax errors as SyntaxError"):
-      for result <- brokenQuery.exit
-      yield assert(result)(fails(isSubtype[SaferisError.SyntaxError](anything)))
-    .provideShared(defaultClassifierLayer),
-    test("the hook does not resume a failed transaction"):
-      for result <- transact(brokenQuery).exit
-      yield assert(result)(fails(isSubtype[SaferisError.SyntaxError](anything)))
-    .provideShared(customClassifierLayer),
-  )
-
   override def spec = suite("Retryable error classification")(
-    classifyTests,
-    wiringTests,
-  ) @@ TestAspect.sequential
+    classifyTests
+  )
 
 end RetryableSpecs

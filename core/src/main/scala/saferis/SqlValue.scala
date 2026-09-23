@@ -2,6 +2,8 @@ package saferis
 
 import zio.Chunk
 
+import java.math.MathContext
+import java.math.RoundingMode
 import java.time.format.DateTimeFormatter
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -86,7 +88,7 @@ object SqlValue:
     case SmallInt(v)        => v.toString
     case Integer(v)         => v.toString
     case BigInt(v)          => v.toString
-    case Real(v)            => v.toString
+    case Real(v)            => floatLiteral(v)
     case DoublePrecision(v) => v.toString
     case Numeric(v)         => v.toString
     case VarChar(v)         => quote(v)
@@ -101,6 +103,26 @@ object SqlValue:
 
   def quote(text: String): String =
     s"'${text.replace("'", "''")}'"
+
+  /** Shortest round-trip decimal. Scala.js `Float.toString` prints the widened binary value. */
+  private def floatLiteral(v: Float): String =
+    if v.isNaN then "NaN"
+    else if v.isInfinity then if v > 0.0f then "Infinity" else "-Infinity"
+    else if v == 0.0f then if 1.0f / v < 0.0f then "-0.0" else "0.0"
+    else shortestFloat(v)
+
+  private def shortestFloat(v: Float): String =
+    def attempt(sig: Int): String =
+      val text =
+        new java.math.BigDecimal(
+          v.toDouble,
+          new MathContext(sig, RoundingMode.HALF_EVEN),
+        ).stripTrailingZeros.toPlainString
+      if text.toFloat == v then text
+      else if sig == 9 then v.toString
+      else attempt(sig + 1)
+    attempt(1)
+  end shortestFloat
 
   private def hex(bytes: Chunk[Byte]): String =
     val digits = "0123456789abcdef"

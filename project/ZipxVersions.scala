@@ -35,18 +35,14 @@ object MyVersions extends ZipxVersions:
   val scalafix       = Plugin("ch.epfl.scala", "sbt-scalafix", "0.14.7")
   val dynverCi       = Plugin("rocks.earlyeffect", "sbt-dynver-ci", "0.2.3")
   val scoverage      = Plugin("org.scoverage", "sbt-scoverage", "2.4.4")
+  val scalajs        = Plugin("org.scala-js", "sbt-scalajs", "1.22.0")
 
   private def provided(lib: Lib): Lib = lib.copy(config = Some("provided"))
 
-  def coreLib = library(provided(zio), provided(zioStreams), provided(zioJson), postgresql)
-  def coreTest = library(
-    zioLoggingSlf4j.test,
-    zioTest.test,
-    zioTestSbt.test,
-    zioTestMagnolia.test,
-    postgresqlTc.test,
-    postgresql.test,
-  )
+  def coreLib  = library(provided(zio), provided(zioStreams), provided(zioJson))
+  def coreTest = library(zioTest.test, zioTestSbt.test, zioTestMagnolia.test)
+  def jdbcLib  = library(provided(zio), provided(zioStreams), postgresql)
+  def jdbcTest = library(zioLoggingSlf4j.test, postgresqlTc.test, postgresql.test, zioJson.test)
   def docsLib  = library(zio, zioStreams)
   def docsTest = library(specularZioTest, specularTheme, postgresqlTc.test, postgresql.test, slf4jNop.test)
 end MyVersions

@@ -84,15 +84,18 @@ zipxCapabilities ++= {
   Seq(
     Capability.once(
       name = Capability.TestName,
-      command = zipxTasks.session(testFull, LocalProject("docs") / specularSite),
+      command = zipxTasks.session(
+        LocalProject("core") / testFull,
+        LocalProject("coreJS") / testFull,
+        LocalProject("jdbc") / testFull,
+        LocalProject("docs") / specularSite,
+      ),
       // GHA VMs are disposable; skip Ryuk so Hub flakes on testcontainers/ryuk cannot fail CI.
       env = Map("TESTCONTAINERS_RYUK_DISABLED" -> EnvValue.plain("true")),
       extraSteps = prePullPostgres,
     ),
-    // Same core-only command as before; sessionTail cleared so sonaRelease is not appended twice.
+    // Every publishing row, then sonaRelease once. docs and root do not publish.
     ZipxCentral.release
-      .runningPerModule(cmd"core/publishSigned; sonaRelease")
-      .copy(sessionTail = None)
       .withCondition(upstream),
     ZipxGitHubPackages
       .sharedRegistry(
@@ -102,8 +105,7 @@ zipxCapabilities ++= {
         packagesRepo = Some("https://maven.pkg.github.com/iterable/maven-packages"),
         publishOrg = Some("com.iterable"),
         publishOrgName = Some("Iterable"),
-      )
-      .runningPerModule(cmd"core/publish"),
+      ),
     // Same org reusable workflow as peers; generated into ci.yml (no hand-rolled docs.yml).
     ZipxDocs.pages().andCondition(upstream),
   )
@@ -122,30 +124,48 @@ lazy val publishSettings = Seq(
   pomIncludeRepository := { _ => false },
 )
 
+lazy val scala3Version: String = MyVersions.scala
+lazy val scalaVersions         = Seq(scala3Version)
+
 // Root project aggregates all modules but is not published
 lazy val root = project
   .in(file("."))
-  .aggregate(core, docs)
+  .aggregate((core.projectRefs ++ jdbc.projectRefs ++ Seq[sbt.ProjectReference](docs))*)
   .settings(
     name           := "saferis-root",
     publish / skip := true,
   )
 
-// Core library - the main publishable artifact
-lazy val core = project
-  .in(file("core"))
+// Core library. JVM and Scala.js. No JDBC.
+lazy val core = (projectMatrix in file("core"))
   .settings(commonSettings)
   .settings(publishSettings)
+  .settings(MyVersions.coreLib)
+  .settings(MyVersions.coreTest)
   .settings(
     name        := "saferis",
     description := "Saferis mitigates the discord of unsafe SQL. It is a resource safe SQL client library.",
-    MyVersions.coreLib,
-    MyVersions.coreTest,
   )
+  .jvmPlatform(scalaVersions = scalaVersions)
+  .jsPlatform(scalaVersions = scalaVersions)
+
+// JDBC driver. JVM only. Depends on the core JVM row.
+lazy val jdbc = (projectMatrix in file("jdbc"))
+  .dependsOn(core)
+  .settings(commonSettings)
+  .settings(publishSettings)
+  .settings(MyVersions.jdbcLib)
+  .settings(MyVersions.coreTest)
+  .settings(MyVersions.jdbcTest)
+  .settings(
+    name        := "saferis-jdbc",
+    description := "JDBC SqlSession for Postgres.",
+  )
+  .jvmPlatform(scalaVersions = scalaVersions)
 
 lazy val docs = project
   .in(file("saferis-docs"))
-  .dependsOn(core)
+  .dependsOn(jdbc.jvm(scala3Version))
   .enablePlugins(SpecularPlugin)
   .settings(commonSettings)
   .settings(
