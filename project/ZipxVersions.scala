@@ -10,7 +10,7 @@ import zipx.*
   * (zio-schema-json still pins 0.10.0; a docs-selected 1.0.0 row fails early-semver eviction).
   */
 object MyVersions extends ZipxVersions:
-  val sbt: SbtVersion     = SbtVersion("2.0.7")
+  val sbt: SbtVersion     = SbtVersion("2.1.0-M2")
   val scala: ScalaVersion = ScalaVersion("3.3.8")
 
   val zio             = Lib("dev.zio", "zio", "2.1.26")
