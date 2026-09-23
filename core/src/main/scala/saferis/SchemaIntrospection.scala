@@ -2,6 +2,7 @@ package saferis
 
 import zio.*
 
+import java.util.Locale
 import scala.collection.mutable.ListBuffer
 
 /** Schema introspection and validation.
@@ -53,10 +54,10 @@ object SchemaIntrospection:
     val tableName = instance.tableName
     val issues    = ListBuffer.empty[SchemaIssue]
 
-    // Check each expected column
+    // Stored catalog name equals the folded label. Do not fold the catalog name.
     instance.columns.foreach { col =>
       val columnLabel = col.label
-      dbTable.columns.find(_.name.equalsIgnoreCase(columnLabel)) match
+      dbTable.columns.find(_.name == folded(columnLabel)) match
         case None =>
           issues += SchemaIssue.MissingColumn(tableName, columnLabel, col.columnType)
         case Some(dbCol) =>
@@ -69,21 +70,14 @@ object SchemaIntrospection:
       end match
     }
 
-    // Check primary key
-    val expectedKeys = instance.columns.filter(_.isKey).map(_.label).sorted
-    if expectedKeys.nonEmpty && expectedKeys != dbTable.primaryKeyColumns.map(_.toLowerCase).sorted.map { k =>
-        instance.columns.find(_.label.equalsIgnoreCase(k)).map(_.label).getOrElse(k)
-      }
-    then
-      val actualKeys = dbTable.primaryKeyColumns
-      if expectedKeys.map(_.toLowerCase).sorted != actualKeys.map(_.toLowerCase).sorted then
-        issues += SchemaIssue.PrimaryKeyMismatch(tableName, expectedKeys, actualKeys)
+    val expectedKeys = instance.columns.filter(_.isKey).map(_.label)
+    if expectedKeys.nonEmpty && expectedKeys.map(folded).sorted != dbTable.primaryKeyColumns.sorted then
+      issues += SchemaIssue.PrimaryKeyMismatch(tableName, expectedKeys, dbTable.primaryKeyColumns)
 
-    // Check for extra columns
     if options.checkExtraColumns then
-      val expectedColumnNames = instance.columns.map(_.label.toLowerCase).toSet
+      val expectedColumnNames = instance.columns.map(col => folded(col.label)).toSet
       dbTable.columns.foreach { dbCol =>
-        if !expectedColumnNames.contains(dbCol.name.toLowerCase) then
+        if !expectedColumnNames.contains(dbCol.name) then
           issues += SchemaIssue.ExtraColumn(tableName, dbCol.name, dbCol.dataType)
       }
 
@@ -102,17 +96,14 @@ object SchemaIntrospection:
       }
     end if
 
-    // Unique constraints come from the catalog. A unique index that is not a constraint still matches.
     if options.checkUniqueConstraints then
       instance.uniqueConstraints.foreach { ucSpec =>
         val columnLabels = ucSpec.columns.map(instance.fieldToLabel)
         val expectedName = ucSpec.constraintName
-        // First check dedicated unique constraints, then fall back to unique indexes
-        findMatchingUniqueConstraint(dbTable.uniqueConstraints, columnLabels)
-          .orElse(findMatchingIndex(dbTable.indexes, columnLabels, expectedUnique = true)) match
+        findMatchingUniqueConstraint(dbTable.uniqueConstraints, columnLabels) match
           case None =>
             issues += SchemaIssue.MissingUniqueConstraint(tableName, expectedName, columnLabels)
-          case Some(dbUc: DatabaseUniqueConstraint) if options.strictNameMatching && expectedName.isDefined =>
+          case Some(dbUc) if options.strictNameMatching && expectedName.isDefined =>
             if !expectedName.get.equalsIgnoreCase(dbUc.constraintName) then
               issues += SchemaIssue.UniqueConstraintNameMismatch(
                 tableName,
@@ -120,15 +111,7 @@ object SchemaIntrospection:
                 dbUc.constraintName,
                 columnLabels,
               )
-          case Some(dbIdx: DatabaseIndex) if options.strictNameMatching && expectedName.isDefined =>
-            if !expectedName.get.equalsIgnoreCase(dbIdx.indexName) then
-              issues += SchemaIssue.UniqueConstraintNameMismatch(
-                tableName,
-                expectedName.get,
-                dbIdx.indexName,
-                columnLabels,
-              )
-          case _ => // OK
+          case _ => ()
         end match
       }
     end if
@@ -160,21 +143,27 @@ object SchemaIntrospection:
     issues.toList
   end compare
 
+  /** Fold the Scala label. The catalog name is already the spelling Postgres stored. */
+  private def folded(name: String): String =
+    name.toLowerCase(Locale.ROOT)
+
+  private def storedMatches(stored: Seq[String], expected: Seq[String]): Boolean =
+    stored == expected.map(folded)
+
   private def findMatchingIndex(
       indexes: Seq[DatabaseIndex],
       expectedColumns: Seq[String],
       expectedUnique: Boolean,
   ): Option[DatabaseIndex] =
     indexes.find { idx =>
-      idx.columns.map(_.toLowerCase) == expectedColumns.map(_.toLowerCase) &&
-      idx.isUnique == expectedUnique
+      storedMatches(idx.columns, expectedColumns) && idx.isUnique == expectedUnique
     }
 
   private def findMatchingUniqueConstraint(
       constraints: Seq[DatabaseUniqueConstraint],
       expectedColumns: Seq[String],
   ): Option[DatabaseUniqueConstraint] =
-    constraints.find(_.columns.map(_.toLowerCase) == expectedColumns.map(_.toLowerCase))
+    constraints.find(uc => storedMatches(uc.columns, expectedColumns))
 
   private def findMatchingForeignKey(
       foreignKeys: Seq[DatabaseForeignKey],
@@ -183,9 +172,9 @@ object SchemaIntrospection:
       toColumns: Seq[String],
   ): Option[DatabaseForeignKey] =
     foreignKeys.find { fk =>
-      fk.fromColumns.map(_.toLowerCase) == fromColumns.map(_.toLowerCase) &&
-      fk.toTable.equalsIgnoreCase(toTable) &&
-      fk.toColumns.map(_.toLowerCase) == toColumns.map(_.toLowerCase)
+      storedMatches(fk.fromColumns, fromColumns) &&
+      fk.toTable == folded(toTable) &&
+      storedMatches(fk.toColumns, toColumns)
     }
 
   // === Type Compatibility ===

@@ -5,15 +5,6 @@ import zio.Chunk
 import zio.Trace
 import zio.ZIO
 
-/** Postgres catalog reads for schema verification.
-  *
-  * Unquoted names fold. A table predicate is `table_name = lower($1)`, not `lower` on the column, so a quoted `"User"`
-  * does not match class `User`. A dotted name splits on the last dot, the same way `AliasGenerator.next` does: the
-  * suffix is the table and the prefix is `table_schema = lower($prefix)`. No dot means
-  * `table_schema = current_schema()`. Column lookups would use `column_name = lower($1)`. These queries list every
-  * column of the table, so they do not filter by one column name. The selected name is the one Postgres stored. Names
-  * are bound parameters.
-  */
 private[saferis] object PostgresCatalog:
 
   def introspect(rawName: String)(using Trace): ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
@@ -83,7 +74,6 @@ private[saferis] object PostgresCatalog:
   private def and(left: SqlFragment, right: SqlFragment): SqlFragment =
     left.append(SqlFragment.text(" and ")).append(right)
 
-  /** `table_schema` / `table_name` predicate. `column` filters, if added, use the same `lower` on the parameter. */
   private def infoName(alias: String, raw: String): SqlFragment =
     val parsed    = parsedName(raw)
     val schemaCol = s"$alias.table_schema"
@@ -165,29 +155,40 @@ private[saferis] object PostgresCatalog:
   private def foreignKeyQuery(raw: String): SqlFragment =
     selectWhere(
       """
-        |select tc.constraint_name::text as constraint_name,
-        |       kcu.column_name::text as from_column,
-        |       ccu.table_name::text as to_table,
-        |       ccu.column_name::text as to_column,
-        |       rc.update_rule::text as update_rule,
-        |       rc.delete_rule::text as delete_rule,
-        |       kcu.ordinal_position::int as ordinal_position
-        |  from information_schema.table_constraints as tc
-        |  join information_schema.referential_constraints as rc
-        |    on rc.constraint_schema = tc.constraint_schema
-        |   and rc.constraint_name = tc.constraint_name
-        |  join information_schema.key_column_usage as kcu
-        |    on kcu.constraint_schema = tc.constraint_schema
-        |   and kcu.constraint_name = tc.constraint_name
-        |   and kcu.table_schema = tc.table_schema
-        |   and kcu.table_name = tc.table_name
-        |  join information_schema.key_column_usage as ccu
-        |    on ccu.constraint_schema = rc.unique_constraint_schema
-        |   and ccu.constraint_name = rc.unique_constraint_name
-        |   and ccu.ordinal_position = kcu.position_in_unique_constraint
+        |select con.conname::text as constraint_name,
+        |       src_att.attname::text as from_column,
+        |       dst.relname::text as to_table,
+        |       dst_att.attname::text as to_column,
+        |       case con.confupdtype
+        |         when 'a' then 'NO ACTION'
+        |         when 'r' then 'RESTRICT'
+        |         when 'c' then 'CASCADE'
+        |         when 'n' then 'SET NULL'
+        |         when 'd' then 'SET DEFAULT'
+        |       end::text as update_rule,
+        |       case con.confdeltype
+        |         when 'a' then 'NO ACTION'
+        |         when 'r' then 'RESTRICT'
+        |         when 'c' then 'CASCADE'
+        |         when 'n' then 'SET NULL'
+        |         when 'd' then 'SET DEFAULT'
+        |       end::text as delete_rule,
+        |       cols.ord::int as ordinal_position
+        |  from pg_catalog.pg_constraint as con
+        |  join pg_catalog.pg_class as t on t.oid = con.conrelid
+        |  join pg_catalog.pg_namespace as n on n.oid = t.relnamespace
+        |  join pg_catalog.pg_class as dst on dst.oid = con.confrelid
+        |  join lateral unnest(con.conkey, con.confkey) with ordinality as cols(src_attnum, dst_attnum, ord)
+        |    on true
+        |  join pg_catalog.pg_attribute as src_att
+        |    on src_att.attrelid = t.oid
+        |   and src_att.attnum = cols.src_attnum
+        |  join pg_catalog.pg_attribute as dst_att
+        |    on dst_att.attrelid = dst.oid
+        |   and dst_att.attnum = cols.dst_attnum
         """,
-      SqlFragment.text("tc.constraint_type = 'FOREIGN KEY' and ").append(infoName("tc", raw)),
-      " order by tc.constraint_name, kcu.ordinal_position",
+      SqlFragment.text("con.contype = 'f' and ").append(relationName(raw)),
+      " order by con.conname, cols.ord",
     )
 
   private def indexQuery(raw: String): SqlFragment =
@@ -279,7 +280,7 @@ private[saferis] object PostgresCatalog:
     rows.toSeq.sortBy(_.ordinal).map(_.name)
 
   private def columnModels(rows: Chunk[ColumnRow], keys: Seq[String]): Seq[DatabaseColumn] =
-    val keyNames = keys.map(_.toLowerCase).toSet
+    val keyNames = keys.toSet
     rows.toSeq
       .sortBy(_.ordinal)
       .map: row =>
@@ -287,7 +288,7 @@ private[saferis] object PostgresCatalog:
           name = row.name,
           dataType = row.dataType,
           isNullable = row.nullable,
-          isPrimaryKey = keyNames.contains(row.name.toLowerCase),
+          isPrimaryKey = keyNames.contains(row.name),
           defaultValue = row.defaultValue,
           ordinalPosition = row.ordinal,
         )

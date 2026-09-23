@@ -34,6 +34,15 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
       amount: BigDecimal,
   ) derives Table
 
+  @tableName("quoted_name_cols")
+  final case class QuotedColumn(@key id: Int, name: String) derives Table
+
+  @tableName("fk_email_users")
+  final case class FkEmailUser(@key id: Int, email: String) derives Table
+
+  @tableName("fk_email_children")
+  final case class FkEmailChild(@key id: Int, email: String) derives Table
+
   // Helper to extract validation issues from SaferisError.SchemaValidation
   extension [R](zio: ZIO[R, SaferisError, Unit])
     def schemaValidationIssues: ZIO[R, Nothing, List[SchemaIssue]] =
@@ -148,9 +157,25 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
           issues <- (Schema(schema).verify).schemaValidationIssues
         yield assertTrue(issues.exists {
           case SchemaIssue.PrimaryKeyMismatch(_, expected, actual) =>
-            expected.map(_.toLowerCase) == Seq("id") && actual.map(_.toLowerCase) == Seq("email")
+            expected.map(_.toLowerCase) == Seq("id") && actual == Seq("email")
           case _ => false
         })
+      },
+      test("quoted Name is MissingColumn for name and ExtraColumn for Name") {
+        for
+          _ <- (sql"DROP TABLE IF EXISTS quoted_name_cols".execute)
+          _ <- (
+            sql"""CREATE TABLE quoted_name_cols (
+                  id INTEGER PRIMARY KEY,
+                  "Name" VARCHAR(255) NOT NULL
+                )""".execute
+          )
+          issues <- (Schema[QuotedColumn].verify).schemaValidationIssues
+        yield assertTrue(
+          issues.collect { case SchemaIssue.MissingColumn(_, column, _) => column } == List("name"),
+          issues.collect { case SchemaIssue.ExtraColumn(_, column, _) => column } == List("Name"),
+          issues.length == 2,
+        )
       },
     ),
     suite("Index verification")(
@@ -218,6 +243,52 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
           _ <- (Schema(ordersSchema).verify)
         yield assertCompletes
       },
+      test("duplicate uq_email on another table does not change the referenced table") {
+        val schema = Schema[FkEmailChild]
+          .withForeignKey(_.email)
+          .references[FkEmailUser](_.email)
+          .build
+        for
+          _ <- (sql"DROP TABLE IF EXISTS fk_email_children".execute)
+          _ <- (sql"DROP TABLE IF EXISTS fk_email_orders".execute)
+          _ <- (sql"DROP TABLE IF EXISTS fk_email_users".execute)
+          _ <- (
+            sql"""CREATE TABLE fk_email_users (
+                  id INTEGER PRIMARY KEY,
+                  email VARCHAR(255) NOT NULL,
+                  CONSTRAINT uq_email UNIQUE (email)
+                )""".execute
+          )
+          // A second UNIQUE named uq_email fails: Postgres names the backing index uq_email,
+          // and that relation name is unique per schema. A foreign key can reuse the name.
+          // key_column_usage then has two uq_email rows. confrelid must still be fk_email_users.
+          _ <- (
+            sql"""CREATE TABLE fk_email_orders (
+                  id INTEGER PRIMARY KEY,
+                  email VARCHAR(255) NOT NULL,
+                  CONSTRAINT uq_email FOREIGN KEY (email) REFERENCES fk_email_users (email)
+                )""".execute
+          )
+          _ <- (
+            sql"""CREATE TABLE fk_email_children (
+                  id INTEGER PRIMARY KEY,
+                  email VARCHAR(255) NOT NULL,
+                  FOREIGN KEY (email) REFERENCES fk_email_users (email)
+                )""".execute
+          )
+          _     <- (Schema(schema).verify)
+          found <- (SchemaIntrospection.introspect("fk_email_children"))
+        yield assertTrue(
+          found.exists(
+            _.foreignKeys.exists(fk =>
+              fk.toTable == "fk_email_users" &&
+                fk.fromColumns == Seq("email") &&
+                fk.toColumns == Seq("email")
+            )
+          )
+        )
+        end for
+      },
     ),
     suite("Unique constraint verification")(
       test("verify fails with MissingUniqueConstraint when constraint missing") {
@@ -244,8 +315,36 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
           _     <- (Schema(schema).verify)
           found <- (SchemaIntrospection.introspect("validation_users"))
         yield assertTrue(
-          found.exists(_.uniqueConstraints.exists(_.columns.map(_.toLowerCase) == Seq("email")))
+          found.exists(_.uniqueConstraints.exists(_.columns == Seq("email")))
         )
+      },
+      test("a unique index is not a unique constraint") {
+        val schema = Schema[User]
+          .withUniqueConstraint(_.email)
+          .named("uq_users_email")
+          .build
+        for
+          _      <- (dropTable[Order](ifExists = true))
+          _      <- (dropTable[User](ifExists = true))
+          _      <- (createTable[User]())
+          _      <- (sql"CREATE UNIQUE INDEX uq_users_email ON validation_users (email)".execute)
+          issues <- (Schema(schema).verify).schemaValidationIssues
+        yield assertTrue(issues.exists { case _: SchemaIssue.MissingUniqueConstraint => true; case _ => false })
+      },
+      test("a partial unique index is not a unique constraint") {
+        val schema = Schema[User]
+          .withUniqueConstraint(_.email)
+          .named("uq_users_email")
+          .build
+        for
+          _ <- (dropTable[Order](ifExists = true))
+          _ <- (dropTable[User](ifExists = true))
+          _ <- (createTable[User]())
+          _ <- (
+            sql"CREATE UNIQUE INDEX uq_users_email_partial ON validation_users (email) WHERE age IS NOT NULL".execute
+          )
+          issues <- (Schema(schema).verify).schemaValidationIssues
+        yield assertTrue(issues.exists { case _: SchemaIssue.MissingUniqueConstraint => true; case _ => false })
       },
     ),
     suite("VerifyOptions presets")(
