@@ -55,7 +55,11 @@ final class SqlFragment private (
     yield rows
 
   inline def queryOne[E](using table: Table[E])(using Trace): ZIO[SqlSession, SaferisError, Option[E]] =
-    query[E].map(_.headOption)
+    val read = SqlFragment.readTable[E]
+    for
+      command <- toCommand
+      row     <- ZIO.serviceWithZIO[SqlSession](_.queryAtMostOne(command)(read))
+    yield row
 
   inline def queryValue[A](using decoder: RowDecoder[A])(using Trace): ZIO[SqlSession, SaferisError, Option[A]] =
     val read: SqlRow => Either[SaferisError, A] = row =>
@@ -67,8 +71,8 @@ final class SqlFragment private (
           SaferisError.DecodingError(column, "value", err.detail)
     for
       command <- toCommand
-      rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(read))
-    yield rows.headOption
+      row     <- ZIO.serviceWithZIO[SqlSession](_.queryAtMostOne(command)(read))
+    yield row
   end queryValue
 
   inline def queryStream[E](using table: Table[E])(using Trace): ZStream[SqlSession, SaferisError, E] =

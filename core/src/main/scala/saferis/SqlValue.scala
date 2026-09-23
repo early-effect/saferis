@@ -6,9 +6,7 @@ import java.time.format.DateTimeFormatter
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
-import java.time.OffsetDateTime
 import java.time.ZoneOffset
-import java.time.ZonedDateTime
 import java.util.UUID
 
 /** Postgres type identity. Dialects render one spelling each. This is not a JDBC code. */
@@ -112,10 +110,4 @@ object SqlValue:
       sb.append(digits.charAt(v >>> 4))
       sb.append(digits.charAt(v & 0x0f))
     sb.toString
-
-  def utcOffset(instant: java.time.Instant): OffsetDateTime =
-    OffsetDateTime.ofInstant(instant, ZoneOffset.UTC)
-
-  def utcZoned(instant: java.time.Instant): ZonedDateTime =
-    ZonedDateTime.ofInstant(instant, ZoneOffset.UTC)
 end SqlValue

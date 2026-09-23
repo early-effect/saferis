@@ -7,10 +7,10 @@ object SpecializedDML:
 
   /** Insert with RETURNING clause - only available for dialects that support it */
   inline def insertReturning[A](entity: A)(using
-      table: Table[A],
-      dialect: Dialect & ReturningSupport,
+      table: Table[A]
+  )(using
+      Dialect & ReturningSupport
   )(using trace: Trace): ZIO[SqlSession, SaferisError, Option[A]] =
-    val _   = dialect.insertReturningSql(table.name, "", "")
     val sql =
       SqlFragment
         .text(s"insert into ${table.name} ")
@@ -24,10 +24,10 @@ object SpecializedDML:
 
   /** Update with RETURNING clause - only available for dialects that support it */
   inline def updateReturning[A](entity: A)(using
-      table: Table[A],
-      dialect: Dialect & ReturningSupport,
+      table: Table[A]
+  )(using
+      Dialect & ReturningSupport
   )(using trace: Trace): ZIO[SqlSession, SaferisError, Option[A]] =
-    val _   = dialect.updateReturningSql(table.name, "", "", "")
     val sql =
       SqlFragment
         .text(s"update ${table.name} set ")
@@ -40,10 +40,10 @@ object SpecializedDML:
 
   /** Delete with RETURNING clause - only available for dialects that support it */
   inline def deleteReturning[A](entity: A)(using
-      table: Table[A],
-      dialect: Dialect & ReturningSupport,
+      table: Table[A]
+  )(using
+      Dialect & ReturningSupport
   )(using trace: Trace): ZIO[SqlSession, SaferisError, Option[A]] =
-    val _   = dialect.deleteReturningSql(table.name, "", "")
     val sql =
       SqlFragment
         .text(s"delete from ${table.name}")
@@ -60,10 +60,8 @@ object SpecializedDML:
     * conflict columns from type-safe selectors. Kept `private[saferis]`.
     */
   private[saferis] inline def upsert[A](entity: A, conflictColumns: Seq[String])(using
-      table: Table[A],
-      dialect: Dialect & UpsertSupport,
-  )(using trace: Trace): ZIO[SqlSession, SaferisError, Long] =
-    val _   = dialect.upsertSql(table.name, "", conflictColumns, "")
+      table: Table[A]
+  )(using Dialect & UpsertSupport)(using trace: Trace): ZIO[SqlSession, SaferisError, Long] =
     val sql =
       SqlFragment
         .text(s"insert into ${table.name} ")

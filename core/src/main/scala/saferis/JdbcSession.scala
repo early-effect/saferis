@@ -107,6 +107,11 @@ private final class JdbcSession(
     val timeout = applied(command)
     observed(sql, timeout, runQuery(command, sql, timeout, read), rows => rows.length.toLong)
 
+  def queryAtMostOne[A](command: SqlCommand)(read: SqlRow => Either[SaferisError, A]): IO[SaferisError, Option[A]] =
+    val sql     = render(command)
+    val timeout = applied(command)
+    observed(sql, timeout, runQueryAtMostOne(command, sql, timeout, read), row => if row.isDefined then 1L else 0L)
+
   def stream[A](command: SqlCommand)(read: SqlRow => Either[SaferisError, A]): ZStream[Any, SaferisError, A] =
     val sql     = render(command)
     val timeout = applied(command)
@@ -174,6 +179,27 @@ private final class JdbcSession(
             case Left(err)   => ZIO.fail(err)
             case Right(rows) => ZIO.fromEither(decodeRows(rows, read))
 
+  private def runQueryAtMostOne[A](
+      command: SqlCommand,
+      sql: String,
+      timeout: Option[Duration],
+      read: SqlRow => Either[SaferisError, A],
+  )(using Trace): IO[SaferisError, Option[A]] =
+    guard(sql) *> withConnection: conn =>
+      withStatement(conn, command, sql, timeout, None): ps =>
+        ZIO.acquireReleaseWith(
+          driver(sql, ZIO.attemptBlocking(ps.executeQuery()))
+        )(rs => ZIO.attemptBlocking(rs.close()).ignore): rs =>
+          driver(sql, ZIO.attemptBlocking(rs.next())).flatMap: hasRow =>
+            if !hasRow then ZIO.succeed(None)
+            else
+              driver(sql, ZIO.attemptBlocking(JdbcReads.readRow(rs))).flatMap:
+                case Left(err)  => ZIO.fail(err)
+                case Right(row) =>
+                  read(row) match
+                    case Left(err)    => ZIO.fail(err)
+                    case Right(value) => ZIO.succeed(Some(value))
+
   private def runStream[A](
       command: SqlCommand,
       sql: String,
@@ -182,13 +208,14 @@ private final class JdbcSession(
   ): ZStream[Any, SaferisError, A] =
     ZStream.unwrapScoped:
       for
-        start <- Clock.nanoTime
-        count <- Ref.make(0L)
-        began <- Ref.make(false)
-        conn  <- txn match
+        start     <- Clock.nanoTime
+        count     <- Ref.make(0L)
+        began     <- Ref.make(false)
+        committed <- Ref.make(false)
+        conn      <- txn match
           case Some(state) => ZIO.succeed(state.connection)
           case None        => checkout
-        _ <- ZIO.addFinalizerExit(exit => finishStream(conn, began, count, start, sql, timeout, exit))
+        _ <- ZIO.addFinalizerExit(exit => finishStream(conn, began, committed, count, start, sql, timeout, exit))
         _ <- ZIO.when(txn.isEmpty)(configure(conn))
         _ <- ZIO.when(txn.isEmpty)(
           driver(sql, ZIO.attemptBlocking(conn.setAutoCommit(false))) *> began.set(true)
@@ -197,51 +224,58 @@ private final class JdbcSession(
         rs <- ZIO.acquireRelease(driver(sql, ZIO.attemptBlocking(ps.executeQuery())))(rs =>
           ZIO.attemptBlocking(rs.close()).ignore
         )
-      yield ZStream.repeatZIOOption:
-        driver(sql, ZIO.attemptBlocking(rs.next()))
-          .mapError(err => Some(err))
-          .flatMap: hasNext =>
-            if !hasNext then ZIO.fail(None)
-            else
-              driver(sql, ZIO.attemptBlocking(JdbcReads.readRow(rs)))
-                .mapError(err => Some(err))
-                .flatMap:
-                  case Left(err)  => ZIO.fail(Some(err))
-                  case Right(row) =>
-                    read(row) match
-                      case Left(err)    => ZIO.fail(Some(err))
-                      case Right(value) => count.update(_ + 1).as(value)
+      yield
+        val pulls = ZStream.repeatZIOOption:
+          driver(sql, ZIO.attemptBlocking(rs.next()))
+            .mapError(err => Some(err))
+            .flatMap: hasNext =>
+              if !hasNext then ZIO.fail(None)
+              else
+                driver(sql, ZIO.attemptBlocking(JdbcReads.readRow(rs)))
+                  .mapError(err => Some(err))
+                  .flatMap:
+                    case Left(err)  => ZIO.fail(Some(err))
+                    case Right(row) =>
+                      read(row) match
+                        case Left(err)    => ZIO.fail(Some(err))
+                        case Right(value) => count.update(_ + 1).as(value)
+        val commit =
+          if txn.isEmpty then
+            ZStream.execute(
+              ZIO.attemptBlocking(conn.commit()).mapError(t => classifyThrowable(t, Some(sql))) *>
+                committed.set(true)
+            )
+          else ZStream.empty
+        pulls ++ commit
 
+  /** Rollback only when a pool read transaction was opened and `COMMIT` did not happen. Cursor and connection close are
+    * the other finalizers. A failed rollback does not replace the stream error. Statement failures are recorded by
+    * `driver`, not here: interrupt, defect, and `DecodingError` do not abort the transaction.
+    */
   private def finishStream(
       conn: Connection,
       began: Ref[Boolean],
+      committed: Ref[Boolean],
       count: Ref[Long],
       start: Long,
       sql: String,
       timeout: Option[Duration],
       exit: Exit[Any, Any],
   )(using Trace): UIO[Unit] =
-    val base: Either[SaferisError, Unit] = exit match
-      case Exit.Success(_)     => Right(())
-      case Exit.Failure(cause) => Left(failureOf(cause))
-    val settled =
-      for
-        n       <- count.get
-        started <- began.get
-        outcome <- (txn.isEmpty, started, base) match
-          case (true, true, Right(_)) =>
-            ZIO.attemptBlocking(conn.commit()).mapError(t => classifyThrowable(t, None)).as(Right(n))
-          case (true, true, Left(err)) =>
-            ZIO.attemptBlocking(conn.rollback()).ignore.as(Left(err))
-          case (_, _, Right(_))  => ZIO.succeed(Right(n))
-          case (_, _, Left(err)) =>
-            record(err).as(Left(err))
-        end <- Clock.nanoTime
-        _ <- config.listener.executed(SqlExecuted(sql, Duration.fromNanos(math.max(0L, end - start)), timeout, outcome))
-      yield ()
-    settled.catchAll: err =>
-      config.listener.executed(SqlExecuted(sql, Duration.Zero, timeout, Left(err))) *>
-        ZIO.die(new RuntimeException(err.message))
+    for
+      n       <- count.get
+      started <- began.get
+      done    <- committed.get
+      failed = exit match
+        case Exit.Success(_)     => None
+        case Exit.Failure(cause) => Some(failureOf(cause))
+      _   <- ZIO.when(started && !done)(ZIO.attemptBlocking(conn.rollback()).ignore)
+      end <- Clock.nanoTime
+      outcome = failed.fold[Either[SaferisError, Long]](Right(n))(Left(_))
+      _ <- config.listener.executed(
+        SqlExecuted(sql, Duration.fromNanos(math.max(0L, end - start)), timeout, outcome)
+      )
+    yield ()
   end finishStream
 
   private def observed[A](

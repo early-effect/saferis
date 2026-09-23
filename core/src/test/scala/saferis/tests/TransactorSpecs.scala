@@ -48,6 +48,17 @@ object TransactorSpecs extends ZIOSpecDefault:
             sql.queryOne[TestTable]
         yield assertTrue(a == Some(TestTable("Alice", Some(30), Some("alice@example.com"))))
 
+      test("queryOne returns the first row and does not decode a later null"):
+        @tableName("query_one_first_row")
+        final case class NameRow(id: Int, name: String) derives Table
+
+        for
+          _   <- sql"drop table if exists query_one_first_row".dml
+          _   <- sql"create table query_one_first_row (id integer, name varchar(255))".dml
+          _   <- sql"insert into query_one_first_row (id, name) values (1, 'ok'), (2, null)".dml
+          row <- sql"select id, name from query_one_first_row order by id".queryOne[NameRow]
+        yield assertTrue(row.contains(NameRow(1, "ok")))
+
       test("a single value query"):
         val sql = sql"select count(1) from $testTable"
         for a <-

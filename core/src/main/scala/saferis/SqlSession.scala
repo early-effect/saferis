@@ -15,6 +15,11 @@ trait SqlSession:
       read: SqlRow => Either[SaferisError, A]
   ): IO[SaferisError, Chunk[A]]
 
+  /** Execute, decode at most one row, and close. A later row is not read. */
+  def queryAtMostOne[A](command: SqlCommand)(
+      read: SqlRow => Either[SaferisError, A]
+  ): IO[SaferisError, Option[A]]
+
   def stream[A](command: SqlCommand)(
       read: SqlRow => Either[SaferisError, A]
   ): ZStream[Any, SaferisError, A]

@@ -33,7 +33,7 @@ object Interpolator:
       Placeholder.raw(")"),
     )
 
-  /** Varargs convenience overload — at least one element by construction.
+  /** Varargs convenience overload. At least one element by construction.
     *
     * {{{
     *   sql"... where ${table.status} in ${in("active", "pending")}"

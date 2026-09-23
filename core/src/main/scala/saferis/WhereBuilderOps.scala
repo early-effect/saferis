@@ -99,8 +99,8 @@ trait WhereBuilderOps[Parent, T]:
 
   // === Literal collection operators ===
 
-  /** IN literal — varargs form for inline values. Emits `col IN ($1, $2, ...)` with one bound parameter per distinct
-    * element. By construction at least one element is supplied, so this overload always produces valid SQL.
+  /** Varargs `IN`. One `Param` per distinct value. `sql` renders those as `$1`, `$2`. Only the JDBC driver renders `?`.
+    * At least one element is supplied, so this overload always produces valid SQL.
     *
     * {{{
     *   Query[User].where(_.status).in("active", "pending")
@@ -111,8 +111,8 @@ trait WhereBuilderOps[Parent, T]:
   def in(first: T, rest: T*)(using Encoder[T]): Parent =
     inList(first +: rest)
 
-  /** IN literal collection — accepts any `Iterable[T]` (`Seq`, `List`, `Set`, `LinkedHashSet`, etc.). Duplicates are
-    * removed (set semantics). Emits `col IN (?, ?, ?, ...)`.
+  /** `IN` for any `Iterable[T]` (`Seq`, `List`, `Set`, `LinkedHashSet`, etc.). Duplicates are removed. One `Param` per
+    * remaining value. `sql` renders `$n`. Only the JDBC driver renders `?`.
     *
     * On empty (or degenerate-empty-after-dedupe) input the resulting fragment carries a
     * [[FragmentIssue.EmptyCollection]] that surfaces as [[SaferisError.InvalidStatement]] at execution. No DB
@@ -131,11 +131,11 @@ trait WhereBuilderOps[Parent, T]:
         .append(SqlFragment.text(")"))
     addPredicate(whereFrag)
 
-  /** NOT IN literal — varargs form for inline values. */
+  /** Varargs `NOT IN`. One `Param` per distinct value. `sql` renders `$n`. Only the JDBC driver renders `?`. */
   def notIn(first: T, rest: T*)(using Encoder[T]): Parent =
     notInList(first +: rest)
 
-  /** NOT IN literal collection — symmetric to [[inList]]. */
+  /** `NOT IN` for any `Iterable[T]`. Same placeholder rules as [[inList]]. */
   def notInList(values: Iterable[T])(using Encoder[T]): Parent =
     val list = Placeholder.listTagged(values, helper = "WhereBuilder.notInList", origin = Placeholder.captureOrigin())
     val whereFrag =

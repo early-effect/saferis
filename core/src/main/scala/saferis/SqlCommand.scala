@@ -21,9 +21,6 @@ object SqlCommand:
     new SqlCommand(pieces, timeout)
 
 private[saferis] object SqlPieces:
-  def text(sql: String): Chunk[SqlPiece] =
-    if sql.isEmpty then Chunk.empty else Chunk(SqlPiece.Text(sql))
-
   def merge(pieces: Iterable[SqlPiece]): Chunk[SqlPiece] =
     val b             = Chunk.newBuilder[SqlPiece]
     val text          = new StringBuilder

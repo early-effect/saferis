@@ -114,10 +114,9 @@ final case class UpsertDoNothingReady[A: Table](
     private[saferis] val conflictColumns: Vector[String],
 ):
   /** Build the INSERT ... ON CONFLICT DO NOTHING SQL */
-  transparent inline def build(using dialect: Dialect & UpsertSupport): SqlFragment =
+  transparent inline def build(using (Dialect & UpsertSupport)): SqlFragment =
     val table     = summon[Table[A]]
     val conflicts = conflictColumns.mkString(", ")
-    val _         = dialect.upsertDoNothingSql(tableName, "", conflictColumns)
     SqlFragment
       .text(s"insert into $tableName ")
       .append(table.insertColumnsSql)
@@ -148,10 +147,9 @@ final case class UpsertActionReady[A: Table](
     UpsertWhereBuilder(this, Alias.unsafe(tableName), col)
 
   /** Build without WHERE clause */
-  transparent inline def build(using dialect: Dialect & UpsertSupport): SqlFragment =
+  transparent inline def build(using (Dialect & UpsertSupport)): SqlFragment =
     val table     = summon[Table[A]]
     val conflicts = conflictColumns.mkString(", ")
-    val _         = dialect.upsertSql(tableName, "", conflictColumns, "")
     SqlFragment
       .text(s"insert into $tableName ")
       .append(table.insertColumnsSql)
@@ -162,7 +160,7 @@ final case class UpsertActionReady[A: Table](
   end build
 
   /** Build with RETURNING clause (no WHERE) */
-  transparent inline def returning(using dialect: Dialect & UpsertSupport & ReturningSupport): ReturningQuery[A] =
+  transparent inline def returning(using (Dialect & UpsertSupport & ReturningSupport)): ReturningQuery[A] =
     ReturningQuery(build :+ SqlFragment.text(" returning *"))
 end UpsertActionReady
 
@@ -250,10 +248,9 @@ final case class UpsertWhereReady[A: Table](
     UpsertWhereReady.chainAnd(this, selector)
 
   /** Build the complete upsert SQL */
-  transparent inline def build(using dialect: Dialect & UpsertSupport): SqlFragment =
+  transparent inline def build(using (Dialect & UpsertSupport)): SqlFragment =
     val table     = summon[Table[A]]
     val conflicts = action.conflictColumns.mkString(", ")
-    val _         = dialect.upsertWithWhereSql(action.tableName, "", action.conflictColumns, "", None)
     val base      =
       SqlFragment
         .text(s"insert into ${action.tableName} ")
@@ -269,7 +266,7 @@ final case class UpsertWhereReady[A: Table](
   end build
 
   /** Build with RETURNING clause */
-  transparent inline def returning(using dialect: Dialect & UpsertSupport & ReturningSupport): ReturningQuery[A] =
+  transparent inline def returning(using (Dialect & UpsertSupport & ReturningSupport)): ReturningQuery[A] =
     ReturningQuery(build :+ SqlFragment.text(" returning *"))
 
 end UpsertWhereReady
