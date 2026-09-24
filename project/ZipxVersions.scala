@@ -43,6 +43,7 @@ object MyVersions extends ZipxVersions:
   def coreTest = library(zioTest.test, zioTestSbt.test, zioTestMagnolia.test)
   def jdbcLib  = library(provided(zio), provided(zioStreams), postgresql)
   def jdbcTest = library(zioLoggingSlf4j.test, postgresqlTc.test, postgresql.test, zioJson.test)
+  def pgLib    = library(provided(zio), provided(zioStreams))
   def docsLib  = library(zio, zioStreams)
   def docsTest = library(specularZioTest, specularTheme, postgresqlTc.test, postgresql.test, slf4jNop.test)
 end MyVersions

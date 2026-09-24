@@ -1,6 +1,9 @@
 # macOS
 .DS_Store
 
+# Node (pg). package-lock.json stays.
+node_modules/
+
 # sbt specific
 .sbt/
 dist/*

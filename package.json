@@ -1,0 +1,8 @@
+{
+  "name": "saferis",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "pg": "8.16.3"
+  }
+}

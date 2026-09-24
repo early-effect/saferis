@@ -1,3 +1,8 @@
+import org.scalajs.linker.interface.ModuleKind
+import org.scalajs.sbtplugin.ScalaJSPlugin.autoImport.*
+// sbt has its own `Exec` (a queued command). This is the shell AST's simple command.
+import zipx.shell.Exec
+
 MyVersions.settings
 
 // Global settings. Iterable/saferis overrides group via PUBLISH_ORG from ZipxGitHubPackages.
@@ -56,6 +61,16 @@ githubPackagesRepo match {
 /** Pre-pull with retries. Verbatim shell, so runRaw declares the escape hatch and earns a
   * generate-time warning naming the step, rather than hiding it in a bare `run =`.
   */
+val pgJsCiSetup = Steps.buildingWith("pg-js-ci") { ctx =>
+  List(
+    Step
+      .usesRef(ctx.actions.setupNode)
+      .named("Set up Node")
+      .withInputs(scala.collection.immutable.ListMap("node-version" -> "24", "cache" -> "npm")),
+    Step.run(Script(Exec("npm", Word.lit("ci")))).named("Install Node dependencies (pg)"),
+  )
+}
+
 val prePullPostgres = Steps.built("pre-pull-postgres")(
   Step
     .runRaw(
@@ -94,6 +109,30 @@ zipxCapabilities ++= {
       env = Map("TESTCONTAINERS_RYUK_DISABLED" -> EnvValue.plain("true")),
       extraSteps = prePullPostgres,
     ),
+    // Node pg suite. Not part of verify: it needs npm and a Postgres port.
+    // The `test` job must not wait on this one. The suite skips when PGHOST is unset;
+    // this job is the only one that sets PGHOST.
+    Capability.once(
+      name = CapabilityName("test-pg"),
+      command = zipxTasks.session(LocalProject("pgJS") / testFull),
+      extraSteps = pgJsCiSetup,
+      env = Map(
+        "PGHOST"     -> EnvValue.plain("localhost"),
+        "PGPORT"     -> EnvValue.plain("5432"),
+        "PGUSER"     -> EnvValue.plain("postgres"),
+        "PGPASSWORD" -> EnvValue.plain("postgres"),
+        "PGDATABASE" -> EnvValue.plain("postgres"),
+      ),
+      services = Map(
+        "postgres" -> JobService(
+          "postgres:17",
+          ports = List("5432:5432"),
+          options = Some(
+            "--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5 -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_PASSWORD=postgres"
+          ),
+        ),
+      ),
+    ),
     // Every publishing row, then sonaRelease once. docs and root do not publish.
     ZipxCentral.release
       .withCondition(upstream),
@@ -130,7 +169,7 @@ lazy val scalaVersions         = Seq(scala3Version)
 // Root project aggregates all modules but is not published
 lazy val root = project
   .in(file("."))
-  .aggregate((core.projectRefs ++ jdbc.projectRefs ++ Seq[sbt.ProjectReference](docs))*)
+  .aggregate((core.projectRefs ++ jdbc.projectRefs ++ pg.projectRefs ++ Seq[sbt.ProjectReference](docs))*)
   .settings(
     name           := "saferis-root",
     publish / skip := true,
@@ -162,6 +201,24 @@ lazy val jdbc = (projectMatrix in file("jdbc"))
     description := "JDBC SqlSession for Postgres.",
   )
   .jvmPlatform(scalaVersions = scalaVersions)
+
+// Node pg driver. Scala.js only. Depends on the core JS row.
+lazy val pg = (projectMatrix in file("pg"))
+  .dependsOn(core)
+  .settings(commonSettings)
+  .settings(publishSettings)
+  .settings(MyVersions.pgLib)
+  .settings(MyVersions.coreTest)
+  .settings(
+    name        := "saferis-pg",
+    description := "Node pg SqlSession for Postgres.",
+  )
+  .jsPlatform(
+    scalaVersions = scalaVersions,
+    Seq(
+      scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.CommonJSModule)),
+    ),
+  )
 
 lazy val docs = project
   .in(file("saferis-docs"))
