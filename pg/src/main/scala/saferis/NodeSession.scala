@@ -15,6 +15,7 @@ import zio.ZLayer
 import zio.stream.ZStream
 
 import scala.scalajs.js
+import scala.util.control.NonFatal
 
 /** Node `pg` interpreter of `SqlSession`. Promises complete with `ZIO.async`. There is no `ZIO.blocking`. */
 object NodeSession:
@@ -23,11 +24,16 @@ object NodeSession:
       for
         config <- ZIO.service[PgConfig]
         pool   <- open(config)
-        _      <- ZIO.addFinalizer(PgPromises.idle(pool.end()).ignore)
+        _      <- ZIO.addFinalizer(PgPromises.complete(None, pool.end(), _ => ()).ignore)
       yield new NodeSession(pool, config, None)
 
   private def open(config: PgConfig)(using Trace): IO[SaferisError, PgPool] =
-    ZIO.attempt(new PgPool(PgWire.poolConfig(config))).mapError(t => SaferisError.ConnectionError(PgErrors.message(t)))
+    ZIO
+      .attempt:
+        val pool = new PgPool(PgWire.poolConfig(config))
+        pool.on("error", PgPromises.swallow)
+        pool
+      .mapError(t => SaferisError.ConnectionError(PgErrors.message(t)))
 
   private val Aborted =
     "current transaction is aborted, commands ignored until end of transaction block"
@@ -35,7 +41,14 @@ end NodeSession
 
 private final class PgTxn(val lease: PgLease, val failure: Ref[Option[SaferisError]])
 
-private final class PgLease(val client: PgClient, val destroy: Ref[Boolean], val busy: Ref[Boolean])
+private final class PgLease(
+    val client: PgClient,
+    val destroy: Ref[Boolean],
+    val busy: Ref[Boolean],
+    val began: Ref[Boolean],
+    val committed: Ref[Boolean],
+    val released: Ref[Boolean],
+)
 
 private final class NodeSession(
     pool: PgPool,
@@ -77,11 +90,10 @@ private final class NodeSession(
       case None    =>
         ZIO.scoped:
           for
-            lease     <- checkout
-            _         <- protocol(lease, "BEGIN").tapError(err => markBroken(lease, err))
-            failure   <- Ref.make[Option[SaferisError]](None)
-            committed <- Ref.make(false)
-            _         <- ZIO.addFinalizer(finish(lease, committed))
+            lease   <- checkout
+            _       <- lease.began.set(true)
+            _       <- protocol(lease, "BEGIN").tapError(err => markBroken(lease, err))
+            failure <- Ref.make[Option[SaferisError]](None)
             child = new NodeSession(pool, config, Some(new PgTxn(lease, failure)))
             exit   <- body.provideSomeLayer[R](ZLayer.succeed[SqlSession](child)).exit
             result <- exit match
@@ -89,7 +101,7 @@ private final class NodeSession(
                 failure.get.flatMap:
                   case Some(err) => ZIO.fail(err)
                   case None      =>
-                    ZIO.uninterruptible(protocol(lease, "COMMIT") *> committed.set(true)).as(value)
+                    ZIO.uninterruptible(protocol(lease, "COMMIT") *> lease.committed.set(true)).as(value)
               case Exit.Failure(cause) => ZIO.failCause(cause)
           yield result
 
@@ -111,35 +123,24 @@ private final class NodeSession(
               case Some(d) => statementTransaction(lease, d, use)
           yield result
 
-  /** The statement owns the checkout, so `SET LOCAL` needs a transaction that dies with it. */
+  /** The statement owns the checkout, so `SET LOCAL` needs a transaction that dies with it. The checkout finalizer is
+    * already installed.
+    */
   private def statementTransaction[A](
       lease: PgLease,
       timeout: Duration,
       use: PgLease => IO[SaferisError, A],
   )(using Trace): IO[SaferisError, A] =
-    ZIO.scoped:
-      for
-        _         <- protocol(lease, "BEGIN").tapError(err => markBroken(lease, err))
-        committed <- Ref.make(false)
-        _         <- ZIO.addFinalizer(finish(lease, committed))
-        _         <- protocol(lease, s"SET LOCAL statement_timeout = ${PgWire.millis(timeout)}")
-        a         <- use(lease)
-        _         <- ZIO.uninterruptible(protocol(lease, "COMMIT") *> committed.set(true))
-      yield a
-
-  /** In-flight query: `release(true)`. The socket close aborts the server transaction. A finished statement rolls back
-    * with `ROLLBACK`, and a failed rollback does not replace the original error.
-    */
-  private def finish(lease: PgLease, committed: Ref[Boolean])(using Trace): UIO[Unit] =
-    lease.busy.get.flatMap: inFlight =>
-      if inFlight then lease.destroy.set(true)
-      else
-        committed.get.flatMap: done =>
-          if done then ZIO.unit
-          else protocol(lease, "ROLLBACK").ignore
+    for
+      _ <- lease.began.set(true)
+      _ <- protocol(lease, "BEGIN").tapError(err => markBroken(lease, err))
+      _ <- protocol(lease, s"SET LOCAL statement_timeout = ${PgWire.millis(timeout)}")
+      a <- use(lease)
+      _ <- ZIO.uninterruptible(protocol(lease, "COMMIT") *> lease.committed.set(true))
+    yield a
 
   private def runExec(lease: PgLease, command: SqlCommand, sql: String)(using Trace): IO[SaferisError, Long] =
-    queryResult(lease, sql, command).map(PgWire.rowCount)
+    queryResult(lease, sql, command).flatMap(result => ZIO.fromEither(PgWire.rowCount(result)))
 
   private def runQuery[A](
       lease: PgLease,
@@ -161,7 +162,7 @@ private final class NodeSession(
   )(using Trace): IO[SaferisError, Option[A]] =
     queryResult(lease, sql, command).flatMap: result =>
       ZIO
-        .fromEither(PgWire.readFirst(result))
+        .fromEither(PgWire.readRows(result).map(_.headOption))
         .flatMap:
           case None      => ZIO.succeed(None)
           case Some(row) =>
@@ -171,7 +172,8 @@ private final class NodeSession(
 
   private def queryResult(lease: PgLease, sql: String, command: SqlCommand)(using Trace): IO[SaferisError, PgResult] =
     val values = PgWire.parameters(command.pieces)
-    promise(lease, Some(sql), lease.client.query(PgWire.queryConfig(sql, values)))
+    promise(lease, Some(sql), lease.client.query(PgWire.queryConfig(sql, values))).flatMap: value =>
+      ZIO.fromEither(PgWire.ensureSingle(value))
 
   private def protocol(lease: PgLease, statement: String)(using Trace): IO[SaferisError, Unit] =
     promise(lease, None, lease.client.query(PgWire.queryConfig(statement, js.Array()))).unit
@@ -180,16 +182,67 @@ private final class NodeSession(
       Trace
   ): IO[SaferisError, A] =
     lease.busy.set(true).uninterruptible *>
-      PgPromises.task(lease.busy, thunk).mapError(t => classify(t, sql)).tapError(err => markBroken(lease, err))
+      PgPromises
+        .complete(Some(lease.busy), thunk, _ => ())
+        .mapError(t => classify(t, sql))
+        .tapError(err => markBroken(lease, err))
 
+  /** The abort finalizer is installed before the client is returned, so `BEGIN` and every user statement, timed or not,
+    * already have it. In flight: `release(true)`. An open transaction rolls back, and that failure is ignored.
+    */
   private def checkout(using Trace): ZIO[Scope, SaferisError, PgLease] =
-    for
-      destroy <- Ref.make(false)
-      busy    <- Ref.make(false)
-      client  <- ZIO.acquireRelease(
-        PgPromises.idle(pool.connect()).mapError(t => SaferisError.ConnectionError(PgErrors.message(t)))
-      )(client => destroy.get.flatMap(drop => ZIO.attempt(client.release(drop)).ignore))
-    yield new PgLease(client, destroy, busy)
+    ZIO.uninterruptibleMask: restore =>
+      restore(connect).flatMap: client =>
+        for
+          destroy   <- Ref.make(false)
+          busy      <- Ref.make(false)
+          began     <- Ref.make(false)
+          committed <- Ref.make(false)
+          released  <- Ref.make(false)
+          _         <- ZIO.attempt(arm(client)).ignore
+          lease = new PgLease(client, destroy, busy, began, committed, released)
+          _ <- ZIO.addFinalizer(abort(lease))
+        yield lease
+
+  private def connect(using Trace): IO[SaferisError, PgClient] =
+    PgPromises
+      .complete(None, pool.connect(), releaseAbandoned)
+      .mapError(t => SaferisError.ConnectionError(PgErrors.message(t)))
+
+  /** One listener per client. A reused checkout must not stack another `'error'` handler. */
+  private def arm(client: PgClient): Unit =
+    val dyn  = client.asInstanceOf[js.Dynamic]
+    val mark = dyn.selectDynamic("__saferisErrorListener")
+    if js.isUndefined(mark) then
+      dyn.updateDynamic("__saferisErrorListener")(true)
+      client.on("error", PgPromises.swallow)
+
+  /** Client arrived after this fiber was gone. One `release(true)`. The success path never calls this. */
+  private def releaseAbandoned(client: PgClient): Unit =
+    try arm(client)
+    catch case NonFatal(_) => ()
+    try client.release(true)
+    catch case NonFatal(_) => ()
+
+  private def abort(lease: PgLease)(using Trace): UIO[Unit] =
+    lease.busy.get.flatMap: inFlight =>
+      if inFlight then release(lease, true)
+      else
+        lease.began.get
+          .zip(lease.committed.get)
+          .flatMap: (opened, done) =>
+            val rollback =
+              if opened && !done then protocol(lease, "ROLLBACK").ignore
+              else ZIO.unit
+            rollback *> lease.destroy.get.flatMap(drop => release(lease, drop))
+
+  private def release(lease: PgLease, destroy: Boolean): UIO[Unit] =
+    lease.released
+      .modify:
+        case true  => (false, true)
+        case false => (true, true)
+      .flatMap: should =>
+        ZIO.when(should)(ZIO.attempt(lease.client.release(destroy)).ignore).unit
 
   private def observed[A](
       sql: String,

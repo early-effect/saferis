@@ -23,6 +23,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
   private def pgConfig(
       defaultTimeout: Option[Duration] = None,
       listener: SqlListener = SqlListener.noop,
+      poolSize: Int = 4,
   ): PgConfig =
     PgConfig(
       host = env("PGHOST").getOrElse("localhost"),
@@ -30,7 +31,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
       database = env("PGDATABASE").getOrElse("postgres"),
       user = env("PGUSER").getOrElse("postgres"),
       password = env("PGPASSWORD").getOrElse(""),
-      poolSize = 4,
+      poolSize = poolSize,
       defaultTimeout = defaultTimeout,
       listener = listener,
     )
@@ -250,11 +251,114 @@ object PgSessionSpecs extends ZIOSpecDefault:
         yield assertTrue(aborted, recorded, !sentLater, count.contains(0L)),
     )
 
+  private def onSession[A](config: PgConfig)(use: SqlSession => ZIO[Any, SaferisError, A]): ZIO[Any, SaferisError, A] =
+    ZIO.serviceWithZIO[SqlSession](use).provide(session(config))
+
+  private def run[A](db: SqlSession)(f: ZIO[SqlSession, SaferisError, A]): ZIO[Any, SaferisError, A] =
+    f.provideEnvironment(ZEnvironment(db))
+
+  private def untilActive(pid: Int): ZIO[SqlSession, SaferisError, Unit] =
+    (ZIO.sleep(20.millis) *>
+      sql"select count(*)::int from pg_stat_activity where pid = ${pid} and state = 'active'".queryValue[Int])
+      .repeatUntil(_.contains(1))
+      .timeout(5.seconds)
+      .flatMap:
+        case Some(_) => ZIO.unit
+        case None    => ZIO.fail(SaferisError.Unexpected("backend did not become active"))
+
+  private val review =
+    suite("review")(
+      test("shutdown sqlstates break the client and a connection-shaped message does not"):
+        val shutdown = List("57P01", "57P02", "57P03").map: code =>
+          PgErrors.broken(
+            SaferisError.QueryError(Some(code), "terminating connection due to administrator command", None)
+          )
+        val unique    = PgErrors.broken(SaferisError.UniqueViolation(Some("pg_uniq_pkey"), "unique violation", None))
+        val mentioned = PgErrors.broken(SaferisError.QueryError(None, "the connection is still usable", None))
+        assertTrue(shutdown.forall(identity), !unique, !mentioned)
+      ,
+      test("a script of two selects fails and one select still returns the row"):
+        onSession(pgConfig()): db =>
+          for
+            script <- run(db)(sql"select 1; select 2".queryValue[Int].exit)
+            one    <- run(db)(sql"select 1".queryValue[Int])
+          yield assertTrue(script.isFailure, one.contains(1))
+      ,
+      test("a unique violation keeps the same backend"):
+        onSession(pgConfig(poolSize = 1)): db =>
+          for
+            _    <- run(db)(sql"drop table if exists pg_uniq_keep".dml)
+            _    <- run(db)(sql"create table pg_uniq_keep (id integer primary key)".dml)
+            pid1 <- run(db)(sql"select pg_backend_pid()".queryValue[Int])
+            _    <- run(db)(sql"insert into pg_uniq_keep (id) values (1)".dml)
+            exit <- run(db)(sql"insert into pg_uniq_keep (id) values (1)".dml.exit)
+            pid2 <- run(db)(sql"select pg_backend_pid()".queryValue[Int])
+            kept = exit match
+              case Exit.Failure(cause) =>
+                cause.failureOption match
+                  case Some(SaferisError.UniqueViolation(_, "unique violation", _)) => true
+                  case _                                                            => false
+              case _ => false
+          yield assertTrue(kept, pid1 == pid2, pid1.isDefined)
+      ,
+      test("interrupting pg_sleep does not leave a transaction for the next checkout"):
+        ZIO
+          .scoped:
+            for
+              sleeperEnv <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
+              watcherEnv <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
+              sleeper = sleeperEnv.get[SqlSession]
+              watcher = watcherEnv.get[SqlSession]
+              pid   <- run(sleeper)(sql"select pg_backend_pid()".queryValue[Int])
+              id    <- ZIO.fromOption(pid).orElseFail(SaferisError.Unexpected("no backend pid"))
+              fiber <- run(sleeper)(sql"select pg_sleep(30)".queryValue[Int]).fork
+              _     <- run(watcher)(untilActive(id))
+              _     <- fiber.interrupt
+              tx    <- run(sleeper)(sql"select txid_current_if_assigned()::text".queryValue[Option[String]])
+            yield assertTrue(tx.forall(_.isEmpty))
+          .timeoutFail(SaferisError.Unexpected("interrupted sleep left the checkout busy"))(8.seconds)
+      ,
+      test("an interrupted checkout does not hang pool.end"):
+        val close =
+          ZIO.scoped:
+            for
+              held <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
+              db = held.get[SqlSession]
+              hold   <- run(db)(sql"select pg_sleep(30)".queryValue[Int]).fork
+              _      <- ZIO.sleep(400.millis)
+              second <- run(db)(sql"select 1".queryValue[Int]).fork
+              _      <- ZIO.sleep(200.millis)
+              _      <- second.interrupt
+              _      <- hold.interrupt
+            yield ()
+        close.timeout(8.seconds).map(done => assertTrue(done.isDefined))
+      ,
+      test("terminating the backend fails the sleep and the pool still serves"):
+        ZIO.scoped:
+          for
+            sleeperEnv <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
+            killerEnv  <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
+            sleeper = sleeperEnv.get[SqlSession]
+            killer  = killerEnv.get[SqlSession]
+            pid   <- run(sleeper)(sql"select pg_backend_pid()".queryValue[Int])
+            id    <- ZIO.fromOption(pid).orElseFail(SaferisError.Unexpected("no backend pid"))
+            fiber <- run(sleeper)(sql"select pg_sleep(30)".queryValue[Int]).fork
+            _     <- run(killer)(untilActive(id))
+            _     <- run(killer)(sql"select pg_terminate_backend(${id})".queryValue[Boolean])
+            exit  <- fiber.join.exit
+            next  <- run(sleeper)(sql"select 1".queryValue[Int])
+            failed = exit match
+              case Exit.Failure(cause) => cause.failureOption.isDefined
+              case _                   => false
+          yield assertTrue(failed, next.contains(1)),
+    ) @@ TestAspect.withLiveClock @@ TestAspect.timeout(45.seconds) @@ TestAspect.sequential
+
   private val live =
     suite("Node pg")(
       reads.provideShared(open),
       writes.provideShared(open),
       joined.provideShared(timed),
+      review,
     ) @@ TestAspect.sequential
 
   def spec =

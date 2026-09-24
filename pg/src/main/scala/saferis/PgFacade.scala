@@ -8,12 +8,14 @@ import scala.scalajs.js.annotation.JSImport
 @js.native
 @JSImport("pg", "Pool")
 private[saferis] class PgPool(@unused config: js.Object) extends js.Object:
-  def connect(): js.Promise[PgClient] = js.native
-  def end(): js.Promise[Unit]         = js.native
+  def connect(): js.Promise[PgClient]                               = js.native
+  def end(): js.Promise[Unit]                                       = js.native
+  def on(event: String, listener: js.Function1[js.Any, Unit]): Unit = js.native
 
 @js.native
 private[saferis] trait PgClient extends js.Object:
-  def query(query: js.Object): js.Promise[PgResult] = js.native
+  def query(query: js.Object): js.Promise[PgResult]                 = js.native
+  def on(event: String, listener: js.Function1[js.Any, Unit]): Unit = js.native
 
   /** `true` drops the connection. A SQL error is `false`: the pool may reuse the client. */
   def release(destroy: Boolean): Unit = js.native

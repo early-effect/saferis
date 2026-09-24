@@ -87,14 +87,24 @@ private[saferis] object PgWire:
         val _ = values.push(bind(value))
     values
 
-  def rowCount(result: PgResult): Long =
-    val raw = result.asInstanceOf[js.Dynamic].rowCount
-    if js.isUndefined(raw) || (raw eq null) then 0L
-    else raw.asInstanceOf[Double].toLong
+  def ensureSingle(result: PgResult): Either[SaferisError, PgResult] =
+    if js.Array.isArray(result.asInstanceOf[js.Any]) then
+      Left(SaferisError.Unexpected("multiple statements are not one command"))
+    else Right(result)
+
+  def rowCount(result: PgResult): Either[SaferisError, Long] =
+    ensureSingle(result).map: single =>
+      val raw = single.asInstanceOf[js.Dynamic].rowCount
+      if js.isUndefined(raw) || (raw eq null) then 0L
+      else raw.asInstanceOf[Double].toLong
 
   def readRows(result: PgResult): Either[SaferisError, Chunk[SqlRow]] =
+    ensureSingle(result).flatMap: single =>
+      readFields(single)
+
+  private def readFields(result: PgResult): Either[SaferisError, Chunk[SqlRow]] =
     val fields = result.fields
-    if fields == null || js.isUndefined(fields) then Right(Chunk.empty)
+    if fields == null || js.isUndefined(fields) then Left(SaferisError.Unexpected("query result has no fields"))
     else
       val width  = fields.length
       val labels = Chunk.fromIterator(Iterator.tabulate(width)(i => fieldName(fields(i))))
@@ -102,10 +112,7 @@ private[saferis] object PgWire:
       val grid   = result.rows
       if grid == null || js.isUndefined(grid) then Right(Chunk.empty)
       else readGrid(labels, oids, grid)
-  end readRows
-
-  def readFirst(result: PgResult): Either[SaferisError, Option[SqlRow]] =
-    readRows(result).map(_.headOption)
+  end readFields
 
   private def readGrid(
       labels: Chunk[String],
