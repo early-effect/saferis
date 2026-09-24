@@ -35,7 +35,7 @@ object DialectSpecs extends ZIOSpecDefault:
       val pgDialect = summon[Dialect]
       assertTrue(pgDialect.columnType(SqlType.VarChar) == "varchar(255)") &&
       assertTrue(MySQLDialect.columnType(SqlType.VarChar) == "varchar(255)") &&
-      assertTrue(SQLiteDialect.columnType(SqlType.VarChar) == "text") &&
+      assertTrue(SQLiteDialect.columnType(SqlType.VarChar) == "varchar(255)") &&
       assertTrue(pgDialect.columnType(SqlType.Int4) == "integer") &&
       assertTrue(MySQLDialect.columnType(SqlType.Int4) == "int") &&
       assertTrue(SQLiteDialect.columnType(SqlType.Int4) == "integer")

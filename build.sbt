@@ -289,6 +289,7 @@ lazy val sqliteJdbc = (projectMatrix in file("sqlite-jdbc"))
   .settings(publishSettings)
   .settings(MyVersions.sqliteJdbcLib)
   .settings(MyVersions.coreTest)
+  .settings(MyVersions.sqliteJdbcTest)
   .settings(
     name        := "saferis-sqlite-jdbc",
     description := "SQLite JdbcAdapter on sqlite-jdbc.",

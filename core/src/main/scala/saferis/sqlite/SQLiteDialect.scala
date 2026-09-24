@@ -14,15 +14,27 @@ object SQLiteDialect extends Dialect with ReturningSupport with CommonTableExpre
 
   val name: String = "SQLite"
 
-  // === Type Mappings ===
+  /** SQLite stores by affinity, not by declared type, but it keeps the declared name, and a driver reads that name
+    * back. So each `SqlType` declares a name that says what the column holds (`boolean`, `date`, `timestamptz`, `uuid`)
+    * and still lands on the right affinity. Every integer width is `integer`, so an integer primary key stays SQLite's
+    * rowid and autoincrements.
+    */
   def columnType(tpe: SqlType): String = tpe match
-    case SqlType.Bool                                      => "integer"
-    case SqlType.Int2 | SqlType.Int4 | SqlType.Int8        => "integer"
-    case SqlType.Float4 | SqlType.Float8 | SqlType.Numeric => "real"
-    case SqlType.Bytea                                     => "blob"
-    case SqlType.VarChar | SqlType.Text | SqlType.Date | SqlType.Time | SqlType.Timestamp | SqlType.Timestamptz |
-        SqlType.Jsonb | SqlType.Uuid | SqlType.Array(_) | SqlType.Other(_) =>
-      "text"
+    case SqlType.Bool                               => "boolean"
+    case SqlType.Int2 | SqlType.Int4 | SqlType.Int8 => "integer"
+    case SqlType.Float4                             => "real"
+    case SqlType.Float8                             => "double"
+    case SqlType.Numeric                            => "numeric"
+    case SqlType.VarChar                            => s"varchar($DefaultVarcharLength)"
+    case SqlType.Text                               => "text"
+    case SqlType.Bytea                              => "blob"
+    case SqlType.Date                               => "date"
+    case SqlType.Time                               => "time"
+    case SqlType.Timestamp                          => "timestamp"
+    case SqlType.Timestamptz                        => "timestamptz"
+    case SqlType.Jsonb                              => "json"
+    case SqlType.Uuid                               => "uuid"
+    case SqlType.Array(_) | SqlType.Other(_)        => "text"
 
   // === Auto-increment Syntax ===
   override def autoIncrementClause(isGenerated: Boolean, isKey: Boolean, hasDefault: Boolean): String =
@@ -37,11 +49,9 @@ object SQLiteDialect extends Dialect with ReturningSupport with CommonTableExpre
   override def addColumnSql(tableName: String, columnName: String, columnDefinition: String): String =
     s"alter table ${escapeIdentifier(tableName)} add column $columnDefinition"
 
+  /** SQLite 3.35 and later drop a column in place. */
   override def dropColumnSql(tableName: String, columnName: String): String =
-    // SQLite has limited support for dropping columns - requires recreating table
-    throw new UnsupportedOperationException(
-      "SQLite does not support dropping columns directly. Use PRAGMA table_info and recreate table."
-    )
+    s"alter table ${escapeIdentifier(tableName)} drop column ${escapeIdentifier(columnName)}"
 
   // === Index Operations ===
   // SQLite supports partial indexes (WHERE clause)

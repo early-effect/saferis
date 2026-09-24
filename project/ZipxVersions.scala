@@ -55,6 +55,7 @@ object MyVersions extends ZipxVersions:
   def mysqlJdbcLib     = library(provided(zio), provided(zioStreams), mysql)
   def mysqlJdbcTest    = library(zioLoggingSlf4j.test, zioJson.test)
   def sqliteJdbcLib    = library(provided(zio), provided(zioStreams), sqlite)
+  def sqliteJdbcTest   = library(zioJson.test)
   def pgLib    = library(provided(zio), provided(zioStreams))
   def docsLib  = library(zio, zioStreams)
   // postgresql comes from saferis-postgres-jdbc's compile dependency. A second test-scoped copy is redundant.
