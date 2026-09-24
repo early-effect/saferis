@@ -9,64 +9,64 @@ import java.time.LocalTime
 import java.time.ZoneOffset
 import java.util.UUID
 
-/** Postgres type identity. Dialects render one spelling each. This is not a JDBC code. */
-enum PgType:
+/** Shared column type. Case names follow Postgres. Each dialect renders its own spelling. This is not a JDBC code. */
+enum SqlType:
   case Bool
-  case Int2
-  case Int4
-  case Int8
-  case Float4
-  case Float8
+  case SmallInt
+  case Integer
+  case BigInt
+  case Real
+  case DoublePrecision
   case Numeric
   case VarChar
   case Text
-  case Bytea
+  case Binary
   case Date
   case Time
   case Timestamp
-  case Timestamptz
-  case Jsonb
+  case TimestampTz
+  case Json
   case Uuid
-end PgType
+end SqlType
 
-/** A bound value. Null carries the Postgres type so the driver can bind a typed null. */
+/** A bound value. Null carries its `SqlType` so the driver can bind a typed null. */
 enum SqlValue:
-  case Null(tpe: PgType)
+  case Null(tpe: SqlType)
   case Bool(value: Boolean)
-  case Int2(value: Short)
-  case Int4(value: Int)
-  case Int8(value: Long)
-  case Float4(value: Float)
-  case Float8(value: Double)
+  case SmallInt(value: Short)
+  case Integer(value: Int)
+  case BigInt(value: Long)
+  case Real(value: Float)
+  case DoublePrecision(value: Double)
   case Numeric(value: BigDecimal)
   case VarChar(value: String)
   case Text(value: String)
-  case Bytea(value: Chunk[Byte])
+  case Binary(value: Chunk[Byte])
   case Date(value: LocalDate)
   case Time(value: LocalTime)
   case Timestamp(value: LocalDateTime)
-  case Timestamptz(value: java.time.Instant)
-  case Jsonb(value: String)
+  case TimestampTz(value: java.time.Instant)
+  case Json(value: String)
   case Uuid(value: UUID)
 
-  def pgType: PgType = this match
-    case Null(tpe)      => tpe
-    case Bool(_)        => PgType.Bool
-    case Int2(_)        => PgType.Int2
-    case Int4(_)        => PgType.Int4
-    case Int8(_)        => PgType.Int8
-    case Float4(_)      => PgType.Float4
-    case Float8(_)      => PgType.Float8
-    case Numeric(_)     => PgType.Numeric
-    case VarChar(_)     => PgType.VarChar
-    case Text(_)        => PgType.Text
-    case Bytea(_)       => PgType.Bytea
-    case Date(_)        => PgType.Date
-    case Time(_)        => PgType.Time
-    case Timestamp(_)   => PgType.Timestamp
-    case Timestamptz(_) => PgType.Timestamptz
-    case Jsonb(_)       => PgType.Jsonb
-    case Uuid(_)        => PgType.Uuid
+  def sqlType: SqlType = this match
+    case Null(tpe)          => tpe
+    case Bool(_)            => SqlType.Bool
+    case SmallInt(_)        => SqlType.SmallInt
+    case Integer(_)         => SqlType.Integer
+    case BigInt(_)          => SqlType.BigInt
+    case Real(_)            => SqlType.Real
+    case DoublePrecision(_) => SqlType.DoublePrecision
+    case Numeric(_)         => SqlType.Numeric
+    case VarChar(_)         => SqlType.VarChar
+    case Text(_)            => SqlType.Text
+    case Binary(_)          => SqlType.Binary
+    case Date(_)            => SqlType.Date
+    case Time(_)            => SqlType.Time
+    case Timestamp(_)       => SqlType.Timestamp
+    case TimestampTz(_)     => SqlType.TimestampTz
+    case Json(_)            => SqlType.Json
+    case Uuid(_)            => SqlType.Uuid
 end SqlValue
 
 object SqlValue:
@@ -81,23 +81,23 @@ object SqlValue:
 
   /** Inlined form for `show` and DDL defaults. Not a bound parameter. */
   def literal(value: SqlValue): String = value match
-    case Null(_)        => "null"
-    case Bool(v)        => if v then "true" else "false"
-    case Int2(v)        => v.toString
-    case Int4(v)        => v.toString
-    case Int8(v)        => v.toString
-    case Float4(v)      => v.toString
-    case Float8(v)      => v.toString
-    case Numeric(v)     => v.toString
-    case VarChar(v)     => quote(v)
-    case Text(v)        => quote(v)
-    case Bytea(bytes)   => s"'\\x${hex(bytes)}'"
-    case Date(v)        => s"DATE '${v}'"
-    case Time(v)        => s"TIME '${v.format(timeLiteral)}'"
-    case Timestamp(v)   => s"TIMESTAMP '${v.format(timestampLiteral)}'"
-    case Timestamptz(v) => s"TIMESTAMPTZ '${timestamptzLiteral.format(v)}'"
-    case Jsonb(v)       => quote(v)
-    case Uuid(v)        => quote(v.toString)
+    case Null(_)            => "null"
+    case Bool(v)            => if v then "true" else "false"
+    case SmallInt(v)        => v.toString
+    case Integer(v)         => v.toString
+    case BigInt(v)          => v.toString
+    case Real(v)            => v.toString
+    case DoublePrecision(v) => v.toString
+    case Numeric(v)         => v.toString
+    case VarChar(v)         => quote(v)
+    case Text(v)            => quote(v)
+    case Binary(bytes)      => s"'\\x${hex(bytes)}'"
+    case Date(v)            => s"DATE '${v}'"
+    case Time(v)            => s"TIME '${v.format(timeLiteral)}'"
+    case Timestamp(v)       => s"TIMESTAMP '${v.format(timestampLiteral)}'"
+    case TimestampTz(v)     => s"TIMESTAMPTZ '${timestamptzLiteral.format(v)}'"
+    case Json(v)            => quote(v)
+    case Uuid(v)            => quote(v.toString)
 
   def quote(text: String): String =
     s"'${text.replace("'", "''")}'"

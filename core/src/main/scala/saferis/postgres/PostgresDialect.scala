@@ -19,23 +19,23 @@ object PostgresDialect
 
   val name: String = "PostgreSQL"
 
-  def columnType(tpe: PgType): String = tpe match
-    case PgType.Bool        => "boolean"
-    case PgType.Int2        => "smallint"
-    case PgType.Int4        => "integer"
-    case PgType.Int8        => "bigint"
-    case PgType.Float4      => "real"
-    case PgType.Float8      => "double precision"
-    case PgType.Numeric     => "numeric"
-    case PgType.VarChar     => s"varchar($DefaultVarcharLength)"
-    case PgType.Text        => "text"
-    case PgType.Bytea       => "bytea"
-    case PgType.Date        => "date"
-    case PgType.Time        => "time"
-    case PgType.Timestamp   => "timestamp"
-    case PgType.Timestamptz => "timestamptz"
-    case PgType.Jsonb       => "jsonb"
-    case PgType.Uuid        => "uuid"
+  def columnType(tpe: SqlType): String = tpe match
+    case SqlType.Bool            => "boolean"
+    case SqlType.SmallInt        => "smallint"
+    case SqlType.Integer         => "integer"
+    case SqlType.BigInt          => "bigint"
+    case SqlType.Real            => "real"
+    case SqlType.DoublePrecision => "double precision"
+    case SqlType.Numeric         => "numeric"
+    case SqlType.VarChar         => s"varchar($DefaultVarcharLength)"
+    case SqlType.Text            => "text"
+    case SqlType.Binary          => "bytea"
+    case SqlType.Date            => "date"
+    case SqlType.Time            => "time"
+    case SqlType.Timestamp       => "timestamp"
+    case SqlType.TimestampTz     => "timestamptz"
+    case SqlType.Json            => "jsonb"
+    case SqlType.Uuid            => "uuid"
 
   // === PostgreSQL-specific Auto-increment and Primary Key Support ===
 

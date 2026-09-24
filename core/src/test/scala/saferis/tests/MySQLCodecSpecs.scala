@@ -19,8 +19,8 @@ object MySQLCodecSpecs extends ZIOSpecDefault:
 
       assertTrue(dialectName == "MySQL") &&
       assertTrue(colType == "char(36)") &&
-      assertTrue(encoder.pgType == PgType.Text) &&
-      assertTrue(dialect.columnType(PgType.Uuid) == "char(36)")
+      assertTrue(encoder.sqlType == SqlType.Text) &&
+      assertTrue(dialect.columnType(SqlType.Uuid) == "char(36)")
     },
     test("MySQL UUID encoder generates correct literal") {
       import saferis.mysql.given

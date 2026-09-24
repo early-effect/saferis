@@ -21,7 +21,7 @@ object Text:
   extension (t: Text) def value: String = t
 
   given encoder: Encoder[Text] with
-    def pgType: PgType            = PgType.Text
+    def sqlType: SqlType          = SqlType.Text
     def encode(a: Text): SqlValue = SqlValue.Text(a)
 
   given decoder: Decoder[Text] with

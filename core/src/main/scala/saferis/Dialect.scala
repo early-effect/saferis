@@ -8,8 +8,8 @@ package saferis
   */
 trait Dialect:
 
-  /** Database-specific DDL spelling for a Postgres type. Lossy on dialects that are not Postgres. */
-  def columnType(tpe: PgType): String
+  /** DDL spelling of a `SqlType` for this dialect. */
+  def columnType(tpe: SqlType): String
 
   /** Database name/identifier */
   def name: String

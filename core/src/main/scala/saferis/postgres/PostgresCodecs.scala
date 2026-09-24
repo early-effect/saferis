@@ -10,7 +10,7 @@ import java.util.UUID
   */
 
 given uuidEncoder: Encoder[UUID] with
-  def pgType: PgType               = PgType.Uuid
+  def sqlType: SqlType             = SqlType.Uuid
   def encode(uuid: UUID): SqlValue = SqlValue.Uuid(uuid)
 
 /** UUID decoder for PostgreSQL. Reads `SqlValue.Uuid` only. */

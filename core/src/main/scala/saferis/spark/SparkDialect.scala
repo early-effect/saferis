@@ -22,23 +22,23 @@ object SparkDialect
 
   val name: String = "Spark SQL"
 
-  def columnType(tpe: PgType): String = tpe match
-    case PgType.Bool        => "boolean"
-    case PgType.Int2        => "smallint"
-    case PgType.Int4        => "int"
-    case PgType.Int8        => "bigint"
-    case PgType.Float4      => "float"
-    case PgType.Float8      => "double"
-    case PgType.Numeric     => "decimal(10,0)"
-    case PgType.VarChar     => "string"
-    case PgType.Text        => "string"
-    case PgType.Bytea       => "binary"
-    case PgType.Date        => "date"
-    case PgType.Time        => "timestamp"
-    case PgType.Timestamp   => "timestamp"
-    case PgType.Timestamptz => "timestamp"
-    case PgType.Jsonb       => "string"
-    case PgType.Uuid        => "string"
+  def columnType(tpe: SqlType): String = tpe match
+    case SqlType.Bool            => "boolean"
+    case SqlType.SmallInt        => "smallint"
+    case SqlType.Integer         => "int"
+    case SqlType.BigInt          => "bigint"
+    case SqlType.Real            => "float"
+    case SqlType.DoublePrecision => "double"
+    case SqlType.Numeric         => "decimal(10,0)"
+    case SqlType.VarChar         => "string"
+    case SqlType.Text            => "string"
+    case SqlType.Binary          => "binary"
+    case SqlType.Date            => "date"
+    case SqlType.Time            => "timestamp"
+    case SqlType.Timestamp       => "timestamp"
+    case SqlType.TimestampTz     => "timestamp"
+    case SqlType.Json            => "string"
+    case SqlType.Uuid            => "string"
 
   // === Spark SQL Auto-increment and Primary Key Support ===
   // Spark SQL does not support auto-increment or primary key constraints in standard DDL

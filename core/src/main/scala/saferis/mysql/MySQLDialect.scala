@@ -16,23 +16,23 @@ object MySQLDialect extends Dialect with JsonSupport with WindowFunctionSupport 
 
   val name: String = "MySQL"
 
-  def columnType(tpe: PgType): String = tpe match
-    case PgType.Bool        => "boolean"
-    case PgType.Int2        => "smallint"
-    case PgType.Int4        => "int"
-    case PgType.Int8        => "bigint"
-    case PgType.Float4      => "float"
-    case PgType.Float8      => "double"
-    case PgType.Numeric     => "decimal"
-    case PgType.VarChar     => s"varchar($DefaultVarcharLength)"
-    case PgType.Text        => "longtext"
-    case PgType.Bytea       => "blob"
-    case PgType.Date        => "date"
-    case PgType.Time        => "time"
-    case PgType.Timestamp   => "timestamp"
-    case PgType.Timestamptz => "timestamp"
-    case PgType.Jsonb       => "json"
-    case PgType.Uuid        => "char(36)"
+  def columnType(tpe: SqlType): String = tpe match
+    case SqlType.Bool            => "boolean"
+    case SqlType.SmallInt        => "smallint"
+    case SqlType.Integer         => "int"
+    case SqlType.BigInt          => "bigint"
+    case SqlType.Real            => "float"
+    case SqlType.DoublePrecision => "double"
+    case SqlType.Numeric         => "decimal"
+    case SqlType.VarChar         => s"varchar($DefaultVarcharLength)"
+    case SqlType.Text            => "longtext"
+    case SqlType.Binary          => "blob"
+    case SqlType.Date            => "date"
+    case SqlType.Time            => "time"
+    case SqlType.Timestamp       => "timestamp"
+    case SqlType.TimestampTz     => "timestamp"
+    case SqlType.Json            => "json"
+    case SqlType.Uuid            => "char(36)"
 
   // === MySQL-specific Auto-increment and Primary Key Support ===
 

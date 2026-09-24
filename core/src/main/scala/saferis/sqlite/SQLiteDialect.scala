@@ -15,13 +15,13 @@ object SQLiteDialect extends Dialect with ReturningSupport with CommonTableExpre
   val name: String = "SQLite"
 
   // === Type Mappings ===
-  def columnType(tpe: PgType): String = tpe match
-    case PgType.Bool                                    => "integer"
-    case PgType.Int2 | PgType.Int4 | PgType.Int8        => "integer"
-    case PgType.Float4 | PgType.Float8 | PgType.Numeric => "real"
-    case PgType.Bytea                                   => "blob"
-    case PgType.VarChar | PgType.Text | PgType.Date | PgType.Time | PgType.Timestamp | PgType.Timestamptz |
-        PgType.Jsonb | PgType.Uuid =>
+  def columnType(tpe: SqlType): String = tpe match
+    case SqlType.Bool                                             => "integer"
+    case SqlType.SmallInt | SqlType.Integer | SqlType.BigInt      => "integer"
+    case SqlType.Real | SqlType.DoublePrecision | SqlType.Numeric => "real"
+    case SqlType.Binary                                           => "blob"
+    case SqlType.VarChar | SqlType.Text | SqlType.Date | SqlType.Time | SqlType.Timestamp | SqlType.TimestampTz |
+        SqlType.Json | SqlType.Uuid =>
       "text"
 
   // === Auto-increment Syntax ===

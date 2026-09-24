@@ -45,14 +45,14 @@ object TypeSupport extends SaferisDocSpecSuite:
       md"""All `java.time` types are supported with automatic SQL type mapping.
 `OffsetDateTime` and `ZonedDateTime` encode as `Instant` and decode in UTC.
 
-| Scala Type | PostgreSQL Type | PgType |
+| Scala Type | PostgreSQL Type | SqlType |
 |------------|-----------------|--------|
-| `java.time.Instant` | `timestamptz` | Timestamptz |
+| `java.time.Instant` | `timestamptz` | TimestampTz |
 | `java.time.LocalDateTime` | `timestamp` | Timestamp |
 | `java.time.LocalDate` | `date` | Date |
 | `java.time.LocalTime` | `time` | Time |
-| `java.time.ZonedDateTime` | `timestamptz` | Timestamptz |
-| `java.time.OffsetDateTime` | `timestamptz` | Timestamptz |""",
+| `java.time.ZonedDateTime` | `timestamptz` | TimestampTz |
+| `java.time.OffsetDateTime` | `timestamptz` | TimestampTz |""",
       exampleZIO {
         (for
           _ <- ddl.createTable[Event](ifNotExists = true)

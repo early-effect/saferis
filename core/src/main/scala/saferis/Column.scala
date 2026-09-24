@@ -47,10 +47,10 @@ final case class Column[R](
   val pieces: Chunk[SqlPiece]     = Chunk(SqlPiece.Text(sql))
   val issues: List[FragmentIssue] = Nil
 
-  def pgType: PgType = writable.pgType
+  def sqlType: SqlType = writable.sqlType
 
   private[saferis] def read(row: SqlRow): Either[SaferisError, (String, R)] =
-    def fail(detail: String) = Left(SaferisError.DecodingError(label, pgType.toString, detail))
+    def fail(detail: String) = Left(SaferisError.DecodingError(label, sqlType.toString, detail))
     row.get(label) match
       case Left(err)    => fail(err.detail)
       case Right(value) =>

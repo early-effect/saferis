@@ -13,7 +13,7 @@ object Capabilities extends SaferisDocSpecSuite:
   case class SpecializedItem(@generated @key id: Int, name: String, category: String) derives Table
 
   @tableName("capabilities_pg_items")
-  case class PgItem(@generated @key id: Int, name: String) derives Table
+  case class CapabilityItem(@generated @key id: Int, name: String) derives Table
 
   @tableName("capabilities_returning_items")
   case class ReturningItem(@generated @key id: Int, name: String) derives Table
@@ -72,7 +72,7 @@ Capabilities are encoded in the dialect's type. You can ask the compiler to prov
       "PostgreSQL provides every documented capability"
     }.assert(message => assertTrue(message.contains("every"))),
     md"""Operations that require a capability take a `using Dialect & SomeSupport` parameter. Because the default dialect (PostgreSQL) provides every capability, `returningAs` compiles out of the box:""",
-    exampleValue(Update[PgItem].set(_.name, "x").where(_.id).eq(1).returningAs.build.sql)
+    exampleValue(Update[CapabilityItem].set(_.name, "x").where(_.id).eq(1).returningAs.build.sql)
       .assert(sql => assertTrue(sql.toLowerCase.contains("returning"))),
     md"""Switch to a dialect that lacks a capability, for example a SQLite-only program that tries an `Upsert` (SQLite has no `UpsertSupport`), and the operation no longer typechecks. The constraint is part of the method signature, so the mismatch is caught at compile time rather than failing against the database at runtime.
 

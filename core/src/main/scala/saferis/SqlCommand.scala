@@ -13,7 +13,7 @@ final class SqlCommand private (
     val pieces: Chunk[SqlPiece],
     val timeout: Option[Duration],
 ):
-  def render(placeholder: (Int, PgType) => String): String =
+  def render(placeholder: (Int, SqlType) => String): String =
     SqlPieces.render(pieces, placeholder)
 
 object SqlCommand:
@@ -38,7 +38,7 @@ private[saferis] object SqlPieces:
     b.result()
   end merge
 
-  def render(pieces: Chunk[SqlPiece], placeholder: (Int, PgType) => String): String =
+  def render(pieces: Chunk[SqlPiece], placeholder: (Int, SqlType) => String): String =
     val sb = new StringBuilder
     pieces.foldLeft(1): (n, piece) =>
       piece match
@@ -46,7 +46,7 @@ private[saferis] object SqlPieces:
           sb.append(t)
           n
         case SqlPiece.Param(value) =>
-          sb.append(placeholder(n, value.pgType))
+          sb.append(placeholder(n, value.sqlType))
           n + 1
     sb.toString
   end render

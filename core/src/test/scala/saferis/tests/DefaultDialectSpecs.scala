@@ -15,7 +15,7 @@ object DefaultDialectSpecs extends ZIOSpecDefault:
       val dialect = summon[Dialect]
       assertTrue(dialect.autoIncrementClause(true, true, false) == " generated always as identity primary key") &&
       assertTrue(dialect.identifierQuote == "\"") &&
-      assertTrue(dialect.columnType(PgType.VarChar) == "varchar(255)")
+      assertTrue(dialect.columnType(SqlType.VarChar) == "varchar(255)")
     },
     test("Can create tables with just import saferis.*") {
       // This tests that all the necessary implicits are available

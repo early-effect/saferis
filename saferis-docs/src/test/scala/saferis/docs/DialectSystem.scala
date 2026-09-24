@@ -39,16 +39,16 @@ val pg = summon[Dialect]
 | CTEs | Yes | Yes | Yes | Yes |"""
     ),
     section("Type Mappings")(
-      md"""| PgType | PostgreSQL | MySQL | SQLite |
+      md"""| SqlType | PostgreSQL | MySQL | SQLite |
 |--------|------------|-------|--------|
 | VarChar | varchar(255) | varchar(255) | text |
-| Int4 | integer | int | integer |
-| Int8 | bigint | bigint | integer |
-| Float8 | double precision | double | real |
+| Integer | integer | int | integer |
+| BigInt | bigint | bigint | integer |
+| Double | double precision | double | real |
 | Bool | boolean | boolean | integer |
 | Timestamp | timestamp | timestamp | text |
 | Text | text | longtext | text |
-| Bytea | bytea | blob | blob |
+| Binary | bytea | blob | blob |
 | Uuid | uuid | char(36) | text |"""
     ),
     section("Auto-Increment Syntax")(

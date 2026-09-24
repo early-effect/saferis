@@ -25,13 +25,13 @@ object Json:
   extension [A](json: Json[A]) def value(using @scala.annotation.unused codec: JsonCodec[A]): A = json
 
   given encoder[A: JsonCodec]: Encoder[Json[A]] with
-    def pgType: PgType               = PgType.Jsonb
+    def sqlType: SqlType             = SqlType.Json
     def encode(a: Json[A]): SqlValue =
-      SqlValue.Jsonb(summon[JsonCodec[A]].encoder.encodeJson(a, None).toString)
+      SqlValue.Json(summon[JsonCodec[A]].encoder.encodeJson(a, None).toString)
 
   given decoder[A: JsonCodec]: Decoder[Json[A]] with
     def decode(value: SqlValue): Either[DecodeError, Json[A]] = value match
-      case SqlValue.Jsonb(json) =>
+      case SqlValue.Json(json) =>
         summon[JsonCodec[A]].decoder.decodeJson(json).left.map(e => DecodeError(s"Failed to decode JSON: $e"))
       case SqlValue.Null(_) => Left(DecodeError("null value"))
       case other            => Left(DecodeError(s"expected jsonb, found ${other.productPrefix}"))

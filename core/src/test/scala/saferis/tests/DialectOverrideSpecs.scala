@@ -25,7 +25,7 @@ object DialectOverrideSpecs extends ZIOSpecDefault:
       final case class CustomId(value: String)
 
       given customIdEncoder: Encoder[CustomId] with
-        def pgType: PgType                                      = PgType.VarChar
+        def sqlType: SqlType                                    = SqlType.VarChar
         def encode(id: CustomId): SqlValue                      = SqlValue.VarChar(id.value)
         override def columnType(using dialect: Dialect): String = "varchar(50)"
 
@@ -48,13 +48,13 @@ object DialectOverrideSpecs extends ZIOSpecDefault:
     test("Switching dialects changes column types for standard types") {
       // Test with default PostgreSQL
       val pgDialect = summon[Dialect]
-      val pgIntType = pgDialect.columnType(PgType.Int4)
+      val pgIntType = pgDialect.columnType(SqlType.Integer)
 
       // Test with MySQL in a nested scope
       val mysqlIntType =
         import saferis.mysql.given
         val dialect = summon[Dialect]
-        dialect.columnType(PgType.Int4)
+        dialect.columnType(SqlType.Integer)
 
       assertTrue(pgIntType == "integer") &&
       assertTrue(mysqlIntType == "int")

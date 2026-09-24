@@ -62,23 +62,23 @@ object JdbcSession:
       else if nanosFraction > 0 then if seconds + 1L >= Int.MaxValue.toLong then Int.MaxValue else (seconds + 1L).toInt
       else seconds.toInt
 
-  private def jdbcType(tpe: PgType): Int = tpe match
-    case PgType.Bool        => java.sql.Types.BOOLEAN
-    case PgType.Int2        => java.sql.Types.SMALLINT
-    case PgType.Int4        => java.sql.Types.INTEGER
-    case PgType.Int8        => java.sql.Types.BIGINT
-    case PgType.Float4      => java.sql.Types.REAL
-    case PgType.Float8      => java.sql.Types.DOUBLE
-    case PgType.Numeric     => java.sql.Types.NUMERIC
-    case PgType.VarChar     => java.sql.Types.VARCHAR
-    case PgType.Text        => java.sql.Types.LONGVARCHAR
-    case PgType.Bytea       => java.sql.Types.BINARY
-    case PgType.Date        => java.sql.Types.DATE
-    case PgType.Time        => java.sql.Types.TIME
-    case PgType.Timestamp   => java.sql.Types.TIMESTAMP
-    case PgType.Timestamptz => java.sql.Types.TIMESTAMP_WITH_TIMEZONE
-    case PgType.Jsonb       => java.sql.Types.OTHER
-    case PgType.Uuid        => java.sql.Types.OTHER
+  private def jdbcType(tpe: SqlType): Int = tpe match
+    case SqlType.Bool            => java.sql.Types.BOOLEAN
+    case SqlType.SmallInt        => java.sql.Types.SMALLINT
+    case SqlType.Integer         => java.sql.Types.INTEGER
+    case SqlType.BigInt          => java.sql.Types.BIGINT
+    case SqlType.Real            => java.sql.Types.REAL
+    case SqlType.DoublePrecision => java.sql.Types.DOUBLE
+    case SqlType.Numeric         => java.sql.Types.NUMERIC
+    case SqlType.VarChar         => java.sql.Types.VARCHAR
+    case SqlType.Text            => java.sql.Types.LONGVARCHAR
+    case SqlType.Binary          => java.sql.Types.BINARY
+    case SqlType.Date            => java.sql.Types.DATE
+    case SqlType.Time            => java.sql.Types.TIME
+    case SqlType.Timestamp       => java.sql.Types.TIMESTAMP
+    case SqlType.TimestampTz     => java.sql.Types.TIMESTAMP_WITH_TIMEZONE
+    case SqlType.Json            => java.sql.Types.OTHER
+    case SqlType.Uuid            => java.sql.Types.OTHER
 
   private def messageOf(t: Throwable): String =
     Option(t.getMessage).filter(_.nonEmpty).getOrElse(t.getClass.getName)
@@ -415,22 +415,22 @@ private final class JdbcSession(
 
   private def bindOne(ps: PreparedStatement, index: Int, value: SqlValue): Unit =
     value match
-      case SqlValue.Null(tpe)      => ps.setNull(index, jdbcType(tpe))
-      case SqlValue.Bool(v)        => ps.setBoolean(index, v)
-      case SqlValue.Int2(v)        => ps.setShort(index, v)
-      case SqlValue.Int4(v)        => ps.setInt(index, v)
-      case SqlValue.Int8(v)        => ps.setLong(index, v)
-      case SqlValue.Float4(v)      => ps.setFloat(index, v)
-      case SqlValue.Float8(v)      => ps.setDouble(index, v)
-      case SqlValue.Numeric(v)     => ps.setBigDecimal(index, v.bigDecimal)
-      case SqlValue.VarChar(v)     => ps.setString(index, v)
-      case SqlValue.Text(v)        => ps.setString(index, v)
-      case SqlValue.Bytea(v)       => ps.setBytes(index, v.toArray)
-      case SqlValue.Date(v)        => ps.setObject(index, v)
-      case SqlValue.Time(v)        => ps.setObject(index, v)
-      case SqlValue.Timestamp(v)   => ps.setObject(index, v)
-      case SqlValue.Timestamptz(v) => ps.setObject(index, OffsetDateTime.ofInstant(v, ZoneOffset.UTC))
-      case SqlValue.Jsonb(json)    =>
+      case SqlValue.Null(tpe)          => ps.setNull(index, jdbcType(tpe))
+      case SqlValue.Bool(v)            => ps.setBoolean(index, v)
+      case SqlValue.SmallInt(v)        => ps.setShort(index, v)
+      case SqlValue.Integer(v)         => ps.setInt(index, v)
+      case SqlValue.BigInt(v)          => ps.setLong(index, v)
+      case SqlValue.Real(v)            => ps.setFloat(index, v)
+      case SqlValue.DoublePrecision(v) => ps.setDouble(index, v)
+      case SqlValue.Numeric(v)         => ps.setBigDecimal(index, v.bigDecimal)
+      case SqlValue.VarChar(v)         => ps.setString(index, v)
+      case SqlValue.Text(v)            => ps.setString(index, v)
+      case SqlValue.Binary(v)          => ps.setBytes(index, v.toArray)
+      case SqlValue.Date(v)            => ps.setObject(index, v)
+      case SqlValue.Time(v)            => ps.setObject(index, v)
+      case SqlValue.Timestamp(v)       => ps.setObject(index, v)
+      case SqlValue.TimestampTz(v)     => ps.setObject(index, OffsetDateTime.ofInstant(v, ZoneOffset.UTC))
+      case SqlValue.Json(json)         =>
         val obj = new PGobject()
         obj.setType("jsonb")
         obj.setValue(json)
@@ -485,74 +485,74 @@ private object JdbcReads:
     Option(meta.getColumnTypeName(index)).getOrElse("").toLowerCase(Locale.ROOT)
 
   private def readCell(rs: ResultSet, index: Int, name: String, label: String): Either[SaferisError, SqlValue] =
-    def nulled(tpe: PgType): SqlValue = SqlValue.Null(tpe)
-    def unrecognized                  = Left(SaferisError.DecodingError(label, name, s"unrecognized type $name"))
+    def nulled(tpe: SqlType): SqlValue = SqlValue.Null(tpe)
+    def unrecognized                   = Left(SaferisError.DecodingError(label, name, s"unrecognized type $name"))
     name match
       case "bool" =>
         val value = rs.getBoolean(index)
-        Right(if rs.wasNull() then nulled(PgType.Bool) else SqlValue.Bool(value))
+        Right(if rs.wasNull() then nulled(SqlType.Bool) else SqlValue.Bool(value))
       case "int2" | "smallint" | "smallserial" =>
         val value = rs.getShort(index)
-        Right(if rs.wasNull() then nulled(PgType.Int2) else SqlValue.Int2(value))
+        Right(if rs.wasNull() then nulled(SqlType.SmallInt) else SqlValue.SmallInt(value))
       case "int4" | "integer" | "serial" =>
         val value = rs.getInt(index)
-        Right(if rs.wasNull() then nulled(PgType.Int4) else SqlValue.Int4(value))
+        Right(if rs.wasNull() then nulled(SqlType.Integer) else SqlValue.Integer(value))
       case "int8" | "bigint" | "bigserial" =>
         val value = rs.getLong(index)
-        Right(if rs.wasNull() then nulled(PgType.Int8) else SqlValue.Int8(value))
+        Right(if rs.wasNull() then nulled(SqlType.BigInt) else SqlValue.BigInt(value))
       case "float4" =>
         val value = rs.getFloat(index)
-        Right(if rs.wasNull() then nulled(PgType.Float4) else SqlValue.Float4(value))
+        Right(if rs.wasNull() then nulled(SqlType.Real) else SqlValue.Real(value))
       case "float8" =>
         val value = rs.getDouble(index)
-        Right(if rs.wasNull() then nulled(PgType.Float8) else SqlValue.Float8(value))
+        Right(if rs.wasNull() then nulled(SqlType.DoublePrecision) else SqlValue.DoublePrecision(value))
       case "numeric" =>
         val value = rs.getBigDecimal(index)
-        Right(if rs.wasNull() || value == null then nulled(PgType.Numeric) else SqlValue.Numeric(BigDecimal(value)))
+        Right(if rs.wasNull() || value == null then nulled(SqlType.Numeric) else SqlValue.Numeric(BigDecimal(value)))
       case "varchar" | "bpchar" | "name" =>
         val value = rs.getString(index)
-        Right(if rs.wasNull() || value == null then nulled(PgType.VarChar) else SqlValue.VarChar(value))
+        Right(if rs.wasNull() || value == null then nulled(SqlType.VarChar) else SqlValue.VarChar(value))
       case "text" | "unknown" =>
         val value = rs.getString(index)
-        Right(if rs.wasNull() || value == null then nulled(PgType.Text) else SqlValue.Text(value))
+        Right(if rs.wasNull() || value == null then nulled(SqlType.Text) else SqlValue.Text(value))
       case "bytea" =>
         val value = rs.getBytes(index)
-        Right(if rs.wasNull() || value == null then nulled(PgType.Bytea) else SqlValue.Bytea(Chunk.fromArray(value)))
+        Right(if rs.wasNull() || value == null then nulled(SqlType.Binary) else SqlValue.Binary(Chunk.fromArray(value)))
       case "date" =>
         val value = rs.getObject(index, classOf[LocalDate])
-        Right(if rs.wasNull() || value == null then nulled(PgType.Date) else SqlValue.Date(value))
+        Right(if rs.wasNull() || value == null then nulled(SqlType.Date) else SqlValue.Date(value))
       case "time" =>
         val value = rs.getObject(index, classOf[LocalTime])
-        Right(if rs.wasNull() || value == null then nulled(PgType.Time) else SqlValue.Time(value))
+        Right(if rs.wasNull() || value == null then nulled(SqlType.Time) else SqlValue.Time(value))
       case "timetz" =>
         val value = rs.getObject(index, classOf[OffsetTime])
-        Right(if rs.wasNull() || value == null then nulled(PgType.Time) else SqlValue.Time(value.toLocalTime))
+        Right(if rs.wasNull() || value == null then nulled(SqlType.Time) else SqlValue.Time(value.toLocalTime))
       case "timestamp" =>
         val value = rs.getObject(index, classOf[LocalDateTime])
-        Right(if rs.wasNull() || value == null then nulled(PgType.Timestamp) else SqlValue.Timestamp(value))
+        Right(if rs.wasNull() || value == null then nulled(SqlType.Timestamp) else SqlValue.Timestamp(value))
       case "timestamptz" =>
         try
           val value = rs.getObject(index, classOf[OffsetDateTime])
           Right(
-            if rs.wasNull() || value == null then nulled(PgType.Timestamptz) else SqlValue.Timestamptz(value.toInstant)
+            if rs.wasNull() || value == null then nulled(SqlType.TimestampTz) else SqlValue.TimestampTz(value.toInstant)
           )
         catch
           case _: SQLException =>
             val value = rs.getTimestamp(index)
             Right(
-              if rs.wasNull() || value == null then nulled(PgType.Timestamptz)
-              else SqlValue.Timestamptz(value.toInstant)
+              if rs.wasNull() || value == null then nulled(SqlType.TimestampTz)
+              else SqlValue.TimestampTz(value.toInstant)
             )
       case "json" | "jsonb" =>
         val value = rs.getObject(index)
-        if rs.wasNull() || value == null then Right(nulled(PgType.Jsonb))
+        if rs.wasNull() || value == null then Right(nulled(SqlType.Json))
         else
           value match
-            case pg: PGobject => Right(SqlValue.Jsonb(Option(pg.getValue).getOrElse("")))
-            case other        => Right(SqlValue.Jsonb(other.toString))
+            case pg: PGobject => Right(SqlValue.Json(Option(pg.getValue).getOrElse("")))
+            case other        => Right(SqlValue.Json(other.toString))
       case "uuid" =>
         val value = rs.getObject(index, classOf[UUID])
-        Right(if rs.wasNull() || value == null then nulled(PgType.Uuid) else SqlValue.Uuid(value))
+        Right(if rs.wasNull() || value == null then nulled(SqlType.Uuid) else SqlValue.Uuid(value))
       case _ => unrecognized
     end match
   end readCell

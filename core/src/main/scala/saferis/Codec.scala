@@ -14,7 +14,7 @@ trait Codec[A] extends Encoder[A], Decoder[A]:
   self =>
   val encoder: Encoder[A]
   val decoder: Decoder[A]
-  def pgType: PgType                                  = encoder.pgType
+  def sqlType: SqlType                                = encoder.sqlType
   def encode(a: A): SqlValue                          = encoder.encode(a)
   def decode(value: SqlValue): Either[DecodeError, A] = decoder.decode(value)
   override def literal(a: A): String                  = encoder.literal(a)

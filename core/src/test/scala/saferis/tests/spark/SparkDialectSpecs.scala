@@ -27,18 +27,18 @@ object SparkDialectSpecs extends ZIOSpecDefault:
     test("Spark type mappings") {
       val dialect = summon[Dialect]
       assertTrue(
-        dialect.columnType(PgType.VarChar) == "string" &&
-          dialect.columnType(PgType.Text) == "string" &&
-          dialect.columnType(PgType.Int2) == "smallint" &&
-          dialect.columnType(PgType.Int4) == "int" &&
-          dialect.columnType(PgType.Int8) == "bigint" &&
-          dialect.columnType(PgType.Float4) == "float" &&
-          dialect.columnType(PgType.Float8) == "double" &&
-          dialect.columnType(PgType.Bool) == "boolean" &&
-          dialect.columnType(PgType.Date) == "date" &&
-          dialect.columnType(PgType.Timestamp) == "timestamp" &&
-          dialect.columnType(PgType.Bytea) == "binary" &&
-          dialect.columnType(PgType.Uuid) == "string"
+        dialect.columnType(SqlType.VarChar) == "string" &&
+          dialect.columnType(SqlType.Text) == "string" &&
+          dialect.columnType(SqlType.SmallInt) == "smallint" &&
+          dialect.columnType(SqlType.Integer) == "int" &&
+          dialect.columnType(SqlType.BigInt) == "bigint" &&
+          dialect.columnType(SqlType.Real) == "float" &&
+          dialect.columnType(SqlType.DoublePrecision) == "double" &&
+          dialect.columnType(SqlType.Bool) == "boolean" &&
+          dialect.columnType(SqlType.Date) == "date" &&
+          dialect.columnType(SqlType.Timestamp) == "timestamp" &&
+          dialect.columnType(SqlType.Binary) == "binary" &&
+          dialect.columnType(SqlType.Uuid) == "string"
       )
     },
     test("Spark DDL uses IF NOT EXISTS") {

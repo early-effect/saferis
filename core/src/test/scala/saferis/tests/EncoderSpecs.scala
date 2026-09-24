@@ -34,7 +34,7 @@ object EncoderSpecs extends ZIOSpecDefault:
     },
     test("optional none is a typed null") {
       val encoded = summon[Encoder[Option[Int]]].encode(None)
-      assertTrue(encoded == SqlValue.Null(PgType.Int4))
+      assertTrue(encoded == SqlValue.Null(SqlType.Integer))
     },
   )
 end EncoderSpecs

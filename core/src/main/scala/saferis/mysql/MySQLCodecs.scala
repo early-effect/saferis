@@ -11,7 +11,7 @@ import java.util.UUID
 
 /** UUID encoder for MySQL. The bound value is text. Column DDL is `char(36)`, not `longtext`. */
 given uuidEncoder: Encoder[UUID] with
-  def pgType: PgType                             = PgType.Text
+  def sqlType: SqlType                           = SqlType.Text
   def encode(uuid: UUID): SqlValue               = SqlValue.Text(uuid.toString)
   override def columnType(using Dialect): String = "char(36)"
 
