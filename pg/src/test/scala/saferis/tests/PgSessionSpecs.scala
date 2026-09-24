@@ -6,38 +6,18 @@ import zio.test.*
 
 import java.time.Instant
 
-import scala.scalajs.js
-
 object PgSessionSpecs extends ZIOSpecDefault:
   private val pastInt8    = 9223372036854775807L
   private val pastNumeric = BigDecimal("9223372036854775808.25")
   private val micros      = Instant.parse("2024-09-23T15:04:05.123456Z")
 
-  private def env(name: String): Option[String] =
-    val value = js.Dynamic.global.process.env.selectDynamic(name)
-    if js.isUndefined(value) || (value eq null) then None
-    else
-      val text = value.asInstanceOf[js.Any].toString
-      if text.isEmpty then None else Some(text)
-
-  private def pgConfig(
-      defaultTimeout: Option[Duration] = None,
-      listener: SqlListener = SqlListener.noop,
-      poolSize: Int = 4,
-  ): PgConfig =
-    PgConfig(
-      host = env("PGHOST").getOrElse("localhost"),
-      port = env("PGPORT").flatMap(_.toIntOption).getOrElse(5432),
-      database = env("PGDATABASE").getOrElse("postgres"),
-      user = env("PGUSER").getOrElse("postgres"),
-      password = env("PGPASSWORD").getOrElse(""),
-      poolSize = poolSize,
-      defaultTimeout = defaultTimeout,
-      listener = listener,
-    )
-
   private def session(config: PgConfig): ZLayer[Any, SaferisError, SqlSession] =
     ZLayer.succeed(config) >>> NodeSession.layer
+
+  private def sessions(
+      configure: NodePostgres => PgConfig
+  ): ZLayer[NodePostgres, SaferisError, SqlSession] =
+    ZLayer.fromZIO(ZIO.serviceWith[NodePostgres](configure)) >>> NodeSession.layer
 
   /** One row from a long cursor, then the scope ends, then another statement on the same pool. */
   private def pullOneThenSelect(read: SqlRow => Either[SaferisError, Int]) =
@@ -55,8 +35,8 @@ object PgSessionSpecs extends ZIOSpecDefault:
         assertTrue(first.headOption.contains(1), after.contains(1))
       }
 
-  private val open  = session(pgConfig())
-  private val timed = session(pgConfig(defaultTimeout = Some(30.seconds)))
+  private val open  = sessions(_.config())
+  private val timed = sessions(_.config(defaultTimeout = Some(30.seconds)))
 
   private final class Recording(events: Ref[Chunk[String]]) extends SqlListener:
     def executed(event: SqlExecuted): UIO[Unit] =
@@ -158,9 +138,10 @@ object PgSessionSpecs extends ZIOSpecDefault:
             .left
             .map(err => SaferisError.DecodingError("n", "Int", err.detail))
         for
+          pg     <- ZIO.service[NodePostgres]
           events <- Ref.make(Chunk.empty[String])
           result <- pullOneThenSelect(read).provideLayer(
-            session(pgConfig(poolSize = 1, listener = new Recording(events)))
+            session(pg.config(poolSize = 1, listener = new Recording(events)))
           )
           seen <- events.get
         yield result && assertTrue(
@@ -203,13 +184,14 @@ object PgSessionSpecs extends ZIOSpecDefault:
       ,
       test("a pool statement timeout is Timeout and is not BEGIN"):
         for
+          pg    <- ZIO.service[NodePostgres]
           heard <- Ref.make(Chunk.empty[String])
           exit  <- sql"select pg_sleep(5)"
             .withTimeout(1.second)
             .queryValue[Int]
             .exit
             .provide(
-              session(pgConfig(listener = new Recording(heard)))
+              session(pg.config(listener = new Recording(heard)))
             )
           sqls <- heard.get
         yield assertTrue(
@@ -219,8 +201,10 @@ object PgSessionSpecs extends ZIOSpecDefault:
         )
       ,
       test("defaultTimeout cancels a statement inside transact"):
-        for exit <- transact(sql"select pg_sleep(5)".queryValue[Int]).exit.provide(
-            session(pgConfig(defaultTimeout = Some(1.second)))
+        for
+          pg   <- ZIO.service[NodePostgres]
+          exit <- transact(sql"select pg_sleep(5)".queryValue[Int]).exit.provide(
+            session(pg.config(defaultTimeout = Some(1.second)))
           )
         yield assertTrue(isTimeout(exit)),
     )
@@ -252,6 +236,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
       ,
       test("catching a statement failure rolls back and the next command is 25P02 and is not sent"):
         for
+          pg     <- ZIO.service[NodePostgres]
           heard  <- Ref.make(Chunk.empty[String])
           result <- (
             for
@@ -271,7 +256,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
               sqls     <- heard.get
               count    <- sql"select count(*) from pg_abort".queryValue[Long]
             yield (exit, captured, sqls, count)
-          ).provide(session(pgConfig(defaultTimeout = Some(30.seconds), listener = new Recording(heard))))
+          ).provide(session(pg.config(defaultTimeout = Some(30.seconds), listener = new Recording(heard))))
           (exit, captured, sqls, count) = result
           aborted                       = captured match
             case Some(Left(SaferisError.QueryError(Some("25P02"), _, sql))) =>
@@ -287,8 +272,15 @@ object PgSessionSpecs extends ZIOSpecDefault:
         yield assertTrue(aborted, recorded, !sentLater, count.contains(0L)),
     )
 
-  private def onSession[A](config: PgConfig)(use: SqlSession => ZIO[Any, SaferisError, A]): ZIO[Any, SaferisError, A] =
-    ZIO.serviceWithZIO[SqlSession](use).provide(session(config))
+  private def onSession[A](
+      configure: NodePostgres => PgConfig
+  )(use: SqlSession => ZIO[Any, SaferisError, A]): ZIO[NodePostgres, SaferisError, A] =
+    ZIO.serviceWithZIO[NodePostgres]: pg =>
+      ZIO.serviceWithZIO[SqlSession](use).provide(session(configure(pg)))
+
+  private def onePool =
+    ZIO.serviceWithZIO[NodePostgres]: pg =>
+      NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pg.config(poolSize = 1)))
 
   private def run[A](db: SqlSession)(f: ZIO[SqlSession, SaferisError, A]): ZIO[Any, SaferisError, A] =
     f.provideEnvironment(ZEnvironment(db))
@@ -314,14 +306,14 @@ object PgSessionSpecs extends ZIOSpecDefault:
         assertTrue(shutdown.forall(identity), !unique, !mentioned)
       ,
       test("a script of two selects fails and one select still returns the row"):
-        onSession(pgConfig()): db =>
+        onSession(_.config()): db =>
           for
             script <- run(db)(sql"select 1; select 2".queryValue[Int].exit)
             one    <- run(db)(sql"select 1".queryValue[Int])
           yield assertTrue(script.isFailure, one.contains(1))
       ,
       test("a unique violation keeps the same backend"):
-        onSession(pgConfig(poolSize = 1)): db =>
+        onSession(_.config(poolSize = 1)): db =>
           for
             _    <- run(db)(sql"drop table if exists pg_uniq_keep".dml)
             _    <- run(db)(sql"create table pg_uniq_keep (id integer primary key)".dml)
@@ -341,8 +333,8 @@ object PgSessionSpecs extends ZIOSpecDefault:
         ZIO
           .scoped:
             for
-              sleeperEnv <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
-              watcherEnv <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
+              sleeperEnv <- onePool
+              watcherEnv <- onePool
               sleeper = sleeperEnv.get[SqlSession]
               watcher = watcherEnv.get[SqlSession]
               pid   <- run(sleeper)(sql"select pg_backend_pid()".queryValue[Int])
@@ -358,7 +350,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
         val close =
           ZIO.scoped:
             for
-              held <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
+              held <- onePool
               db = held.get[SqlSession]
               hold   <- run(db)(sql"select pg_sleep(30)".queryValue[Int]).fork
               _      <- ZIO.sleep(400.millis)
@@ -372,8 +364,8 @@ object PgSessionSpecs extends ZIOSpecDefault:
       test("terminating the backend fails the sleep and the pool still serves"):
         ZIO.scoped:
           for
-            sleeperEnv <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
-            killerEnv  <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
+            sleeperEnv <- onePool
+            killerEnv  <- onePool
             sleeper = sleeperEnv.get[SqlSession]
             killer  = killerEnv.get[SqlSession]
             pid   <- run(sleeper)(sql"select pg_backend_pid()".queryValue[Int])
@@ -391,7 +383,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
       test("interrupting transact after BEGIN rolls back on the same backend"):
         ZIO.scoped:
           for
-            held <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
+            held <- onePool
             db = held.get[SqlSession]
             seen  <- Promise.make[Nothing, Int]
             _     <- run(db)(sql"drop table if exists pg_idle_txn".dml)
@@ -418,8 +410,8 @@ object PgSessionSpecs extends ZIOSpecDefault:
         ZIO
           .scoped:
             for
-              sleeperEnv <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
-              watcherEnv <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
+              sleeperEnv <- onePool
+              watcherEnv <- onePool
               sleeper = sleeperEnv.get[SqlSession]
               watcher = watcherEnv.get[SqlSession]
               _     <- run(sleeper)(sql"drop table if exists pg_timed_inflight".dml)
@@ -439,17 +431,11 @@ object PgSessionSpecs extends ZIOSpecDefault:
 
   private val live =
     suite("Node pg")(
-      reads.provideShared(open),
-      writes.provideShared(open),
-      joined.provideShared(timed),
+      reads.provideSomeShared[NodePostgres](open),
+      writes.provideSomeShared[NodePostgres](open),
+      joined.provideSomeShared[NodePostgres](timed),
       review,
     ) @@ TestAspect.withLiveClock @@ TestAspect.timeout(1.minute) @@ TestAspect.sequential
 
-  def spec =
-    env("PGHOST") match
-      case None =>
-        suite("Node pg")(
-          test("skips when PGHOST is unset")(assertTrue(true))
-        ) @@ TestAspect.ignore
-      case Some(_) => live
+  def spec = live.provideShared(NodePostgres.layer)
 end PgSessionSpecs

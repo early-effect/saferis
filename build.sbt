@@ -67,7 +67,7 @@ val pgJsCiSetup = Steps.buildingWith("pg-js-ci") { ctx =>
       .usesRef(ctx.actions.setupNode)
       .named("Set up Node")
       .withInputs(scala.collection.immutable.ListMap("node-version" -> "24", "cache" -> "npm")),
-    Step.run(Script(Exec("npm", Word.lit("ci")))).named("Install Node dependencies (pg)"),
+    Step.run(Script(Exec("npm", Word.lit("ci")))).named("Install Node dependencies"),
   )
 }
 
@@ -109,29 +109,14 @@ zipxCapabilities ++= {
       env = Map("TESTCONTAINERS_RYUK_DISABLED" -> EnvValue.plain("true")),
       extraSteps = prePullPostgres,
     ),
-    // Node pg suite. Not part of verify: it needs npm and a Postgres port.
-    // The `test` job must not wait on this one. The suite skips when PGHOST is unset;
-    // this job is the only one that sets PGHOST.
+    // Node pg suite. Not part of verify: it needs npm, and it starts Postgres itself.
+    // The `test` job must not wait on this one.
     Capability.once(
       name = CapabilityName("test-pg"),
       command = zipxTasks.session(LocalProject("pgJS") / testFull),
-      extraSteps = pgJsCiSetup,
-      env = Map(
-        "PGHOST"     -> EnvValue.plain("localhost"),
-        "PGPORT"     -> EnvValue.plain("5432"),
-        "PGUSER"     -> EnvValue.plain("postgres"),
-        "PGPASSWORD" -> EnvValue.plain("postgres"),
-        "PGDATABASE" -> EnvValue.plain("postgres"),
-      ),
-      services = Map(
-        "postgres" -> JobService(
-          "postgres:17",
-          ports = List("5432:5432"),
-          options = Some(
-            "--health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5 -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_PASSWORD=postgres"
-          ),
-        ),
-      ),
+      extraSteps = pgJsCiSetup ++ prePullPostgres,
+      // GHA VMs are disposable; skip Ryuk so Hub flakes on testcontainers/ryuk cannot fail CI.
+      env = Map("TESTCONTAINERS_RYUK_DISABLED" -> EnvValue.plain("true")),
     ),
     // Every publishing row, then sonaRelease once. docs and root do not publish.
     ZipxCentral.release
