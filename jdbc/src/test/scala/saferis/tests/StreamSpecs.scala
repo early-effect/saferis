@@ -4,7 +4,7 @@ import saferis.*
 import saferis.ddl.*
 import saferis.dml.*
 import saferis.postgres.given
-import saferis.tests.PostgresTestContainer.DataSourceProvider
+import saferis.tests.DataSourceProvider
 import zio.*
 import zio.stream.*
 import zio.test.*

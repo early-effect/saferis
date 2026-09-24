@@ -11,13 +11,31 @@ object PgSessionSpecs extends ZIOSpecDefault:
   private val pastNumeric = BigDecimal("9223372036854775808.25")
   private val micros      = Instant.parse("2024-09-23T15:04:05.123456Z")
 
+  extension (pg: PostgresTestContainer)
+    private def config(
+        defaultTimeout: Option[Duration] = None,
+        listener: SqlListener = SqlListener.noop,
+        poolSize: Int = 4,
+    ): PgConfig =
+      PgConfig(
+        host = pg.host,
+        port = pg.port,
+        database = pg.database,
+        user = pg.user,
+        password = pg.password,
+        poolSize = poolSize,
+        defaultTimeout = defaultTimeout,
+        listener = listener,
+      )
+  end extension
+
   private def session(config: PgConfig): ZLayer[Any, SaferisError, SqlSession] =
     ZLayer.succeed(config) >>> NodeSession.layer
 
   private def sessions(
-      configure: NodePostgres => PgConfig
-  ): ZLayer[NodePostgres, SaferisError, SqlSession] =
-    ZLayer.fromZIO(ZIO.serviceWith[NodePostgres](configure)) >>> NodeSession.layer
+      configure: PostgresTestContainer => PgConfig
+  ): ZLayer[PostgresTestContainer, SaferisError, SqlSession] =
+    ZLayer.fromZIO(ZIO.serviceWith[PostgresTestContainer](configure)) >>> NodeSession.layer
 
   /** One row from a long cursor, then the scope ends, then another statement on the same pool. */
   private def pullOneThenSelect(read: SqlRow => Either[SaferisError, Int]) =
@@ -138,7 +156,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
             .left
             .map(err => SaferisError.DecodingError("n", "Int", err.detail))
         for
-          pg     <- ZIO.service[NodePostgres]
+          pg     <- ZIO.service[PostgresTestContainer]
           events <- Ref.make(Chunk.empty[String])
           result <- pullOneThenSelect(read).provideLayer(
             session(pg.config(poolSize = 1, listener = new Recording(events)))
@@ -184,7 +202,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
       ,
       test("a pool statement timeout is Timeout and is not BEGIN"):
         for
-          pg    <- ZIO.service[NodePostgres]
+          pg    <- ZIO.service[PostgresTestContainer]
           heard <- Ref.make(Chunk.empty[String])
           exit  <- sql"select pg_sleep(5)"
             .withTimeout(1.second)
@@ -202,7 +220,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
       ,
       test("defaultTimeout cancels a statement inside transact"):
         for
-          pg   <- ZIO.service[NodePostgres]
+          pg   <- ZIO.service[PostgresTestContainer]
           exit <- transact(sql"select pg_sleep(5)".queryValue[Int]).exit.provide(
             session(pg.config(defaultTimeout = Some(1.second)))
           )
@@ -236,7 +254,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
       ,
       test("catching a statement failure rolls back and the next command is 25P02 and is not sent"):
         for
-          pg     <- ZIO.service[NodePostgres]
+          pg     <- ZIO.service[PostgresTestContainer]
           heard  <- Ref.make(Chunk.empty[String])
           result <- (
             for
@@ -273,13 +291,13 @@ object PgSessionSpecs extends ZIOSpecDefault:
     )
 
   private def onSession[A](
-      configure: NodePostgres => PgConfig
-  )(use: SqlSession => ZIO[Any, SaferisError, A]): ZIO[NodePostgres, SaferisError, A] =
-    ZIO.serviceWithZIO[NodePostgres]: pg =>
+      configure: PostgresTestContainer => PgConfig
+  )(use: SqlSession => ZIO[Any, SaferisError, A]): ZIO[PostgresTestContainer, SaferisError, A] =
+    ZIO.serviceWithZIO[PostgresTestContainer]: pg =>
       ZIO.serviceWithZIO[SqlSession](use).provide(session(configure(pg)))
 
   private def onePool =
-    ZIO.serviceWithZIO[NodePostgres]: pg =>
+    ZIO.serviceWithZIO[PostgresTestContainer]: pg =>
       NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pg.config(poolSize = 1)))
 
   private def run[A](db: SqlSession)(f: ZIO[SqlSession, SaferisError, A]): ZIO[Any, SaferisError, A] =
@@ -431,11 +449,11 @@ object PgSessionSpecs extends ZIOSpecDefault:
 
   private val live =
     suite("Node pg")(
-      reads.provideSomeShared[NodePostgres](open),
-      writes.provideSomeShared[NodePostgres](open),
-      joined.provideSomeShared[NodePostgres](timed),
+      reads.provideSomeShared[PostgresTestContainer](open),
+      writes.provideSomeShared[PostgresTestContainer](open),
+      joined.provideSomeShared[PostgresTestContainer](timed),
       review,
     ) @@ TestAspect.withLiveClock @@ TestAspect.timeout(1.minute) @@ TestAspect.sequential
 
-  def spec = live.provideShared(NodePostgres.layer)
+  def spec = live.provideShared(PostgresTestContainer.live)
 end PgSessionSpecs

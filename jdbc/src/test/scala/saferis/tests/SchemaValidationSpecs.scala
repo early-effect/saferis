@@ -7,7 +7,7 @@ import saferis.mysql.MySQLDialect
 import saferis.postgres.PostgresDialect
 import saferis.spark.SparkDialect
 import saferis.sqlite.SQLiteDialect
-import saferis.tests.PostgresTestContainer.DataSourceProvider
+import saferis.tests.DataSourceProvider
 import zio.*
 import zio.test.*
 

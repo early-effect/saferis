@@ -2,7 +2,7 @@ package saferis.tests
 
 import saferis.*
 import saferis.ddl.*
-import saferis.tests.PostgresTestContainer.DataSourceProvider
+import saferis.tests.DataSourceProvider
 import zio.test.*
 
 object FloatLiteralSpecs extends ZIOSpecDefault:

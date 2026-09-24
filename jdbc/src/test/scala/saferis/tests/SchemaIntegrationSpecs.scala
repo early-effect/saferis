@@ -5,7 +5,7 @@ import saferis.Schema.*
 import saferis.ddl.*
 import saferis.dml.*
 import saferis.postgres.PostgresDialect
-import saferis.tests.PostgresTestContainer.DataSourceProvider
+import saferis.tests.DataSourceProvider
 import zio.*
 import zio.json.*
 import zio.test.*

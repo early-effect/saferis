@@ -1,7 +1,7 @@
 package saferis.tests
 
 import saferis.*
-import saferis.tests.PostgresTestContainer.DataSourceProvider
+import saferis.tests.DataSourceProvider
 import zio.*
 import zio.test.*
 import zio.test.Assertion.*

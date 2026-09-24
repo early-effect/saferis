@@ -184,6 +184,12 @@ lazy val jdbc = (projectMatrix in file("jdbc"))
   .settings(
     name        := "saferis-jdbc",
     description := "JDBC SqlSession for Postgres.",
+    Test / unmanagedSourceDirectories ++= Def.uncached(
+      Seq(
+        (ThisBuild / baseDirectory).value / "testkit" / "src" / "scala",
+        (ThisBuild / baseDirectory).value / "testkit" / "src" / "jvm" / "scala",
+      )
+    ),
   )
   .jvmPlatform(scalaVersions = scalaVersions)
 
@@ -197,6 +203,12 @@ lazy val pg = (projectMatrix in file("pg"))
   .settings(
     name        := "saferis-pg",
     description := "Node pg SqlSession for Postgres.",
+    Test / unmanagedSourceDirectories ++= Def.uncached(
+      Seq(
+        (ThisBuild / baseDirectory).value / "testkit" / "src" / "scala",
+        (ThisBuild / baseDirectory).value / "testkit" / "src" / "js" / "scala",
+      )
+    ),
   )
   .jsPlatform(
     scalaVersions = scalaVersions,

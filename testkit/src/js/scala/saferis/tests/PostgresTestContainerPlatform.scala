@@ -1,47 +1,18 @@
 package saferis.tests
 
-import saferis.PgConfig
 import saferis.PgPromises
-import saferis.SqlListener
 import zio.*
 
 import scala.annotation.unused
 import scala.scalajs.js
 import scala.scalajs.js.annotation.JSImport
 
-/** Connection coordinates for one Postgres this suite started.
-  *
-  * `@testcontainers/postgresql` is `require`d from Node, same as `pg`. The scope stops the container.
-  */
-final case class NodePostgres(
-    host: String,
-    port: Int,
-    database: String,
-    user: String,
-    password: String,
-):
-  def config(
-      defaultTimeout: Option[Duration] = None,
-      listener: SqlListener = SqlListener.noop,
-      poolSize: Int = 4,
-  ): PgConfig =
-    PgConfig(
-      host = host,
-      port = port,
-      database = database,
-      user = user,
-      password = password,
-      poolSize = poolSize,
-      defaultTimeout = defaultTimeout,
-      listener = listener,
-    )
-end NodePostgres
-
-object NodePostgres:
+private[tests] object PostgresTestContainerPlatform:
   /** Same tag as jdbc `ContainerConfig`: `postgres:latest`. */
-  val Image = "postgres:latest"
+  private val Image = "postgres:latest"
 
-  val layer: ZLayer[Any, Throwable, NodePostgres] =
+  /** Started Postgres. `@testcontainers/postgresql` is `require`d from Node, same as `pg`. The scope stops it. */
+  val live: ZLayer[Any, Throwable, PostgresTestContainer] =
     ZLayer.scoped:
       ZIO.uninterruptible:
         for
@@ -65,6 +36,14 @@ object NodePostgres:
         case None    => ZIO.dieMessage("Postgres container stop timed out")
       .orDie
 
+  private final class NodePostgres(
+      val host: String,
+      val port: Int,
+      val database: String,
+      val user: String,
+      val password: String,
+  ) extends PostgresTestContainer
+
   /** CommonJS `require("@testcontainers/postgresql").PostgreSqlContainer`. */
   @js.native
   @JSImport("@testcontainers/postgresql", "PostgreSqlContainer")
@@ -79,4 +58,4 @@ object NodePostgres:
     def getUsername(): String    = js.native
     def getPassword(): String    = js.native
     def stop(): js.Promise[Unit] = js.native
-end NodePostgres
+end PostgresTestContainerPlatform
