@@ -350,7 +350,55 @@ object PgSessionSpecs extends ZIOSpecDefault:
             failed = exit match
               case Exit.Failure(cause) => cause.failureOption.isDefined
               case _                   => false
-          yield assertTrue(failed, next.contains(1)),
+          yield assertTrue(failed, next.contains(1))
+      ,
+      test("interrupting transact after BEGIN rolls back on the same backend"):
+        ZIO.scoped:
+          for
+            held <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
+            db = held.get[SqlSession]
+            seen  <- Promise.make[Nothing, Int]
+            _     <- run(db)(sql"drop table if exists pg_idle_txn".dml)
+            _     <- run(db)(sql"create table pg_idle_txn (id integer primary key)".dml)
+            fiber <- run(db)(
+              transact(
+                for
+                  _   <- sql"insert into pg_idle_txn (id) values (1)".dml
+                  pid <- sql"select pg_backend_pid()".queryValue[Int]
+                  id  <- ZIO.fromOption(pid).orElseFail(SaferisError.Unexpected("no backend pid"))
+                  _   <- seen.succeed(id)
+                  _   <- ZIO.never
+                yield ()
+              )
+            ).fork
+            id   <- seen.await
+            _    <- fiber.interrupt
+            pid2 <- run(db)(sql"select pg_backend_pid()".queryValue[Int])
+            tx   <- run(db)(sql"select txid_current_if_assigned()::text".queryValue[Option[String]])
+            n    <- run(db)(sql"select count(*)::int from pg_idle_txn".queryValue[Int])
+          yield assertTrue(pid2.contains(id), tx.forall(_.isEmpty), n.contains(0))
+      ,
+      test("interrupting an in-flight timed statement leaves no transaction"):
+        ZIO
+          .scoped:
+            for
+              sleeperEnv <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
+              watcherEnv <- NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pgConfig(poolSize = 1)))
+              sleeper = sleeperEnv.get[SqlSession]
+              watcher = watcherEnv.get[SqlSession]
+              _     <- run(sleeper)(sql"drop table if exists pg_timed_inflight".dml)
+              _     <- run(sleeper)(sql"create table pg_timed_inflight (id integer primary key)".dml)
+              pid   <- run(sleeper)(sql"select pg_backend_pid()".queryValue[Int])
+              id    <- ZIO.fromOption(pid).orElseFail(SaferisError.Unexpected("no backend pid"))
+              fiber <- run(sleeper)(
+                sql"insert into pg_timed_inflight (id) select 7 from pg_sleep(30)".withTimeout(30.seconds).dml
+              ).fork
+              _  <- run(watcher)(untilActive(id))
+              _  <- fiber.interrupt
+              tx <- run(sleeper)(sql"select txid_current_if_assigned()::text".queryValue[Option[String]])
+              n  <- run(sleeper)(sql"select count(*)::int from pg_timed_inflight".queryValue[Int])
+            yield assertTrue(tx.forall(_.isEmpty), n.contains(0))
+          .timeoutFail(SaferisError.Unexpected("in-flight timed statement left the checkout busy"))(8.seconds),
     ) @@ TestAspect.withLiveClock @@ TestAspect.timeout(45.seconds) @@ TestAspect.sequential
 
   private val live =
