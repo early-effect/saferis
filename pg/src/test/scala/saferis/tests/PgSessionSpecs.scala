@@ -39,6 +39,22 @@ object PgSessionSpecs extends ZIOSpecDefault:
   private def session(config: PgConfig): ZLayer[Any, SaferisError, SqlSession] =
     ZLayer.succeed(config) >>> NodeSession.layer
 
+  /** One row from a long cursor, then the scope ends, then another statement on the same pool. */
+  private def pullOneThenSelect(read: SqlRow => Either[SaferisError, Int]) =
+    ZIO
+      .scoped {
+        for
+          command <- sql"select n::int4 from generate_series(1, 100000) n".toCommand
+          session <- ZIO.service[SqlSession]
+          pull    <- session.stream(command)(read).toPull
+          chunk   <- pull
+        yield chunk
+      }
+      .zip(sql"select 1".queryValue[Int])
+      .map { (first, after) =>
+        assertTrue(first.headOption.contains(1), after.contains(1))
+      }
+
   private val open  = session(pgConfig())
   private val timed = session(pgConfig(defaultTimeout = Some(30.seconds)))
 
@@ -135,7 +151,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
           rows    <- session.stream(command)(read).runCollect
         yield assertTrue(rows == Chunk(pastInt8))
       ,
-      test("closing the stream scope releases the checkout"):
+      test("closing the stream scope releases the checkout") {
         val read: SqlRow => Either[SaferisError, Int] = row =>
           summon[RowDecoder[Int]]
             .decode(row)
@@ -143,26 +159,17 @@ object PgSessionSpecs extends ZIOSpecDefault:
             .map(err => SaferisError.DecodingError("n", "Int", err.detail))
         for
           events <- Ref.make(Chunk.empty[String])
-          result <-
-            (for
-              first <- ZIO.scoped:
-                for
-                  command <- sql"select n::int4 from generate_series(1, 100000) n".toCommand
-                  session <- ZIO.service[SqlSession]
-                  pull    <- session.stream(command)(read).toPull
-                  chunk   <- pull
-                yield chunk
-              after <- sql"select 1".queryValue[Int]
-              seen  <- events.get
-            yield assertTrue(
-              first.headOption.contains(1),
-              after.contains(1),
-              seen.size == 2,
-              seen.headOption.exists(_.contains("generate_series")),
-              seen.forall(!_.contains("BEGIN")),
-            )).provideLayer(session(pgConfig(poolSize = 1, listener = new Recording(events))))
-        yield result
-        end for,
+          result <- pullOneThenSelect(read).provideLayer(
+            session(pgConfig(poolSize = 1, listener = new Recording(events)))
+          )
+          seen <- events.get
+        yield result && assertTrue(
+          seen.size == 2,
+          seen.headOption.exists(_.contains("generate_series")),
+          seen.forall(!_.contains("BEGIN")),
+        )
+        end for
+      },
     )
 
   private val writes =
