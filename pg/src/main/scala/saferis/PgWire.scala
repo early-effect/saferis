@@ -7,7 +7,6 @@ import saferis.SqlRow
 import saferis.SqlType
 import saferis.SqlValue
 import saferis.ServerType
-import saferis.postgres.PgConnectionConfig
 import saferis.postgres.PgText
 import saferis.postgres.SslMode
 
@@ -47,15 +46,20 @@ private[pg] object PgWire:
       "max"                     -> config.poolSize.toDouble,
       "ssl"                     -> sslValue(connection.ssl),
       "connectionTimeoutMillis" -> connection.connectTimeout.toMillis.toDouble,
-      "options"                 -> startupOptions(connection),
-      "allowExitOnIdle"         -> true,
-      "types"                   -> rawTypes,
+      "options"                 -> connection.startupOptions(Required),
+      // A peer that vanished without a reset otherwise leaves a query, including an uninterruptible COMMIT, waiting
+      // forever. Keepalive probes turn that into a socket error.
+      "keepAlive"                   -> true,
+      "keepAliveInitialDelayMillis" -> KeepAliveDelayMillis,
+      "allowExitOnIdle"             -> true,
+      "types"                       -> rawTypes,
     )
   end poolConfig
 
-  def startupOptions(connection: PgConnectionConfig): String =
-    val extra = connection.parameters.map { (name, value) => s"-c $name=$value" }.mkString(" ")
-    if extra.isEmpty then "-c DateStyle=ISO" else s"-c DateStyle=ISO $extra"
+  /** `PgText` decodes `DateStyle=ISO` text. A user parameter cannot change it. */
+  private val Required: Map[String, String] = Map("DateStyle" -> "ISO")
+
+  private val KeepAliveDelayMillis = 10000.0
 
   def reveal(secret: Secret): String =
     secret.value.mkString

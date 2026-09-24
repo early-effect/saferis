@@ -141,7 +141,9 @@ val result: ZIO[SqlSession, SaferisError, Chunk[User]] =
 
 `JdbcSessionConfig` carries the session-wide statement timeout, a JDBC `configure` callback, and a vendor retry hook. Statement observation is `SqlListener.observe`, not a field on the driver config. A connection pool already queues callers. The session does not add a second semaphore.
 
-Open a transaction with `transact`. Nested `transact` joins the outer transaction: one commit, one rollback. See [Statement Timeouts](statement-timeouts.html) for `defaultTimeout`."""
+Open a transaction with `transact`. Nested `transact` joins the outer transaction: one commit, one rollback. See [Statement Timeouts](statement-timeouts.html) for `defaultTimeout`.
+
+Once `COMMIT` is sent, the session waits for the answer and an interrupt does not cut it off, because an abandoned commit leaves you not knowing whether it happened. The statement timeout does not cover `COMMIT`, so the bound on that wait is the socket. On Node the pool turns on TCP keepalive. On JDBC set your driver's socket timeout on the `DataSource` (pgjdbc `socketTimeout`, Connector/J `socketTimeout`) so a peer that vanished without a reset fails the commit instead of hanging it."""
     ),
   )
 end CoreConcepts
