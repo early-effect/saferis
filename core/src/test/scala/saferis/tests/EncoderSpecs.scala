@@ -36,5 +36,32 @@ object EncoderSpecs extends ZIOSpecDefault:
       val encoded = summon[Encoder[Option[Int]]].encode(None)
       assertTrue(encoded == SqlValue.Null(SqlType.Integer))
     },
+    test("NaN and infinities are quoted float and double literals") {
+      val floats  = summon[Encoder[Float]]
+      val doubles = summon[Encoder[Double]]
+      assertTrue(
+        floats.literal(Float.NaN) == "'NaN'",
+        floats.literal(Float.PositiveInfinity) == "'Infinity'",
+        floats.literal(Float.NegativeInfinity) == "'-Infinity'",
+        doubles.literal(Double.NaN) == "'NaN'",
+        doubles.literal(Double.PositiveInfinity) == "'Infinity'",
+        doubles.literal(Double.NegativeInfinity) == "'-Infinity'",
+      )
+    },
+    test("finite float literals round-trip") {
+      val floats                        = summon[Encoder[Float]]
+      def roundTrips(v: Float): Boolean =
+        val text = floats.literal(v)
+        text != "3.140000104904175" && text.toFloat == v
+      assertTrue(
+        floats.literal(3.14f) == "3.14",
+        roundTrips(3.14f),
+        roundTrips(0.1f),
+        roundTrips(1.0f),
+        roundTrips(-0.0f),
+        roundTrips(Float.MaxValue),
+        roundTrips(Float.MinPositiveValue),
+      )
+    },
   )
 end EncoderSpecs

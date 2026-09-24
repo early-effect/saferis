@@ -89,7 +89,7 @@ object SqlValue:
     case Integer(v)         => v.toString
     case BigInt(v)          => v.toString
     case Real(v)            => floatLiteral(v)
-    case DoublePrecision(v) => v.toString
+    case DoublePrecision(v) => doubleLiteral(v)
     case Numeric(v)         => v.toString
     case VarChar(v)         => quote(v)
     case Text(v)            => quote(v)
@@ -104,12 +104,18 @@ object SqlValue:
   def quote(text: String): String =
     s"'${text.replace("'", "''")}'"
 
-  /** Shortest round-trip decimal. Scala.js `Float.toString` prints the widened binary value. */
+  private def quotedNonFinite(nan: Boolean, infinity: Boolean, positive: Boolean): Option[String] =
+    if nan then Some("'NaN'")
+    else if infinity then Some(if positive then "'Infinity'" else "'-Infinity'")
+    else None
+
   private def floatLiteral(v: Float): String =
-    if v.isNaN then "NaN"
-    else if v.isInfinity then if v > 0.0f then "Infinity" else "-Infinity"
-    else if v == 0.0f then if 1.0f / v < 0.0f then "-0.0" else "0.0"
-    else shortestFloat(v)
+    quotedNonFinite(v.isNaN, v.isInfinity, v > 0.0f).getOrElse:
+      if v == 0.0f then if 1.0f / v < 0.0f then "-0.0" else "0.0"
+      else shortestFloat(v)
+
+  private def doubleLiteral(v: Double): String =
+    quotedNonFinite(v.isNaN, v.isInfinity, v > 0.0).getOrElse(v.toString)
 
   private def shortestFloat(v: Float): String =
     def attempt(sig: Int): String =
@@ -118,8 +124,7 @@ object SqlValue:
           v.toDouble,
           new MathContext(sig, RoundingMode.HALF_EVEN),
         ).stripTrailingZeros.toPlainString
-      if text.toFloat == v then text
-      else if sig == 9 then v.toString
+      if text.toFloat == v || sig == 9 then text
       else attempt(sig + 1)
     attempt(1)
   end shortestFloat
