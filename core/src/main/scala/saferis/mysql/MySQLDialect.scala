@@ -16,6 +16,10 @@ object MySQLDialect extends Dialect with JsonSupport with WindowFunctionSupport 
 
   val name: String = "MySQL"
 
+  /** `decimal` alone is `decimal(10,0)` in MySQL and drops the fraction, so `Numeric` asks for the widest scale.
+    * `datetime(6)` is a local timestamp and `timestamp(6)` an instant: MySQL converts only `timestamp` through the
+    * session time zone, and the two spellings let a driver tell them apart when reading. `(6)` keeps microseconds.
+    */
   def columnType(tpe: SqlType): String = tpe match
     case SqlType.Bool        => "boolean"
     case SqlType.Int2        => "smallint"
@@ -23,14 +27,14 @@ object MySQLDialect extends Dialect with JsonSupport with WindowFunctionSupport 
     case SqlType.Int8        => "bigint"
     case SqlType.Float4      => "float"
     case SqlType.Float8      => "double"
-    case SqlType.Numeric     => "decimal"
+    case SqlType.Numeric     => "decimal(65, 30)"
     case SqlType.VarChar     => s"varchar($DefaultVarcharLength)"
     case SqlType.Text        => "longtext"
     case SqlType.Bytea       => "blob"
     case SqlType.Date        => "date"
-    case SqlType.Time        => "time"
-    case SqlType.Timestamp   => "timestamp"
-    case SqlType.Timestamptz => "timestamp"
+    case SqlType.Time        => "time(6)"
+    case SqlType.Timestamp   => "datetime(6)"
+    case SqlType.Timestamptz => "timestamp(6)"
     case SqlType.Jsonb       => "json"
     case SqlType.Uuid        => "char(36)"
     case SqlType.Array(_)    => "json"

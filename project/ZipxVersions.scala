@@ -53,7 +53,7 @@ object MyVersions extends ZipxVersions:
   def postgresJdbcLib = library(provided(zio), provided(zioStreams), postgresql)
   def postgresJdbcTest = library(zioLoggingSlf4j.test, postgresqlTc.test, zioJson.test)
   def mysqlJdbcLib     = library(provided(zio), provided(zioStreams), mysql)
-  def mysqlJdbcTest    = library(zioLoggingSlf4j.test)
+  def mysqlJdbcTest    = library(zioLoggingSlf4j.test, zioJson.test)
   def sqliteJdbcLib    = library(provided(zio), provided(zioStreams), sqlite)
   def pgLib    = library(provided(zio), provided(zioStreams))
   def docsLib  = library(zio, zioStreams)
