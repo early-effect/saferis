@@ -37,8 +37,11 @@ private[saferis] object PgPromises:
           Left(ZIO.unit)
       end try
 
-  private def toThrowable(err: Any): Throwable =
+  def asThrowable(err: Any): Throwable =
     err match
       case t: Throwable => t
       case other        => js.JavaScriptException(other.asInstanceOf[js.Any])
+
+  private def toThrowable(err: Any): Throwable =
+    asThrowable(err)
 end PgPromises

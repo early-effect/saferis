@@ -123,7 +123,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
                 case _                                              => false
             case _ => false
       ,
-      test("stream emits the buffered rows"):
+      test("stream emits rows through the server cursor"):
         val read: SqlRow => Either[SaferisError, Long] = row =>
           summon[RowDecoder[Long]]
             .decode(row)
@@ -133,7 +133,36 @@ object PgSessionSpecs extends ZIOSpecDefault:
           command <- sql"select ${pastInt8}".toCommand
           session <- ZIO.service[SqlSession]
           rows    <- session.stream(command)(read).runCollect
-        yield assertTrue(rows == Chunk(pastInt8)),
+        yield assertTrue(rows == Chunk(pastInt8))
+      ,
+      test("closing the stream scope releases the checkout"):
+        val read: SqlRow => Either[SaferisError, Int] = row =>
+          summon[RowDecoder[Int]]
+            .decode(row)
+            .left
+            .map(err => SaferisError.DecodingError("n", "Int", err.detail))
+        for
+          events <- Ref.make(Chunk.empty[String])
+          result <-
+            (for
+              first <- ZIO.scoped:
+                for
+                  command <- sql"select n::int4 from generate_series(1, 100000) n".toCommand
+                  session <- ZIO.service[SqlSession]
+                  pull    <- session.stream(command)(read).toPull
+                  chunk   <- pull
+                yield chunk
+              after <- sql"select 1".queryValue[Int]
+              seen  <- events.get
+            yield assertTrue(
+              first.headOption.contains(1),
+              after.contains(1),
+              seen.size == 2,
+              seen.headOption.exists(_.contains("generate_series")),
+              seen.forall(!_.contains("BEGIN")),
+            )).provideLayer(session(pgConfig(poolSize = 1, listener = new Recording(events))))
+        yield result
+        end for,
     )
 
   private val writes =
@@ -407,7 +436,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
       writes.provideShared(open),
       joined.provideShared(timed),
       review,
-    ) @@ TestAspect.sequential
+    ) @@ TestAspect.withLiveClock @@ TestAspect.timeout(1.minute) @@ TestAspect.sequential
 
   def spec =
     env("PGHOST") match

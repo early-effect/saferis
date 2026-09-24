@@ -4,6 +4,7 @@ import zio.Cause
 import zio.Chunk
 import zio.Clock
 import zio.Duration
+import zio.durationInt
 import zio.Exit
 import zio.IO
 import zio.Ref
@@ -15,6 +16,7 @@ import zio.ZLayer
 import zio.stream.ZStream
 
 import scala.scalajs.js
+import scala.scalajs.js.timers.setTimeout
 import scala.util.control.NonFatal
 
 /** Node `pg` interpreter of `SqlSession`. Promises complete with `ZIO.async`. There is no `ZIO.blocking`. */
@@ -79,10 +81,20 @@ private final class NodeSession(
   def stream[A](command: SqlCommand)(read: SqlRow => Either[SaferisError, A]): ZStream[Any, SaferisError, A] =
     val sql     = PgWire.render(command)
     val timeout = applied(command)
-    ZStream.unwrap:
-      dispatch(sql, timeout): lease =>
-        observed(sql, timeout, runQuery(lease, command, sql, read), rows => rows.length.toLong).map: rows =>
-          ZStream.fromChunk(rows)
+    ZStream.unwrapScoped:
+      for
+        start <- Clock.nanoTime
+        count <- Ref.make(0L)
+        lease <- acquireCursor(sql, timeout)
+        _     <- lease.busy.set(true)
+      yield cursorRows(lease, sql, command)
+        .mapZIO: row =>
+          read(row) match
+            case Left(err)    => ZIO.fail(err)
+            case Right(value) => count.update(_ + 1).as(value)
+        .ensuringWith: exit =>
+          finishStream(lease, sql, timeout, start, count, exit)
+  end stream
 
   def transact[R, A](body: ZIO[SqlSession & R, SaferisError, A]): ZIO[R, SaferisError, A] =
     txn match
@@ -294,6 +306,139 @@ private final class NodeSession(
   /** Absence on a child clears the previous cap. `0` is no timeout. A present cap never becomes `0`. */
   private def childMillis(timeout: Option[Duration]): Int =
     timeout.fold(0)(PgWire.millis)
+
+  /** Pool streams open a transaction so the portal keeps one snapshot, matching the JDBC read transaction. A child uses
+    * the transaction it already has.
+    */
+  private def acquireCursor(sql: String, timeout: Option[Duration])(using Trace): ZIO[Scope, SaferisError, PgLease] =
+    txn match
+      case Some(state) =>
+        guard(state, sql) *>
+          protocol(state.lease, s"SET LOCAL statement_timeout = ${childMillis(timeout)}")
+            .tapError(err => record(state, err))
+            .as(state.lease)
+      case None =>
+        for
+          lease <- checkout
+          _     <- protocol(lease, "BEGIN").tapError(err => markBroken(lease, err))
+          _     <- lease.began.set(true)
+          _ <- ZIO.foreachDiscard(timeout)(d => protocol(lease, s"SET LOCAL statement_timeout = ${PgWire.millis(d)}"))
+        yield lease
+
+  private def cursorRows(lease: PgLease, sql: String, command: SqlCommand)(using
+      Trace
+  ): ZStream[Any, SaferisError, SqlRow] =
+    ZStream.asyncInterrupt[Any, SaferisError, SqlRow] { emit =>
+      val query   = new PgQueryStream(sql, PgWire.parameters(command.pieces), PgWire.cursorConfig)
+      val opened  = lease.client.submit(query)
+      var closed  = false
+      var settled = false
+      var ended   = false
+      def stop(effect: UIO[Unit], err: SaferisError): Unit =
+        if !settled then
+          settled = true
+          emit(effect *> ZIO.fail(Some(err)))
+      def note(err: SaferisError): UIO[Unit] =
+        markBroken(lease, err) *> txn.fold(ZIO.unit)(state => record(state, err))
+      opened.on(
+        "data",
+        (raw: js.Any) =>
+          later:
+            if !settled then
+              val fields = cursorFields(opened)
+              val row    = raw.asInstanceOf[js.Array[js.Any]]
+              PgWire.readCursorRow(fields, row) match
+                case Left(err)    => stop(note(err), err)
+                case Right(value) => emit.single(value),
+      )
+      opened.on(
+        "end",
+        (_: js.Any) =>
+          later:
+            if !settled then
+              settled = true
+              ended = true
+              emit.end,
+      )
+      opened.on(
+        "error",
+        (raw: js.Any) =>
+          later:
+            val err = classify(PgPromises.asThrowable(raw), Some(sql))
+            stop(note(err), err),
+      )
+      Left:
+        ZIO
+          .succeed:
+            val done = ended
+            if !closed then
+              closed = true
+              if !done then
+                val _ = opened.destroy()
+            done
+          .flatMap: done =>
+            if done then lease.busy.set(false) else lease.busy.set(true)
+    }
+
+  /** `ZStream.asyncInterrupt` runs the callback with `runtime.unsafe.run`. A portal emits rows on the same turn, so
+    * delivering them inline re-enters that run and the runtime never reaches `end`.
+    */
+  private def later(body: => Unit): Unit =
+    val _ = setTimeout(0)(body)
+
+  private def cursorFields(query: PgQueryStream): js.Array[PgField] =
+    val result = query.asInstanceOf[js.Dynamic].selectDynamic("cursor").selectDynamic("_result")
+    result.selectDynamic("fields").asInstanceOf[js.Array[PgField]]
+
+  /** Runs after the portal finalizer. A finished pool stream commits, and that commit is interruptible under the live
+    * clock so a stuck socket cannot pin the scope. Anything else leaves the checkout finalizer to drop or roll back the
+    * client. The listener runs either way.
+    */
+  private def finishStream(
+      lease: PgLease,
+      sql: String,
+      timeout: Option[Duration],
+      start: Long,
+      count: Ref[Long],
+      exit: Exit[Any, Any],
+  )(using Trace): UIO[Unit] =
+    for
+      inFlight <- lease.busy.get
+      outcome  <-
+        if txn.isDefined || inFlight || !exit.isSuccess then streamOutcome(count, exit)
+        else
+          protocol(lease, "COMMIT").interruptible
+            .timeout(2.seconds)
+            .provideLayer(ZLayer.succeed(Clock.ClockLive))
+            .foldZIO(
+              err => ZIO.succeed(Left(err)),
+              {
+                case Some(_) =>
+                  lease.committed.set(true) *> count.get.map(n => Right(n))
+                case None =>
+                  lease.busy.set(true) *>
+                    lease.destroy.set(true) *>
+                    ZIO.succeed(Left(SaferisError.ConnectionError("cursor commit did not finish")))
+              },
+            )
+      _ <- reportCursor(sql, timeout, start, outcome)
+    yield ()
+
+  private def streamOutcome(count: Ref[Long], exit: Exit[Any, Any])(using Trace): UIO[Either[SaferisError, Long]] =
+    exit match
+      case Exit.Success(_)     => count.get.map(n => Right(n))
+      case Exit.Failure(cause) => ZIO.succeed(Left(failureOf(cause)))
+
+  private def reportCursor(
+      sql: String,
+      timeout: Option[Duration],
+      start: Long,
+      outcome: Either[SaferisError, Long],
+  )(using Trace): UIO[Unit] =
+    Clock.nanoTime.flatMap: end =>
+      config.listener.executed(
+        SqlExecuted(sql, Duration.fromNanos(math.max(0L, end - start)), timeout, outcome)
+      )
 
   private def decodeRows[A](
       rows: Chunk[SqlRow],

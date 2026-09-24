@@ -24,7 +24,9 @@ object Streaming extends SaferisDocSpecSuite:
   val items = Table[ZipItem]
 
   def doc = page("Streaming with ZStream")(
-    md"""For large result sets, Saferis provides `queryStream`, a `ZStream` that pulls rows as they are consumed. The stream finalizer owns the cursor. The caller does not open a `Scope`. `pagedStream` and `seekingStream` still run one statement per page, so the pool releases the connection between pages.""",
+    md"""For large result sets, Saferis provides `queryStream`, a `ZStream` that pulls rows as they are consumed. The stream finalizer owns the cursor. The caller does not open a `Scope`. `pagedStream` and `seekingStream` still run one statement per page, so the pool releases the connection between pages.
+
+On Node, `queryStream` is a server cursor (`pg-query-stream`, batches of 256) with the same `rowMode` and OID decode as `query`. The pool holds that checkout until the stream ends, fails, or is interrupted. JDBC does the same with a fetch size. `pagedStream` still releases the connection between pages.""",
     section("Basic Streaming")(
       md"""Use `queryStream` instead of `query` to get a stream:""",
       exampleZIO {

@@ -34,12 +34,22 @@ private[saferis] object PgWire:
   private val rawParser: js.Function1[js.Any, js.Any] =
     (value: js.Any) => value
 
-  /** Returns the raw text for every OID. Passed on the pool. Not `pg.types.setTypeParser`. */
+  /** Returns the raw text for every OID. Passed on the pool and on the cursor. Not `pg.types.setTypeParser`. */
   val getTypeParser: js.Function2[js.Any, js.Any, js.Function1[js.Any, js.Any]] =
     (_: js.Any, _: js.Any) => rawParser
 
+  val rawTypes: js.Object =
+    js.Dynamic.literal("getTypeParser" -> getTypeParser)
+
+  /** Same fetch width as the JDBC driver. `rowMode` stays `array` so the OID decode does not change. */
+  def cursorConfig: js.Object =
+    js.Dynamic.literal(
+      "batchSize" -> 256.0,
+      "rowMode"   -> "array",
+      "types"     -> rawTypes,
+    )
+
   def poolConfig(config: PgConfig): js.Object =
-    val types = js.Dynamic.literal("getTypeParser" -> getTypeParser)
     js.Dynamic.literal(
       "host"            -> config.host,
       "port"            -> config.port.toDouble,
@@ -50,7 +60,7 @@ private[saferis] object PgWire:
       "ssl"             -> config.ssl,
       "options"         -> "-c DateStyle=ISO",
       "allowExitOnIdle" -> true,
-      "types"           -> types,
+      "types"           -> rawTypes,
     )
   end poolConfig
 
@@ -101,6 +111,14 @@ private[saferis] object PgWire:
   def readRows(result: PgResult): Either[SaferisError, Chunk[SqlRow]] =
     ensureSingle(result).flatMap: single =>
       readFields(single)
+
+  /** One portal row. `fields` come from the cursor result, not from a buffered `PgResult`. */
+  def readCursorRow(fields: js.Array[PgField], row: js.Array[js.Any]): Either[SaferisError, SqlRow] =
+    if fields == null || js.isUndefined(fields) then Left(SaferisError.Unexpected("cursor result has no fields"))
+    else
+      val labels = Chunk.fromIterator(Iterator.tabulate(fields.length)(i => fieldName(fields(i))))
+      val oids   = Array.tabulate(fields.length)(i => fields(i).dataTypeID.toInt)
+      readRow(labels, oids, row)
 
   private def readFields(result: PgResult): Either[SaferisError, Chunk[SqlRow]] =
     val fields = result.fields
