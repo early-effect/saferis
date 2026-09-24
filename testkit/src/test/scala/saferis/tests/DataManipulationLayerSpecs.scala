@@ -2,13 +2,14 @@ package saferis.tests
 
 import saferis.*
 import saferis.dml.*
-import zio.*
+import zio.{test as _, *}
 import zio.test.*
 
-object DataManipulationLayerSpecs extends ZIOSpecDefault:
-  def spec = suite("run from SqlSessionConformance")()
+object DataManipulationLayerSpecs:
+  private object Collected extends zio.test.ZIOSpecDefault:
+    def spec = suite("unused")()
 
-  val dmlTests = suiteAll("should handle DML operations"):
+  val dmlTests = Collected.suiteAll("should handle DML operations"):
 
     // Insert operations
     test("insert basic record"):

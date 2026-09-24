@@ -22,7 +22,7 @@ import scala.util.control.NonFatal
 /** Node `pg` connection. The session around it is [[SqlSession.pooled]]. */
 object NodeSession:
   /** How many `pg-cursor` `read` calls this fiber has made. A short stream stays at one batch. */
-  val cursorReads: FiberRef[Int] =
+  private[pg] val cursorReads: FiberRef[Int] =
     Unsafe.unsafe(implicit unsafe => FiberRef.unsafe.make(0))
 
   private[pg] val Batch = 256
@@ -54,10 +54,10 @@ object NodeSession:
           destroy     <- Ref.make(false)
           busy        <- Ref.make(false)
           began       <- Ref.make(false)
-          committed   <- Ref.make(false)
+          finished    <- Ref.make(false)
           released    <- Ref.make(false)
           lastTimeout <- Ref.make(Option.empty[Duration])
-          lease = new PgLease(client, destroy, busy, began, committed, released)
+          lease = new PgLease(client, destroy, busy, began, finished, released)
           _ <- ZIO.addFinalizer(abort(lease))
         yield new NodeConnection(lease, config, lastTimeout)
 
@@ -75,7 +75,7 @@ object NodeSession:
       if inFlight then release(lease, true)
       else
         lease.began.get
-          .zip(lease.committed.get)
+          .zip(lease.finished.get)
           .flatMap: (opened, done) =>
             val rollback =
               if opened && !done then
@@ -99,7 +99,7 @@ private final class PgLease(
     val destroy: Ref[Boolean],
     val busy: Ref[Boolean],
     val began: Ref[Boolean],
-    val committed: Ref[Boolean],
+    val finished: Ref[Boolean],
     val released: Ref[Boolean],
 )
 
@@ -139,16 +139,27 @@ private final class NodeConnection(
 
   def begin: IO[SaferisError, Unit] =
     lease.began.set(true) *>
-      protocol("BEGIN").tapError(err => markBroken(err) *> lease.committed.set(true))
+      protocol("BEGIN").tapError(err => markBroken(err) *> lease.finished.set(true))
 
   def commit: IO[SaferisError, Unit] =
-    protocol("COMMIT") *> lease.committed.set(true)
+    protocolResult("COMMIT").flatMap: result =>
+      lease.finished.set(true) *>
+        ZIO
+          .when(result.command == "ROLLBACK"):
+            ZIO.fail(
+              SaferisError.QueryError(
+                Some("25P02"),
+                "commit reported ROLLBACK",
+                Some("COMMIT"),
+              )
+            )
+          .unit
 
   def rollback: UIO[Unit] =
     lease.began.get
-      .zip(lease.committed.get)
+      .zip(lease.finished.get)
       .flatMap: (opened, done) =>
-        if opened && !done then protocol("ROLLBACK").ignore *> lease.committed.set(true)
+        if opened && !done then protocol("ROLLBACK").ignore *> lease.finished.set(true)
         else ZIO.unit
 
   /** Outside a transaction a timeout needs `BEGIN` so `SET LOCAL` has a scope. Inside one, skip an unchanged cap. */
@@ -166,8 +177,11 @@ private final class NodeConnection(
       val want = command.timeout
       if previous == want then ZIO.unit
       else
-        val millis = want.fold(0)(PgWire.millis)
-        protocol(s"SET LOCAL statement_timeout = $millis") *> lastTimeout.set(want)
+        val statement =
+          want match
+            case None    => "SET LOCAL statement_timeout TO DEFAULT"
+            case Some(d) => s"SET LOCAL statement_timeout = ${PgWire.millis(d)}"
+        protocol(statement) *> lastTimeout.set(want)
 
   private def runExec(command: SqlCommand): IO[SaferisError, Long] =
     queryResult(command).flatMap(result => ZIO.fromEither(PgWire.rowCount(result)))
@@ -241,7 +255,11 @@ private final class NodeConnection(
             case None    => lease.busy.set(true) *> lease.destroy.set(true)
 
   private def protocol(statement: String): IO[SaferisError, Unit] =
-    promise(None, lease.client.query(PgWire.queryConfig(statement, js.Array()))).unit
+    protocolResult(statement).unit
+
+  private def protocolResult(statement: String): IO[SaferisError, PgResult] =
+    promise(None, lease.client.query(PgWire.queryConfig(statement, js.Array()))).flatMap: value =>
+      ZIO.fromEither(PgWire.ensureSingle(value))
 
   private def promise[A](sql: Option[String], thunk: => js.Promise[A]): IO[SaferisError, A] =
     lease.busy.set(true).uninterruptible *>

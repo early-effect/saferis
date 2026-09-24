@@ -120,11 +120,11 @@ Use multiple `@key` annotations to create a composite primary key:""",
 See [SQL Injection Prevention](sql-injection-prevention.html) for the complete security model.""",
     ),
     section("The session")(
-      md"""`SqlSession` executes statements. On the JVM, `JdbcSession.layer` builds one from a `DataSource`:
+      md"""`SqlSession` executes statements. On the JVM, `PostgresJdbc.layer` builds one from a `DataSource`. `JdbcSession.layer` is the same session with a `JdbcAdapter` you supply:
 
 ```scala
 import saferis.*
-import saferis.jdbc.*
+import saferis.postgres.jdbc.PostgresJdbc
 import zio.*
 import javax.sql.DataSource
 
@@ -133,7 +133,7 @@ val dataSource: DataSource = ???
 @tableName("core_concepts_users")
 case class User(@generated @key id: Int, name: String) derives Table
 
-val session = ZLayer.succeed(dataSource) >>> JdbcSession.layer()
+val session = ZLayer.succeed(dataSource) >>> PostgresJdbc.layer()
 
 val result: ZIO[SqlSession, SaferisError, Chunk[User]] =
   sql"SELECT * FROM $${Table[User]}".query[User]

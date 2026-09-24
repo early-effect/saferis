@@ -2,12 +2,11 @@ package saferis.tests
 
 import saferis.*
 
-import zio.*
+import zio.{test as _, *}
 import zio.test.*
 
 /** Transaction behavior every driver has to share. No pool, listener, or socket assumptions. */
-object TransactionConformance extends ZIOSpecDefault:
-  def spec        = suite("run from SqlSessionConformance")()
+object TransactionConformance:
   def conformance =
     suite("transaction semantics")(
       test("a failed transact rolls back"):
@@ -86,6 +85,21 @@ object TransactionConformance extends ZIOSpecDefault:
               cause.failureOption match
                 case Some(_: SaferisError.Timeout) => true
                 case _                             => false
-            case _ => false,
+            case _ => false
+      ,
+      test("catching a failed stream inside transact does not commit"):
+        for
+          _    <- sql"drop table if exists conformance_stream_abort".dml
+          _    <- sql"create table conformance_stream_abort (id integer primary key)".dml
+          exit <- transact(
+            for
+              _       <- sql"insert into conformance_stream_abort (id) values (1)".dml
+              command <- sql"select * from conformance_stream_missing".toCommand
+              _       <- ZIO.serviceWithZIO[SqlSession]: session =>
+                session.stream(command)(_ => Right(())).runDrain.catchAll(_ => ZIO.unit)
+            yield 1
+          ).exit
+          count <- sql"select count(*) from conformance_stream_abort".queryValue[Long]
+        yield assertTrue(exit.isFailure, count.contains(0L)),
     )
 end TransactionConformance

@@ -106,7 +106,9 @@ zipxCapabilities ++= {
         LocalProject("coreNative") / testFull,
         LocalProject("postgres") / testFull,
         LocalProject("postgresJS") / testFull,
+        LocalProject("postgresNative") / testFull,
         LocalProject("jdbc") / testFull,
+        LocalProject("postgresJdbc") / testFull,
         LocalProject("docs") / specularSite,
       ),
       // GHA VMs are disposable; skip Ryuk so Hub flakes on testcontainers/ryuk cannot fail CI.
@@ -117,7 +119,7 @@ zipxCapabilities ++= {
     // The `test` job must not wait on this one.
     Capability.once(
       name = CapabilityName("test-pg"),
-      command = zipxTasks.session(LocalProject("pgJS") / testFull, LocalProject("pgEsm") / fastLinkJS),
+      command = zipxTasks.session(LocalProject("pgJS") / testFull, LocalProject("pgEsm") / pgEsmProbe),
       extraSteps = pgJsCiSetup ++ prePullPostgres,
       // GHA VMs are disposable; skip Ryuk so Hub flakes on testcontainers/ryuk cannot fail CI.
       env = Map("TESTCONTAINERS_RYUK_DISABLED" -> EnvValue.plain("true")),
@@ -159,8 +161,8 @@ lazy val scalaVersions         = Seq(scala3Version)
 lazy val root = project
   .in(file("."))
   .aggregate(
-    (core.projectRefs ++ postgres.projectRefs ++ jdbc.projectRefs ++ pg.projectRefs ++ testkit.projectRefs ++
-      Seq[sbt.ProjectReference](docs, pgEsm))*
+    (core.projectRefs ++ postgres.projectRefs ++ jdbc.projectRefs ++ postgresJdbc.projectRefs ++ pg.projectRefs ++
+      testkit.projectRefs ++ Seq[sbt.ProjectReference](docs, pgEsm))*
   )
   .settings(
     name           := "saferis-root",
@@ -190,7 +192,7 @@ lazy val core = (projectMatrix in file("core"))
   .jsPlatform(scalaVersions = scalaVersions)
   .nativePlatform(scalaVersions = scalaVersions, nativeCore)
 
-// Postgres text codec and connection settings. JVM and Scala.js. No driver.
+// Postgres text codec and connection settings. JVM, Scala.js, and Scala Native. No driver.
 lazy val postgres = (projectMatrix in file("postgres"))
   .dependsOn(core)
   .settings(commonSettings)
@@ -203,6 +205,7 @@ lazy val postgres = (projectMatrix in file("postgres"))
   )
   .jvmPlatform(scalaVersions = scalaVersions)
   .jsPlatform(scalaVersions = scalaVersions)
+  .nativePlatform(scalaVersions = scalaVersions, nativeCore)
 
 // Test container and the conformance suite. Not published: it starts Docker.
 lazy val testkit = (projectMatrix in file("testkit"))
@@ -215,8 +218,7 @@ lazy val testkit = (projectMatrix in file("testkit"))
     MyVersions.coreLib,
     MyVersions.coreTest,
     MyVersions.testkitTest,
-    // The driver projects run these suites. Discovering them here would start them with no session.
-    Test / definedTests := Seq.empty,
+
   )
   .jvmPlatform(scalaVersions = scalaVersions, MyVersions.testkitJvm)
   .jsPlatform(
@@ -241,18 +243,31 @@ lazy val testkit = (projectMatrix in file("testkit"))
     ),
   )
 
-// JDBC driver. JVM only. Depends on the core JVM row.
+// java.sql session. No database driver. A JdbcAdapter supplies bind, read, and errors.
 lazy val jdbc = (projectMatrix in file("jdbc"))
   .dependsOn(core)
-  .dependsOn(testkit % "test->compile;test->test")
   .settings(commonSettings)
   .settings(publishSettings)
   .settings(MyVersions.jdbcLib)
   .settings(MyVersions.coreTest)
-  .settings(MyVersions.jdbcTest)
   .settings(
     name        := "saferis-jdbc",
-    description := "JDBC SqlSession for Postgres.",
+    description := "JDBC SqlSession. Database behavior is a JdbcAdapter.",
+  )
+  .jvmPlatform(scalaVersions = scalaVersions)
+
+// Postgres JdbcAdapter. The only JVM module that depends on pgjdbc and saferis-postgres.
+lazy val postgresJdbc = (projectMatrix in file("postgres-jdbc"))
+  .dependsOn(jdbc, postgres)
+  .dependsOn(testkit % "test->compile;test->test")
+  .settings(commonSettings)
+  .settings(publishSettings)
+  .settings(MyVersions.postgresJdbcLib)
+  .settings(MyVersions.coreTest)
+  .settings(MyVersions.postgresJdbcTest)
+  .settings(
+    name        := "saferis-postgres-jdbc",
+    description := "Postgres JdbcAdapter on pgjdbc.",
   )
   .jvmPlatform(scalaVersions = scalaVersions)
 
@@ -265,7 +280,7 @@ lazy val pg = (projectMatrix in file("pg"))
   .settings(MyVersions.pgLib)
   .settings(MyVersions.coreTest)
   .settings(
-    name        := "saferis-pg",
+    name        := "saferis-postgres-node",
     description := "Node pg SqlSession for Postgres.",
   )
   .jsPlatform(
@@ -274,6 +289,8 @@ lazy val pg = (projectMatrix in file("pg"))
       scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.CommonJSModule)),
     ),
   )
+
+lazy val pgEsmProbe = taskKey[Unit]("Load the Node driver as an ES module under Node")
 
 // Second link of the Node driver as an ES module. Sources are the pg module. Not published.
 lazy val pgEsm = project
@@ -289,11 +306,25 @@ lazy val pgEsm = project
       (ThisBuild / baseDirectory).value / "pg" / "src" / "main" / "scala"
     ),
     scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.ESModule)),
+    scalaJSUseMainModuleInitializer := true,
+    // sbt's `run` executes the `.js` output as CommonJS. Node only treats this file as
+    // an ES module when the name is `.mjs`, which is when a wrong `pg` import fails.
+    pgEsmProbe := Def.uncached {
+      val report = (Compile / fastLinkJS).value
+      val output = (Compile / fastLinkJS / scalaJSLinkerOutputDirectory).value
+      val js     = output / report.data.publicModules.head.jsFileName
+      val mjs    = output / "main.mjs"
+      sbt.io.IO.copyFile(js, mjs)
+      val code = scala.sys.process
+        .Process(List("node", mjs.getAbsolutePath), (ThisBuild / baseDirectory).value)
+        .!
+      if code != 0 then sys.error(s"ES module load exited $code")
+    },
   )
 
 lazy val docs = project
   .in(file("saferis-docs"))
-  .dependsOn(jdbc.jvm(scala3Version))
+  .dependsOn(postgresJdbc.jvm(scala3Version))
   .enablePlugins(SpecularPlugin)
   .settings(commonSettings)
   .settings(

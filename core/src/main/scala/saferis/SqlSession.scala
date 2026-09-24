@@ -29,7 +29,19 @@ trait SqlSession:
   def transact[R, A](body: ZIO[SqlSession & R, SaferisError, A]): ZIO[R, SaferisError, A]
 end SqlSession
 
-/** One checked-out connection. A driver implements this. It does not join transactions or call listeners. */
+/** One checked-out connection. A driver implements this. It does not join transactions or call listeners.
+  *
+  * `SqlSession.pooled` depends on the following. The compiler cannot check it:
+  *
+  *   - `command.timeout` is already resolved. The connection enforces it however it likes.
+  *   - `begin`, `commit`, and `rollback` are called only by the session. A `cursor` outside a transaction provides its
+  *     own read consistency.
+  *   - Releasing the checkout leaves the connection reusable: no open transaction, and no leaked session state
+  *     (autocommit, `statement_timeout`, settings applied at checkout).
+  *   - `commit` fails when the server rolls the transaction back instead of committing.
+  *   - A failure that leaves the connection unusable destroys it rather than returning it to a pool. A statement error
+  *     inside an open transaction does not: the session still rolls that transaction back.
+  */
 trait SqlConnection:
   def execute(command: SqlCommand): IO[SaferisError, Long]
   def query(command: SqlCommand): IO[SaferisError, Chunk[SqlRow]]

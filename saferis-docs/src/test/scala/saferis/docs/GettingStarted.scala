@@ -18,18 +18,18 @@ object GettingStarted extends SaferisDocSpecSuite:
 ```scala
 libraryDependencies ++= Seq(
   "rocks.earlyeffect" %% "saferis" % "0.18.0",
-  "rocks.earlyeffect" %% "saferis-jdbc" % "0.18.0",
+  "rocks.earlyeffect" %% "saferis-postgres-jdbc" % "0.18.0",
 )
 ```
 
-The JDBC artifact is a separate module. `org.postgresql:postgresql` is a compile dependency of `saferis-jdbc` because the driver binds `PGobject` and reads `PSQLException`. It is not `provided`.
+`saferis-postgres-jdbc` is the Postgres driver. It is the module that depends on pgjdbc. `saferis-jdbc` is `java.sql` only: bind, read, and server errors come from a `JdbcAdapter`.
 
 A Node application depends on the Scala.js artifacts and on npm packages. The versions below are the ones this repository tests. A missing `require` fails when the bundle loads.
 
 ```scala
 libraryDependencies ++= Seq(
   "rocks.earlyeffect" %%% "saferis" % "0.18.0",
-  "rocks.earlyeffect" %%% "saferis-pg" % "0.18.0",
+  "rocks.earlyeffect" %%% "saferis-postgres-node" % "0.18.0",
 )
 ```
 
@@ -69,13 +69,13 @@ it, all type-safe, all against a real database:""",
 
 ```mermaid
 flowchart TB
-  ds[DataSource] --> session[JdbcSession.layer]
+  ds[DataSource] --> session[PostgresJdbc.layer]
   session --> prog[ZIO program]
 ```
 
 ```scala
 import saferis.*
-import saferis.jdbc.*
+import saferis.postgres.jdbc.PostgresJdbc
 import zio.*
 import javax.sql.DataSource
 
@@ -91,10 +91,10 @@ object MyApp extends ZIOAppDefault:
     yield users
 
   // A JDBC pool (for example HikariCP) is the DataSource.
-  // JdbcSession.layer turns it into an SqlSession.
+  // PostgresJdbc.layer is the Postgres JdbcAdapter on that pool.
   def dataSource: DataSource = ???
 
-  def run = program.provide(ZLayer.succeed(dataSource) >>> JdbcSession.layer())
+  def run = program.provide(ZLayer.succeed(dataSource) >>> PostgresJdbc.layer())
 ```
 
 Next, read [Core Concepts](core-concepts.html) to understand table definitions, the

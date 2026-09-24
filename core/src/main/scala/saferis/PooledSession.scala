@@ -42,7 +42,11 @@ private final class PooledSession(
     ZStream.unwrapScoped:
       lease match
         case Some(open) =>
-          guard(open, cmd).as(open.connection.cursor(cmd).mapZIO(row => ZIO.fromEither(read(row))))
+          guard(open, cmd).as:
+            open.connection
+              .cursor(cmd)
+              .tapError(err => record(open, err))
+              .mapZIO(row => ZIO.fromEither(read(row)))
         case None =>
           checkout.map(connection => connection.cursor(cmd).mapZIO(row => ZIO.fromEither(read(row))))
   end stream
@@ -54,16 +58,21 @@ private final class PooledSession(
         ZIO.scoped:
           for
             connection <- checkout
-            _          <- connection.begin
-            failure    <- Ref.make[Option[SaferisError]](None)
+            // Interrupt skips the exit match. This finalizer is the rollback, not the driver's close.
+            finished <- Ref.make(false)
+            _        <- ZIO.addFinalizer(finished.get.flatMap(done => ZIO.unless(done)(connection.rollback).unit))
+            _        <- connection.begin
+            failure  <- Ref.make[Option[SaferisError]](None)
             child = new PooledSession(checkout, defaultTimeout, Some(PooledSession.Lease(connection, failure)))
             exit   <- body.provideSomeLayer[R](ZLayer.succeed[SqlSession](child)).exit
             result <- exit match
               case zio.Exit.Success(value) =>
                 failure.get.flatMap:
-                  case Some(err) => connection.rollback *> ZIO.fail(err)
-                  case None      => connection.commit.as(value)
-              case zio.Exit.Failure(cause) => connection.rollback *> ZIO.failCause(cause)
+                  case Some(err) => ZIO.fail(err)
+                  case None      =>
+                    // Once COMMIT is sent, wait for the answer. A later interrupt must not cut it off.
+                    ZIO.uninterruptible(connection.commit *> finished.set(true)).as(value)
+              case zio.Exit.Failure(cause) => ZIO.failCause(cause)
           yield result
 
   private def applied(command: SqlCommand): SqlCommand =
@@ -89,12 +98,12 @@ private final class PooledSession(
           )
         )
 
-  /** `25P02` is the consequence of an earlier failure. A decode error did not abort the transaction. */
+  /** A decode error did not abort the transaction. The first real failure stays: a later `25P02` does not replace it.
+    */
   private def record(open: PooledSession.Lease, err: SaferisError): zio.UIO[Unit] =
     err match
-      case SaferisError.QueryError(Some("25P02"), _, _) => ZIO.unit
-      case SaferisError.DecodingError(_, _, _)          => ZIO.unit
-      case other                                        => open.failure.update(prev => prev.orElse(Some(other)))
+      case SaferisError.DecodingError(_, _, _) => ZIO.unit
+      case other                               => open.failure.update(prev => prev.orElse(Some(other)))
 
   private def decode[A](
       rows: Chunk[SqlRow],

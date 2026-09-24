@@ -98,6 +98,12 @@ object Encoder:
 
   given defaultUuidEncoder: Encoder[UUID] = postgres.uuidEncoder
 
+  def array[A](using element: Encoder[A]): Encoder[Chunk[A]] = new Encoder[Chunk[A]]:
+    def sqlType: SqlType                   = SqlType.Array(element.sqlType)
+    def encode(values: Chunk[A]): SqlValue =
+      val members = values.map(element.encode)
+      SqlValue.array(element.sqlType, members).getOrElse(SqlValue.Array(element.sqlType, members))
+
   def fromJsonCodec[T](using codec: zio.json.JsonCodec[T]): Encoder[T] = new Encoder[T]:
     def sqlType: SqlType       = SqlType.Jsonb
     def encode(a: T): SqlValue = SqlValue.Jsonb(codec.encoder.encodeJson(a, None).toString)

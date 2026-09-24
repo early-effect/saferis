@@ -40,13 +40,13 @@ object SqlListener:
 
   private def outcomeOf(exit: Exit[Any, Any], rows: Long): StatementOutcome =
     exit match
-      case Exit.Success(_)     => StatementOutcome.Completed(rows)
-      case Exit.Failure(cause) =>
+      case Exit.Success(_)                            => StatementOutcome.Completed(rows)
+      case Exit.Failure(cause) if cause.isInterrupted => StatementOutcome.Interrupted
+      case Exit.Failure(cause)                        =>
         cause.failureOption match
-          case Some(error: SaferisError)    => StatementOutcome.Failed(error)
-          case _ if cause.isInterruptedOnly => StatementOutcome.Interrupted
-          case _ if cause.defects.nonEmpty  => StatementOutcome.Died
-          case _                            => StatementOutcome.Interrupted
+          case Some(error: SaferisError)   => StatementOutcome.Failed(error)
+          case _ if cause.defects.nonEmpty => StatementOutcome.Died
+          case _                           => StatementOutcome.Interrupted
 
   private final class Observed(inner: SqlSession, listener: SqlListener) extends SqlSession:
     def exec(command: SqlCommand): zio.IO[SaferisError, Long] =
@@ -82,19 +82,15 @@ object SqlListener:
     private def timed[A](command: SqlCommand, effect: zio.IO[SaferisError, A], rows: A => Long)(using
         Trace
     ): zio.IO[SaferisError, A] =
-      for
-        start <- Clock.nanoTime
-        exit  <- effect.exit
-        _     <- reportExit(
-          command,
-          start,
-          exit,
-          exit match
+      // `exit` does not observe an interrupt from outside the fiber. `onExit` does, and its finalizer is not skipped.
+      Clock.nanoTime.flatMap { start =>
+        effect.onExit { exit =>
+          val count = exit match
             case Exit.Success(value) => rows(value)
-            case Exit.Failure(_)     => 0L,
-        )
-        value <- exit.foldExit(ZIO.failCause, ZIO.succeed)
-      yield value
+            case Exit.Failure(_)     => 0L
+          reportExit(command, start, exit, count)
+        }
+      }
 
     private def report(command: SqlCommand, start: Long, count: Ref[Long], exit: Exit[Any, Any]): UIO[Unit] =
       count.get.flatMap: rows =>

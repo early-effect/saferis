@@ -383,45 +383,31 @@ object QuerySpecs extends ZIOSpecDefault:
         val q = Query[User].where(_.id).inList(List(1, 2)).where(_.name).inList(List("a", "b", "c")).build
         assertTrue(q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 2, arrayLength(q) == 5)
       },
-      test("inList(empty) does not throw — fragment carries one issue tagged WhereBuilder.inList") {
+      test("inList(empty) is one empty array and has no issues") {
         val q = Query[User].where(_.id).inList(List.empty[Int]).build
-        assertTrue(
-          q.issues.size == 1,
-          q.issues.exists {
-            case FragmentIssue.EmptyCollection("WhereBuilder.inList", _) => true
-            case _                                                       => false
-          },
-        )
+        assertTrue(q.issues.isEmpty, q.sql.contains("= ANY($1)"), arrayLength(q) == 0)
       },
-      test("notInList(empty) carries one issue tagged WhereBuilder.notInList") {
+      test("notInList(empty) is one empty array and has no issues") {
         val q = Query[User].where(_.id).notInList(List.empty[Int]).build
-        assertTrue(
-          q.issues.size == 1,
-          q.issues.exists {
-            case FragmentIssue.EmptyCollection("WhereBuilder.notInList", _) => true
-            case _                                                          => false
-          },
-        )
+        assertTrue(q.issues.isEmpty, q.sql.contains("<> ALL($1)"), arrayLength(q) == 0)
       },
       test("all-duplicates collapsing to one is NOT an error") {
         val q = Query[User].where(_.id).inList(List(7, 7, 7)).build
         assertTrue(q.issues.isEmpty, q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1, q.sql.contains("= ANY($1)"))
       },
-      test("two empty inList calls produce two accumulated issues") {
+      test("two empty inList calls are two array parameters and have no issues") {
         val q = Query[User].where(_.id).inList(List.empty[Int]).where(_.name).inList(List.empty[String]).build
-        assertTrue(q.issues.size == 2)
+        assertTrue(q.issues.isEmpty, q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 2)
       },
       test("SqlFragment.validate succeeds for a valid query") {
         val q = Query[User].where(_.id).inList(List(1, 2)).build
         for r <- q.validate
         yield assertTrue(r == q)
       },
-      test("SqlFragment.validate fails with InvalidStatement for an empty inList") {
+      test("SqlFragment.validate succeeds for an empty inList") {
         val q = Query[User].where(_.id).inList(List.empty[Int]).build
-        for r <- q.validate.either
-        yield assertTrue(r match
-          case Left(SaferisError.InvalidStatement(issues)) if issues.size == 1 => true
-          case _                                                               => false)
+        for r <- q.validate
+        yield assertTrue(r == q)
       },
       test("select modifies query to select specific column") {
         val q   = Query[User].select(_.id)

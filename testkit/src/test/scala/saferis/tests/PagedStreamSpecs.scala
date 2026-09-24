@@ -4,11 +4,10 @@ import saferis.*
 import saferis.ddl.*
 import saferis.dml.*
 import saferis.postgres.given
-import zio.*
+import zio.{test as _, *}
 import zio.test.*
 
-object PagedStreamSpecs extends ZIOSpecDefault:
-  def spec = suite("run from SqlSessionConformance")()
+object PagedStreamSpecs:
 
   @tableName("paged_stream_users")
   final case class PagedUser(@generated @key id: Int, name: String, age: Int) derives Table

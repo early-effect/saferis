@@ -48,22 +48,21 @@ object Placeholder:
     join(placeholders, ", ")
 
   def list[A](values: Iterable[A])(using Encoder[A]): Placeholder =
-    listTagged(values, helper = "Placeholder.list", origin = captureOrigin())
+    array(values)
 
   def list[A](first: A, rest: A*)(using Encoder[A]): Placeholder =
-    listTagged(first +: rest, helper = "Placeholder.list", origin = captureOrigin())
+    array(first +: rest)
 
-  /** One array parameter. Empty input is an issue, not `IN ()`. */
-  private[saferis] def listTagged[A](values: Iterable[A], helper: String, origin: Option[StackTraceElement])(using
-      encoder: Encoder[A]
-  ): Placeholder =
-    val deduped = values.iterator.distinct.toVector
-    if deduped.isEmpty then Derived(Chunk.empty, List(FragmentIssue.EmptyCollection(helper, origin)), None)
-    else param(SqlValue.Array(encoder.sqlType, Chunk.fromIterable(deduped.map(encoder.encode))))
+  /** One array parameter. An empty collection is `'{}'`: `= ANY('{}')` is false and `<> ALL('{}')` is true. */
+  def array[A](values: Iterable[A])(using encoder: Encoder[A]): Placeholder =
+    param(members(values, encoder))
 
-  private[saferis] def captureOrigin(): Option[StackTraceElement] =
-    val st = new Throwable().getStackTrace
-    st.find(f => !f.getClassName.startsWith("saferis."))
+  def array[A](first: A, rest: A*)(using encoder: Encoder[A]): Placeholder =
+    array(first +: rest)
+
+  private def members[A](values: Iterable[A], encoder: Encoder[A]): SqlValue =
+    val encoded = Chunk.fromIterable(values).distinct.map(encoder.encode)
+    SqlValue.array(encoder.sqlType, encoded).getOrElse(SqlValue.Array(encoder.sqlType, encoded))
 
   private[saferis] def allIssues(ps: Seq[Placeholder]): List[FragmentIssue] =
     ps.toList.flatMap(_.issues)

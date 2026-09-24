@@ -5,15 +5,14 @@ import saferis.Schema.*
 import saferis.ddl.*
 import saferis.dml.*
 import saferis.postgres.PostgresDialect
-import zio.*
+import zio.{test as _, *}
 import zio.json.*
 import zio.test.*
 
 /** Integration tests for Schema DSL features with PostgreSQL. Tests partial indexes, JSON operations, and verifies
   * actual database behavior.
   */
-object SchemaIntegrationSpecs extends ZIOSpecDefault:
-  def spec = suite("run from SqlSessionConformance")()
+object SchemaIntegrationSpecs:
 
   // Provide PostgresDialect for JSON operators
   given (Dialect & JsonSupport) = PostgresDialect

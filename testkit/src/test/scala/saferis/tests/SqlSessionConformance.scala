@@ -15,6 +15,7 @@ object SqlSessionConformance:
     zio.test
       .suite(s"$driver conformance")(
         TransactionConformance.conformance,
+        ValueConformance.conformance,
         InCollectionIntegrationSpecs.conformance,
         DataManipulationLayerSpecs.conformance,
         SchemaIntegrationSpecs.conformance,

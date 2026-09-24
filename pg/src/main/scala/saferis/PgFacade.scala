@@ -30,6 +30,9 @@ private[pg] trait PgResult extends js.Object:
   def rows: js.Array[js.Array[js.Any]] = js.native
   def fields: js.Array[PgField]        = js.native
 
+  /** Command tag. `COMMIT` on an aborted transaction is `ROLLBACK`, with no error. */
+  def command: String = js.native
+
 @js.native
 private[pg] trait PgField extends js.Object:
   def name: String       = js.native

@@ -119,6 +119,14 @@ object Decoder:
 
   given defaultUuidDecoder: Decoder[UUID] = postgres.uuidDecoder
 
+  def array[A](using element: Decoder[A]): Decoder[Chunk[A]] = new Decoder[Chunk[A]]:
+    def decode(value: SqlValue): Either[DecodeError, Chunk[A]] = value match
+      case SqlValue.Array(_, values) =>
+        values.foldLeft[Either[DecodeError, Chunk[A]]](Right(Chunk.empty)):
+          case (Left(err), _)       => Left(err)
+          case (Right(acc), member) => element.decode(member).map(acc :+ _)
+      case other => reject("array", other)
+
   def fromJsonCodec[T](using codec: zio.json.JsonCodec[T]): Decoder[T] =
     new Decoder[T]:
       def decode(value: SqlValue): Either[DecodeError, T] = value match

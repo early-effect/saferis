@@ -2,6 +2,11 @@ package saferis
 
 import zio.Chunk
 
+import scala.compiletime.constValueTuple
+import scala.compiletime.erasedValue
+import scala.compiletime.summonInline
+import scala.deriving.Mirror
+
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -60,4 +65,45 @@ object Codec:
 
   given defaultUuidCodec: Codec[UUID] =
     make(Encoder.defaultUuidEncoder, Decoder.defaultUuidDecoder)
+
+  /** One column of `element` values. `Chunk[Byte]` stays `bytea` via [[Encoder.chunkByte]]. Summon this explicitly. */
+  def array[A](using element: Codec[A]): Codec[Chunk[A]] =
+    make(Encoder.array(using element.encoder), Decoder.array(using element.decoder))
+
+  /** Postgres enum as [[SqlValue.Other]] text. The server type name is not matched: drivers disagree on name versus
+    * OID.
+    */
+  def pgEnum[E](typeName: String)(encodeName: E => String, decodeName: String => Option[E]): Codec[E] =
+    val server = ServerType.Named(typeName)
+    new Codec[E]:
+      val encoder: Encoder[E] = new Encoder[E]:
+        def sqlType: SqlType       = SqlType.Other(server)
+        def encode(a: E): SqlValue = SqlValue.Other(server, encodeName(a))
+      val decoder: Decoder[E] = new Decoder[E]:
+        def decode(value: SqlValue): Either[DecodeError, E] =
+          val text = value match
+            case SqlValue.Other(_, t) => Some(t)
+            case SqlValue.Text(t)     => Some(t)
+            case SqlValue.VarChar(t)  => Some(t)
+            case _                    => None
+          text.flatMap(decodeName).toRight(DecodeError(s"not a $typeName"))
+    end new
+  end pgEnum
+
+  /** Parameterless Scala 3 enum. Case names are the Postgres labels. */
+  inline def pgEnum[E](typeName: String)(using m: Mirror.SumOf[E]): Codec[E] =
+    val labels = constValueTuple[m.MirroredElemLabels].productIterator.map(_.asInstanceOf[String]).toVector
+    val values = enumValues[m.MirroredElemTypes].asInstanceOf[Vector[E]]
+    pgEnum(typeName)(
+      (e: E) => labels(m.ordinal(e)),
+      (text: String) =>
+        val index = labels.indexOf(text)
+        if index < 0 then None else Some(values(index)),
+    )
+
+  private inline def enumValues[T <: Tuple]: Vector[Any] =
+    inline erasedValue[T] match
+      case _: EmptyTuple     => Vector.empty
+      case _: (head *: tail) =>
+        Vector(summonInline[ValueOf[head]].value) ++ enumValues[tail]
 end Codec

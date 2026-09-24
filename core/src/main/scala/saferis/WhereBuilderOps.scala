@@ -112,16 +112,14 @@ trait WhereBuilderOps[Parent, T]:
 
   /** Membership for any `Iterable[T]`. Duplicates are removed. One array parameter: `col = ANY($1)`.
     *
-    * On empty (or degenerate-empty-after-dedupe) input the resulting fragment carries a
-    * [[FragmentIssue.EmptyCollection]] that surfaces as [[SaferisError.InvalidStatement]] at execution. No DB
-    * round-trip on failure.
+    * An empty collection is `= ANY('{}')`, which is false. No separate empty-collection failure.
     *
     * {{{
     *   Query[User].where(_.id).inList(runIds)
     * }}}
     */
   def inList(values: Iterable[T])(using Encoder[T]): Parent =
-    membership("= ANY(", values, "WhereBuilder.inList")
+    membership("= ANY(", values)
 
   /** Varargs exclusion. One array parameter: `col <> ALL($1)`. */
   def notIn(first: T, rest: T*)(using Encoder[T]): Parent =
@@ -129,10 +127,10 @@ trait WhereBuilderOps[Parent, T]:
 
   /** Exclusion for any `Iterable[T]`. Same array rules as [[inList]]: `col <> ALL($1)`. */
   def notInList(values: Iterable[T])(using Encoder[T]): Parent =
-    membership("<> ALL(", values, "WhereBuilder.notInList")
+    membership("<> ALL(", values)
 
-  private def membership(op: String, values: Iterable[T], helper: String)(using Encoder[T]): Parent =
-    val list      = Placeholder.listTagged(values, helper = helper, origin = Placeholder.captureOrigin())
+  private def membership(op: String, values: Iterable[T])(using Encoder[T]): Parent =
+    val list      = Placeholder.array(values)
     val whereFrag =
       SqlFragment
         .text(s"${whereAlias.toSql}.${whereColumn.label} $op")

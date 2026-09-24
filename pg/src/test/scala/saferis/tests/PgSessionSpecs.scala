@@ -465,12 +465,34 @@ object PgSessionSpecs extends ZIOSpecDefault:
           .timeoutFail(SaferisError.Unexpected("in-flight timed statement left the checkout busy"))(8.seconds),
     ) @@ TestAspect.withLiveClock @@ TestAspect.timeout(45.seconds) @@ TestAspect.sequential
 
+  private val startupTimeout =
+    test("a missing timeout restores the server statement_timeout"):
+      for
+        pg <- ZIO.service[PostgresTestContainer]
+        config = PgConfig(
+          connection = PgConnectionConfig(
+            host = pg.host,
+            port = pg.port,
+            database = pg.database,
+            user = pg.user,
+            password = zio.Config.Secret(pg.password),
+            parameters = Map("statement_timeout" -> "1s"),
+          ),
+          poolSize = 1,
+        )
+        exit <- transact(
+          sql"select 1".withTimeout(8.seconds).queryValue[Int] *>
+            sql"select pg_sleep(3)".queryValue[Int]
+        ).provide(ZLayer.succeed(config) >>> NodeSession.layer).exit
+      yield assertTrue(isTimeout(exit))
+
   private val live =
     suite("Node pg")(
       reads.provideSomeShared[PostgresTestContainer](open),
       writes.provideSomeShared[PostgresTestContainer](open),
       joined.provideSomeShared[PostgresTestContainer](timed),
       review,
+      startupTimeout,
     ) @@ TestAspect.withLiveClock @@ TestAspect.timeout(45.seconds) @@ TestAspect.sequential
 
   def spec = live.provideShared(PostgresTestContainer.live)

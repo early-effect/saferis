@@ -9,37 +9,25 @@ class silent extends Annotation
 
 export Interpolator.sql
 export Interpolator.sqlEcho
-export Interpolator.in
+export Interpolator.array
 
 object Interpolator:
 
-  /** One array parameter: `= ANY($1)`. The driver casts that parameter to the element type.
+  /** One array value. Write the operator in the SQL string.
     *
     * {{{
-    *   sql"select * from $table where ${table.id} ${in(ids)}"
+    *   sql"select * from $table where ${table.id} = any(${array(ids)})"
+    *   sql"select * from $table where ${table.id} <> all(${array(names)})"
     * }}}
     *
-    * Accepts any `Iterable[A]` (`Seq`, `List`, `Set`, `LinkedHashSet`, etc.). Duplicates are removed. The remaining
-    * values are one `SqlValue.Array`.
-    *
-    * On empty (or degenerate-empty-after-dedupe) input, the resulting placeholder carries a
-    * [[FragmentIssue.EmptyCollection]] that surfaces as [[SaferisError.InvalidStatement]] at execution. No DB
-    * round-trip on failure.
+    * Accepts any `Iterable[A]`. Duplicates are removed. An empty collection is one empty array parameter.
     */
-  def in[A](values: Iterable[A])(using Encoder[A]): Placeholder =
-    anyOf(Placeholder.listTagged(values, helper = "in", origin = Placeholder.captureOrigin()))
+  def array[A](values: Iterable[A])(using Encoder[A]): Placeholder =
+    Placeholder.array(values)
 
-  /** Varargs convenience overload. At least one element by construction.
-    *
-    * {{{
-    *   sql"... where ${table.status} ${in("active", "pending")}"
-    * }}}
-    */
-  def in[A](first: A, rest: A*)(using Encoder[A]): Placeholder =
-    anyOf(Placeholder.listTagged(first +: rest, helper = "in", origin = Placeholder.captureOrigin()))
-
-  private def anyOf(list: Placeholder): Placeholder =
-    Placeholder.concat(Placeholder.raw("= ANY("), list, Placeholder.raw(")"))
+  /** Varargs form. At least one element by construction. */
+  def array[A](first: A, rest: A*)(using Encoder[A]): Placeholder =
+    Placeholder.array(first +: rest)
 
   extension (inline sc: StringContext)
     /** Interpolates a string context creating an [[SqlFragment]].

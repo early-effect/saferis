@@ -23,20 +23,20 @@
 Add to your `build.sbt`:
 
 ```scala
-// JVM. saferis-jdbc talks to Postgres. postgresql is a compile dependency of that
-// artifact (PGobject, PSQLException), not a provided dependency you add yourself.
+// JVM. saferis-postgres-jdbc is the Postgres driver (pgjdbc). saferis-jdbc is
+// java.sql only: another database supplies its own JdbcAdapter.
 libraryDependencies ++= Seq(
   "rocks.earlyeffect" %% "saferis" % "<version>",
-  "rocks.earlyeffect" %% "saferis-jdbc" % "<version>",
+  "rocks.earlyeffect" %% "saferis-postgres-jdbc" % "<version>",
 )
 ```
 
-Node (Scala.js) uses `saferis-pg`. Compile does not download `pg`. Install the same versions this repository links against, or `require` fails when the bundle loads:
+Node (Scala.js) uses `saferis-postgres-node`. Compile does not download `pg`. Install the same versions this repository links against, or `require` fails when the bundle loads:
 
 ```scala
 libraryDependencies ++= Seq(
   "rocks.earlyeffect" %%% "saferis" % "<version>",
-  "rocks.earlyeffect" %%% "saferis-pg" % "<version>",
+  "rocks.earlyeffect" %%% "saferis-postgres-node" % "<version>",
 )
 ```
 

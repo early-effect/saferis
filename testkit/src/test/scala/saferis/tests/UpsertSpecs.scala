@@ -1,13 +1,12 @@
 package saferis.tests
 
 import saferis.*
-import zio.*
+import zio.{test as _, *}
 import zio.test.*
 
 import java.time.Instant
 
-object UpsertSpecs extends ZIOSpecDefault:
-  def spec = suite("run from SqlSessionConformance")()
+object UpsertSpecs:
 
   // Test table for upsert - simulates a lock/lease table
   @tableName("upsert_locks")

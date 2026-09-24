@@ -7,6 +7,7 @@ import saferis.SqlRow
 import saferis.SqlType
 import saferis.SqlValue
 import saferis.ServerType
+import saferis.postgres.PgConnectionConfig
 import saferis.postgres.PgText
 import saferis.postgres.SslMode
 
@@ -46,14 +47,22 @@ private[pg] object PgWire:
       "max"                     -> config.poolSize.toDouble,
       "ssl"                     -> sslValue(connection.ssl),
       "connectionTimeoutMillis" -> connection.connectTimeout.toMillis.toDouble,
-      "options"                 -> "-c DateStyle=ISO",
+      "options"                 -> startupOptions(connection),
       "allowExitOnIdle"         -> true,
       "types"                   -> rawTypes,
     )
   end poolConfig
 
+  def startupOptions(connection: PgConnectionConfig): String =
+    val extra = connection.parameters.map { (name, value) => s"-c $name=$value" }.mkString(" ")
+    if extra.isEmpty then "-c DateStyle=ISO" else s"-c DateStyle=ISO $extra"
+
   def reveal(secret: Secret): String =
     secret.value.mkString
+
+  /** `undefined` tells Node TLS not to check the certificate hostname. */
+  private val skipHostname: js.Function2[js.Any, js.Any, js.UndefOr[js.Any]] =
+    (_, _) => js.undefined
 
   def sslValue(mode: SslMode): js.Any = mode match
     case SslMode.Disable =>
@@ -61,9 +70,14 @@ private[pg] object PgWire:
     case SslMode.Require =>
       js.Dynamic.literal(rejectUnauthorized = false)
     case SslMode.VerifyCa(ca) =>
-      js.Dynamic.literal(rejectUnauthorized = true, ca = ca)
+      // rejectUnauthorized alone is verify-full. verify-ca skips the hostname check.
+      js.Dynamic.literal(
+        rejectUnauthorized = true,
+        ca = ca.text,
+        checkServerIdentity = skipHostname,
+      )
     case SslMode.VerifyFull(ca) =>
-      js.Dynamic.literal(rejectUnauthorized = true, ca = ca)
+      js.Dynamic.literal(rejectUnauthorized = true, ca = ca.text)
 
   def queryConfig(sql: String, values: js.Array[js.Any]): js.Object =
     js.Dynamic.literal(
@@ -74,10 +88,9 @@ private[pg] object PgWire:
 
   def render(command: SqlCommand): String =
     command.render: (index, tpe) =>
-      tpe match
-        case SqlType.Other(_)       => s"$$$index"
-        case SqlType.Array(element) => s"$$$index::${PgText.cast(element)}[]"
-        case other                  => s"$$$index::${PgText.cast(other)}"
+      PgText.cast(tpe) match
+        case Some(name) => s"$$$index::$name"
+        case None       => s"$$$index"
 
   /** Whole milliseconds, round up, minimum 1. Infinity is `Int.MaxValue` milliseconds. `0` is not a present cap. */
   def millis(d: Duration): Int =
@@ -192,7 +205,10 @@ private[pg] object PgWire:
     case SqlValue.Float4(v)        => js.Any.fromDouble(v.toDouble)
     case SqlValue.Float8(v)        => js.Any.fromDouble(v)
     case SqlValue.Array(_, values) => js.Array(values.map(bind)*)
-    case other                     => PgText.encode(other)
+    case other                     =>
+      PgText.encode(other) match
+        case Some(text) => text
+        case None       => jsNull
 
   /** JS null. Stays inside the bind. Callers see `SqlValue.Null`, not this. */
   private def jsNull: js.Any = null

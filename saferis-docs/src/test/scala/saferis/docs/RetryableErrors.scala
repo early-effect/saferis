@@ -2,6 +2,7 @@ package saferis.docs
 
 import saferis.*
 import saferis.jdbc.*
+import saferis.postgres.jdbc.PostgresJdbc
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.*
@@ -49,7 +50,7 @@ object RetryableErrors extends SaferisDocSpecSuite:
         val databricks: ServerError => Boolean =
           e => e.vendorCode.contains(8000)
 
-        val session = JdbcSession.layer(JdbcSessionConfig(retry = databricks))
+        val session = PostgresJdbc.layer(JdbcSessionConfig(retry = databricks))
         val vendor  = SqlState.classify(
           ServerError(Some("8000"), "http blip", vendorCode = Some(8000)),
           Some("select 1"),

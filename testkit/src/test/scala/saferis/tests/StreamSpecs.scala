@@ -4,14 +4,13 @@ import saferis.*
 import saferis.ddl.*
 import saferis.dml.*
 import saferis.postgres.given
-import zio.*
+import zio.{test as _, *}
 import zio.stream.*
 import zio.test.*
 
 import java.util.concurrent.atomic.AtomicInteger
 
-object StreamSpecs extends ZIOSpecDefault:
-  def spec = suite("run from SqlSessionConformance")()
+object StreamSpecs:
 
   @tableName("stream_test_users")
   final case class StreamUser(@generated @key id: Int, name: String, age: Int) derives Table

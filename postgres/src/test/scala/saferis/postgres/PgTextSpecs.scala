@@ -39,7 +39,7 @@ object PgTextSpecs extends ZIOSpecDefault:
 
   private def roundTrip(value: SqlValue): Boolean =
     PgText.oid(value.sqlType).exists { id =>
-      PgText.decode(id, PgText.encode(value)) == Right(value)
+      PgText.encode(value).exists(text => PgText.decode(id, text) == Right(value))
     }
 
   def spec = suite("PgText")(
@@ -58,17 +58,18 @@ object PgTextSpecs extends ZIOSpecDefault:
         assertTrue(values.forall(roundTrip))
     ,
     test("non-finite floats encode as Postgres text"):
-      val nan = PgText.decode(701, PgText.encode(SqlValue.Float8(Double.NaN)))
-      val inf = PgText.decode(700, PgText.encode(SqlValue.Float4(Float.PositiveInfinity)))
+      val nan = PgText.encode(SqlValue.Float8(Double.NaN)).flatMap(text => PgText.decode(701, text).toOption)
+      val inf =
+        PgText.encode(SqlValue.Float4(Float.PositiveInfinity)).flatMap(text => PgText.decode(700, text).toOption)
       assertTrue(
-        PgText.encode(SqlValue.Float8(Double.NaN)) == "NaN",
+        PgText.encode(SqlValue.Float8(Double.NaN)) == Some("NaN"),
         nan match
-          case Right(SqlValue.Float8(v)) => v.isNaN
-          case _                         => false
+          case Some(SqlValue.Float8(v)) => v.isNaN
+          case _                        => false
         ,
         inf match
-          case Right(SqlValue.Float4(v)) => v.isInfinite
-          case _                         => false,
+          case Some(SqlValue.Float4(v)) => v.isInfinite
+          case _                        => false,
       )
     ,
     test("an unknown oid is Other"):
@@ -76,11 +77,32 @@ object PgTextSpecs extends ZIOSpecDefault:
     ,
     test("casts use postgres spellings"):
       assertTrue(
-        PgText.cast(SqlType.Int8) == "int8",
-        PgText.cast(SqlType.Float8) == "float8",
-        PgText.cast(SqlType.Bytea) == "bytea",
-        PgText.cast(SqlType.Jsonb) == "jsonb",
-        PgText.cast(SqlType.Timestamptz) == "timestamptz",
-      ),
+        PgText.cast(SqlType.Int8) == Some("int8"),
+        PgText.cast(SqlType.Float8) == Some("float8"),
+        PgText.cast(SqlType.Bytea) == Some("bytea"),
+        PgText.cast(SqlType.Jsonb) == Some("jsonb"),
+        PgText.cast(SqlType.Timestamptz) == Some("timestamptz"),
+        PgText.cast(SqlType.Array(SqlType.Int4)) == Some("int4[]"),
+        PgText.cast(SqlType.Other(ServerType.Named("mood"))) == None,
+        PgText.encode(SqlValue.Null(SqlType.Text)) == None,
+      )
+    ,
+    test("array text quotes, escapes, and round-trips"):
+      check(Gen.listOf(Gen.string), Gen.listOf(Gen.int), Gen.boolean): (texts, ints, includeNull) =>
+        val textValues =
+          Chunk.fromIterable(texts.map(SqlValue.Text(_))) ++
+            (if includeNull then Chunk(SqlValue.Null(SqlType.Text)) else Chunk.empty)
+        val intValues             = Chunk.fromIterable(ints.map(SqlValue.Int4(_)))
+        val textArray             = SqlValue.array(SqlType.Text, textValues)
+        val intArray              = SqlValue.array(SqlType.Int4, intValues)
+        def back(value: SqlValue) =
+          PgText.encode(value).flatMap(text => PgText.decode(1009, text).toOption)
+        def backInt(value: SqlValue) =
+          PgText.encode(value).flatMap(text => PgText.decode(1007, text).toOption)
+        assertTrue(
+          textArray.exists(value => back(value).contains(value)),
+          intArray.exists(value => backInt(value).contains(value)),
+          SqlValue.array(SqlType.Int4, Chunk(SqlValue.Text("x"))).isLeft,
+        ),
   )
 end PgTextSpecs

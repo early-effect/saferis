@@ -3,7 +3,7 @@ package saferis.docs
 import org.postgresql.ds.PGSimpleDataSource
 import org.testcontainers.containers.PostgreSQLContainer
 import saferis.SqlSession
-import saferis.jdbc.JdbcSession
+import saferis.postgres.jdbc.PostgresJdbc
 import zio.*
 
 import javax.sql.DataSource
@@ -31,5 +31,5 @@ object DocsTransactor:
     ds
 
   val layer: ULayer[SqlSession] =
-    ZLayer.succeed(dataSource) >>> JdbcSession.layer()
+    ZLayer.succeed(dataSource) >>> PostgresJdbc.layer()
 end DocsTransactor

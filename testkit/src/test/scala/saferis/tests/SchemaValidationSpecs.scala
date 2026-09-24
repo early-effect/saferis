@@ -7,12 +7,11 @@ import saferis.mysql.MySQLDialect
 import saferis.postgres.PostgresDialect
 import saferis.spark.SparkDialect
 import saferis.sqlite.SQLiteDialect
-import zio.*
+import zio.{test as _, *}
 import zio.test.*
 
 /** Integration tests for Schema validation feature. */
-object SchemaValidationSpecs extends ZIOSpecDefault:
-  def spec = suite("run from SqlSessionConformance")()
+object SchemaValidationSpecs:
 
   given Dialect = PostgresDialect
 

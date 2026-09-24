@@ -58,7 +58,7 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
           case _ => false
       yield assertTrue(failed, calls.contains("commit"))
     ,
-    test("interrupting the body does not commit"):
+    test("interrupting the body rolls back and does not commit"):
       for
         log <- Ref.make(Chunk.empty[String])
         script = new Script(log, failCommit = false)
@@ -66,7 +66,24 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
         _     <- log.get.repeatUntil(_.contains("begin"))
         _     <- fiber.interrupt
         calls <- log.get
-      yield assertTrue(calls.contains("begin"), !calls.contains("commit")),
+      yield assertTrue(calls.contains("begin"), calls.contains("rollback"), !calls.contains("commit"))
+    ,
+    test("catching a failed stream still fails the transaction"):
+      for
+        log <- Ref.make(Chunk.empty[String])
+        script = new Script(log, failCommit = false, failCursor = true)
+        exit <- transact(
+          ZIO.serviceWithZIO[SqlSession]: session =>
+            val read: SqlRow => Either[SaferisError, Int] = _ => Right(1)
+            session.stream(SqlCommand(Chunk(SqlPiece.Text("stream-boom")), None))(read).runDrain.catchAll(_ => ZIO.unit)
+        ).provide(ZLayer.succeed(SqlSession.pooled(ZIO.succeed(script)))).exit
+        calls <- log.get
+      yield assertTrue(
+        exit.isFailure,
+        calls.exists(_.startsWith("cursor:")),
+        calls.contains("rollback"),
+        !calls.contains("commit"),
+      ),
   )
 
   private def run[A](log: Ref[Chunk[String]], failCommit: Boolean = false)(
@@ -74,7 +91,8 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
   ): ZIO[Any, SaferisError, A] =
     body.provide(ZLayer.succeed(SqlSession.pooled(ZIO.succeed(new Script(log, failCommit)))))
 
-  private final class Script(log: Ref[Chunk[String]], failCommit: Boolean) extends SqlConnection:
+  private final class Script(log: Ref[Chunk[String]], failCommit: Boolean, failCursor: Boolean = false)
+      extends SqlConnection:
     def execute(command: SqlCommand): IO[SaferisError, Long] =
       note(s"exec:${command.inspection}") *>
         ZIO
@@ -91,7 +109,14 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
       note(s"one:${command.inspection}").as(None)
 
     def cursor(command: SqlCommand): zio.stream.ZStream[Any, SaferisError, SqlRow] =
-      zio.stream.ZStream.empty
+      zio.stream.ZStream.unwrap:
+        note(s"cursor:${command.inspection}").as:
+          if failCursor then
+            zio.stream.ZStream.succeed(SqlRow(Chunk("n"), Chunk(SqlValue.Int4(1)))) ++
+              zio.stream.ZStream.fail(
+                SaferisError.QueryError(Some("42601"), "cursor failed", Some(command.inspection))
+              )
+          else zio.stream.ZStream.empty
 
     def begin: IO[SaferisError, Unit] =
       note("begin")

@@ -32,7 +32,45 @@ object PgText:
   /** Offset at the end of a `DateStyle=ISO` time or timestamptz, for example `+00` or `-05:30`. */
   private val zoneTail: Regex = """^(.+)([+-]\d{2}(?::\d{2}){0,2})$""".r
 
-  def sqlType(oid: Int): Option[SqlType] = oid match
+  /** Array OID to element OID. `1007` is `int4[]`, `1009` is `text[]`. */
+  private val arrayElement: Map[Int, Int] = Map(
+    1000 -> 16,
+    1001 -> 17,
+    1002 -> 18,
+    1003 -> 19,
+    1005 -> 21,
+    1007 -> 23,
+    1009 -> 25,
+    1014 -> 1042,
+    1015 -> 1043,
+    1016 -> 20,
+    1021 -> 700,
+    1022 -> 701,
+    1115 -> 1114,
+    1182 -> 1082,
+    1183 -> 1083,
+    1185 -> 1184,
+    1231 -> 1700,
+    1270 -> 1266,
+    199  -> 114,
+    2951 -> 2950,
+    3807 -> 3802,
+  )
+
+  private def elementOid(arrayOid: Int): Option[Int] =
+    arrayElement.get(arrayOid)
+
+  /** Array OID for an element OID, for example `23` (`int4`) to `1007` (`int4[]`). */
+  def arrayOid(elementOid: Int): Option[Int] =
+    arrayElement.collectFirst { case (array, element) if element == elementOid => array }
+
+  def sqlType(oid: Int): Option[SqlType] =
+    elementOid(oid) match
+      case Some(element) =>
+        Some(SqlType.Array(sqlType(element).getOrElse(SqlType.Other(ServerType.Oid(element)))))
+      case None => scalarType(oid)
+
+  private def scalarType(oid: Int): Option[SqlType] = oid match
     case 16                    => Some(SqlType.Bool)
     case 21                    => Some(SqlType.Int2)
     case 23                    => Some(SqlType.Int4)
@@ -73,32 +111,37 @@ object PgText:
     case SqlType.Other(ServerType.Both(_, id)) => Some(id)
     case SqlType.Other(ServerType.Named(_))    => None
 
-  /** Cast name for `$n::cast`. An array cast is `cast(element) + "[]"` at the call site. */
-  def cast(tpe: SqlType): String = tpe match
-    case SqlType.Bool        => "boolean"
-    case SqlType.Int2        => "int2"
-    case SqlType.Int4        => "int4"
-    case SqlType.Int8        => "int8"
-    case SqlType.Float4      => "float4"
-    case SqlType.Float8      => "float8"
-    case SqlType.Numeric     => "numeric"
-    case SqlType.VarChar     => "varchar"
-    case SqlType.Text        => "text"
-    case SqlType.Bytea       => "bytea"
-    case SqlType.Date        => "date"
-    case SqlType.Time        => "time"
-    case SqlType.Timestamp   => "timestamp"
-    case SqlType.Timestamptz => "timestamptz"
-    case SqlType.Jsonb       => "jsonb"
-    case SqlType.Uuid        => "uuid"
-    case SqlType.Array(_)    => "text"
-    case SqlType.Other(_)    => "text"
+  /** Cast name for `$n::cast`. `None` for [[SqlType.Other]]: an enum must not be cast to `text`. Arrays recurse. */
+  def cast(tpe: SqlType): Option[String] = tpe match
+    case SqlType.Bool           => Some("boolean")
+    case SqlType.Int2           => Some("int2")
+    case SqlType.Int4           => Some("int4")
+    case SqlType.Int8           => Some("int8")
+    case SqlType.Float4         => Some("float4")
+    case SqlType.Float8         => Some("float8")
+    case SqlType.Numeric        => Some("numeric")
+    case SqlType.VarChar        => Some("varchar")
+    case SqlType.Text           => Some("text")
+    case SqlType.Bytea          => Some("bytea")
+    case SqlType.Date           => Some("date")
+    case SqlType.Time           => Some("time")
+    case SqlType.Timestamp      => Some("timestamp")
+    case SqlType.Timestamptz    => Some("timestamptz")
+    case SqlType.Jsonb          => Some("jsonb")
+    case SqlType.Uuid           => Some("uuid")
+    case SqlType.Array(element) => cast(element).map(name => s"$name[]")
+    case SqlType.Other(_)       => None
 
   def typeLabel(oid: Int): String =
     sqlType(oid).fold(oid.toString)(_.productPrefix)
 
-  /** Unknown OIDs are [[SqlValue.Other]], not a failed row. */
+  /** Unknown OIDs are [[SqlValue.Other]], not a failed row. Array OIDs decode to [[SqlValue.Array]]. */
   def decode(oid: Int, text: String): Either[String, SqlValue] =
+    elementOid(oid) match
+      case Some(element) => decodeArray(element, text)
+      case None          => decodeScalar(oid, text)
+
+  private def decodeScalar(oid: Int, text: String): Either[String, SqlValue] =
     def bad(detail: String): Left[String, SqlValue] = Left(detail)
     oid match
       case 16 =>
@@ -163,28 +206,210 @@ object PgText:
           case None    => bad(s"not a uuid: $text")
       case _ => Right(SqlValue.Other(ServerType.Oid(oid), text))
     end match
-  end decode
+  end decodeScalar
 
-  def encode(value: SqlValue): String = value match
-    case SqlValue.Null(_)          => ""
-    case SqlValue.Bool(v)          => if v then "t" else "f"
-    case SqlValue.Int2(v)          => v.toString
-    case SqlValue.Int4(v)          => v.toString
-    case SqlValue.Int8(v)          => v.toString
-    case SqlValue.Float4(v)        => encodeFloat(v)
-    case SqlValue.Float8(v)        => encodeDouble(v)
-    case SqlValue.Numeric(v)       => v.underlying.toPlainString
-    case SqlValue.VarChar(v)       => v
-    case SqlValue.Text(v)          => v
-    case SqlValue.Bytea(v)         => encodeBytea(v)
-    case SqlValue.Date(v)          => v.toString
-    case SqlValue.Time(v)          => formatTime(v)
-    case SqlValue.Timestamp(v)     => formatTimestamp(v)
-    case SqlValue.Timestamptz(v)   => s"${formatTimestamp(LocalDateTime.ofInstant(v, ZoneOffset.UTC))}+00"
-    case SqlValue.Jsonb(v)         => v
-    case SqlValue.Uuid(v)          => v.toString
-    case SqlValue.Other(_, text)   => text
-    case SqlValue.Array(_, values) => values.map(encode).mkString("{", ",", "}")
+  /** `None` is SQL null. Null is not an empty string. */
+  def encode(value: SqlValue): Option[String] = value match
+    case SqlValue.Null(_)          => None
+    case SqlValue.Bool(v)          => Some(if v then "t" else "f")
+    case SqlValue.Int2(v)          => Some(v.toString)
+    case SqlValue.Int4(v)          => Some(v.toString)
+    case SqlValue.Int8(v)          => Some(v.toString)
+    case SqlValue.Float4(v)        => Some(encodeFloat(v))
+    case SqlValue.Float8(v)        => Some(encodeDouble(v))
+    case SqlValue.Numeric(v)       => Some(v.underlying.toPlainString)
+    case SqlValue.VarChar(v)       => Some(v)
+    case SqlValue.Text(v)          => Some(v)
+    case SqlValue.Bytea(v)         => Some(encodeBytea(v))
+    case SqlValue.Date(v)          => Some(v.toString)
+    case SqlValue.Time(v)          => Some(formatTime(v))
+    case SqlValue.Timestamp(v)     => Some(formatTimestamp(v))
+    case SqlValue.Timestamptz(v)   => Some(s"${formatTimestamp(LocalDateTime.ofInstant(v, ZoneOffset.UTC))}+00")
+    case SqlValue.Jsonb(v)         => Some(v)
+    case SqlValue.Uuid(v)          => Some(v.toString)
+    case SqlValue.Other(_, text)   => Some(text)
+    case SqlValue.Array(_, values) => Some(encodeArray(values))
+
+  private def encodeArray(values: Chunk[SqlValue]): String =
+    values.map(encodeMember).mkString("{", ",", "}")
+
+  private def encodeMember(value: SqlValue): String = value match
+    case SqlValue.Null(_)          => "NULL"
+    case SqlValue.Array(_, nested) => encodeArray(nested)
+    case other                     =>
+      encode(other) match
+        case None       => "NULL"
+        case Some(text) => quoteArrayElement(text)
+
+  /** Quote when empty, special, whitespace, or the unquoted null token. Escape `"` and `\` inside quotes. */
+  private def quoteArrayElement(text: String): String =
+    val quote = text.isEmpty ||
+      text.equalsIgnoreCase("NULL") ||
+      text.exists(c => c == '{' || c == '}' || c == ',' || c == '"' || c == '\\' || c.isWhitespace)
+    if !quote then text
+    else
+      val out = new StringBuilder(text.length + 2)
+      out.append('"')
+      text.foreach: c =>
+        if c == '"' || c == '\\' then out.append('\\')
+        out.append(c)
+      out.append('"')
+      out.toString
+  end quoteArrayElement
+
+  private def decodeArray(element: Int, text: String): Either[String, SqlValue] =
+    parseArray(text).flatMap: members =>
+      val elementType = sqlType(element).getOrElse(SqlType.Other(ServerType.Oid(element)))
+      val nested      = members.exists:
+        case ArrayMember.Nested(_) => true
+        case _                     => false
+      val memberType = if nested then SqlType.Array(elementType) else elementType
+      members
+        .foldLeft[Either[String, Chunk[SqlValue]]](Right(Chunk.empty)):
+          case (Left(err), _)       => Left(err)
+          case (Right(acc), member) => decodeMember(element, elementType, nested, member).map(acc :+ _)
+        .flatMap(values => SqlValue.array(memberType, values))
+
+  private def decodeMember(
+      element: Int,
+      elementType: SqlType,
+      nested: Boolean,
+      member: ArrayMember,
+  ): Either[String, SqlValue] = member match
+    case ArrayMember.Null =>
+      Right(SqlValue.Null(if nested then SqlType.Array(elementType) else elementType))
+    case ArrayMember.Nested(raw) => decodeArray(element, raw)
+    case ArrayMember.Text(raw)   =>
+      if nested then Left(s"flat element in a nested array: $raw")
+      else decode(element, raw)
+
+  private enum ArrayMember:
+    case Null
+    case Text(value: String)
+    case Nested(literal: String)
+
+  private def parseArray(text: String): Either[String, Chunk[ArrayMember]] =
+    if text.length < 2 || text.charAt(0) != '{' then Left(s"not an array: $text")
+    else parseMembers(text, 1)
+
+  private def parseMembers(text: String, start: Int): Either[String, Chunk[ArrayMember]] =
+    val out                   = Chunk.newBuilder[ArrayMember]
+    var i                     = start
+    var error: Option[String] = None
+    var closed                = false
+    if start < text.length && text.charAt(start) == '}' then
+      closed = true
+      i = start + 1
+    while i < text.length && error.isEmpty && !closed do
+      val c = text.charAt(i)
+      if c == '}' then
+        closed = true
+        i += 1
+      else if c == '"' then
+        quoted(text, i + 1) match
+          case Left(detail)       => error = Some(detail)
+          case Right(value, next) =>
+            out += ArrayMember.Text(value)
+            val step = separator(text, next)
+            if step < 0 then error = Some(s"bad array near $next")
+            else
+              closed = text.charAt(next) == '}' || (step > next && text.charAt(step - 1) == '}')
+              i = step
+      else if c == '{' then
+        val end = matchingBrace(text, i)
+        if end < 0 then error = Some("unclosed nested array")
+        else
+          out += ArrayMember.Nested(text.substring(i, end + 1))
+          val step = separator(text, end + 1)
+          if step < 0 then error = Some(s"bad array near ${end + 1}")
+          else
+            closed = text.charAt(end + 1) == '}'
+            i = if closed then end + 2 else step
+      else
+        val end = unquotedEnd(text, i)
+        val raw = text.substring(i, end)
+        if raw.equalsIgnoreCase("NULL") then out += ArrayMember.Null
+        else out += ArrayMember.Text(raw)
+        if end >= text.length then error = Some("unclosed array")
+        else if text.charAt(end) == '}' then
+          closed = true
+          i = end + 1
+        else if text.charAt(end) == ',' then i = end + 1
+        else error = Some(s"bad array near $end")
+      end if
+    end while
+    if error.nonEmpty then Left(error.get)
+    else if !closed then Left("unclosed array")
+    else Right(out.result())
+  end parseMembers
+
+  /** Index after a comma, or after a closing brace. Negative on a bad character. */
+  private def separator(text: String, at: Int): Int =
+    if at >= text.length then -1
+    else if text.charAt(at) == ',' then at + 1
+    else if text.charAt(at) == '}' then at + 1
+    else -1
+
+  private def unquotedEnd(text: String, at: Int): Int =
+    var i = at
+    while i < text.length && text.charAt(i) != ',' && text.charAt(i) != '}' do i += 1
+    i
+
+  private def matchingBrace(text: String, open: Int): Int =
+    var i     = open
+    var depth = 0
+    var quote = false
+    var done  = false
+    var found = -1
+    while i < text.length && !done do
+      val c = text.charAt(i)
+      if quote then
+        if c == '\\' && i + 1 < text.length then i += 2
+        else
+          if c == '"' then quote = false
+          i += 1
+      else if c == '"' then
+        quote = true
+        i += 1
+      else if c == '{' then
+        depth += 1
+        i += 1
+      else if c == '}' then
+        depth -= 1
+        if depth == 0 then
+          found = i
+          done = true
+        i += 1
+      else i += 1
+      end if
+    end while
+    found
+  end matchingBrace
+
+  private def quoted(text: String, at: Int): Either[String, (String, Int)] =
+    val out                   = new StringBuilder
+    var i                     = at
+    var closed                = false
+    var error: Option[String] = None
+    while i < text.length && error.isEmpty && !closed do
+      val c = text.charAt(i)
+      if c == '\\' then
+        if i + 1 >= text.length then error = Some("truncated array escape")
+        else
+          out.append(text.charAt(i + 1))
+          i += 2
+      else if c == '"' then
+        closed = true
+        i += 1
+      else
+        out.append(c)
+        i += 1
+      end if
+    end while
+    if error.nonEmpty then Left(error.get)
+    else if !closed then Left("unclosed array quote")
+    else Right((out.toString, i))
+  end quoted
 
   private def encodeFloat(v: Float): String =
     if v.isNaN then "NaN"

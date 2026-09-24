@@ -44,11 +44,12 @@ object MyVersions extends ZipxVersions:
 
   def coreLib  = library(provided(zio), provided(zioStreams), provided(zioJson))
   def coreTest = library(zioTest.test, zioTestSbt.test)
-  def jdbcLib  = library(provided(zio), provided(zioStreams), postgresql)
-  def jdbcTest = library(zioLoggingSlf4j.test, postgresqlTc.test, zioJson.test)
+  def jdbcLib         = library(provided(zio), provided(zioStreams))
+  def postgresJdbcLib = library(provided(zio), provided(zioStreams), postgresql)
+  def postgresJdbcTest = library(zioLoggingSlf4j.test, postgresqlTc.test, zioJson.test)
   def pgLib    = library(provided(zio), provided(zioStreams))
   def docsLib  = library(zio, zioStreams)
-  // postgresql comes from saferis-jdbc's compile dependency. A second test-scoped copy is redundant.
+  // postgresql comes from saferis-postgres-jdbc's compile dependency. A second test-scoped copy is redundant.
   def docsTest   = library(specularZioTest, specularTheme, postgresqlTc.test, slf4jNop.test)
   def testkitJvm     = library(postgresqlTc)
   def testkitTest    = library(zioJson.test)

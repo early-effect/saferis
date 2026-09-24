@@ -2,6 +2,7 @@ package saferis.docs
 
 import saferis.*
 import saferis.jdbc.*
+import saferis.postgres.jdbc.PostgresJdbc
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.*
@@ -33,7 +34,7 @@ A set fragment timeout wins over the aspect. The aspect wins over the session de
     section("Session-wide default")(
       exampleValue {
         // Every statement on this session is bounded by 30 seconds, unless a fragment or the aspect sets one.
-        val session = JdbcSession.layer(JdbcSessionConfig(defaultTimeout = Some(30.seconds)))
+        val session = PostgresJdbc.layer(JdbcSessionConfig(defaultTimeout = Some(30.seconds)))
         session
       }.assert(_ => assertTrue(true))
     ),

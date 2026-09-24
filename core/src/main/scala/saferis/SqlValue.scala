@@ -11,7 +11,12 @@ import java.time.LocalTime
 import java.time.ZoneOffset
 import java.util.UUID
 
-/** A server type Saferis does not model. A driver may know a name, an OID, or both. */
+/** A server type Saferis does not model. A driver may know a name, an OID, or both.
+  *
+  * The label is informational. JDBC reports `Named("mood")` and Node reports `Oid(16390)` for the same enum, and a user
+  * enum's OID differs per database. Match text with [[Codec.pgEnum]], not this label. A later driver can report
+  * [[ServerType.Both]] once it has resolved the OID.
+  */
 enum ServerType:
   case Named(name: String)
   case Oid(oid: Int)
@@ -60,7 +65,7 @@ enum SqlValue:
   case Timestamptz(value: java.time.Instant)
   case Jsonb(value: String)
   case Uuid(value: UUID)
-  case Array(element: SqlType, values: Chunk[SqlValue])
+  case Array private[saferis] (element: SqlType, values: Chunk[SqlValue])
   case Other(tpe: ServerType, text: String)
 
   def sqlType: SqlType = this match
@@ -86,6 +91,16 @@ enum SqlValue:
 end SqlValue
 
 object SqlValue:
+  /** Every member is `element` or `Null(element)`. A mismatch is not an array. */
+  def array(element: SqlType, values: Chunk[SqlValue]): Either[String, SqlValue] =
+    val mismatch = values.indexWhere(value => !memberOf(element, value))
+    if mismatch < 0 then Right(Array(element, values))
+    else Left(s"element $mismatch is ${values(mismatch).sqlType}, expected $element")
+
+  private def memberOf(element: SqlType, value: SqlValue): Boolean = value match
+    case Null(tpe) => tpe == element
+    case other     => other.sqlType == element
+
   private val timeLiteral: DateTimeFormatter =
     DateTimeFormatter.ofPattern("HH:mm:ss")
 
