@@ -19,7 +19,7 @@ import scala.scalajs.js.typedarray.Uint8Array
 import scala.util.control.NonFatal
 import scala.util.matching.Regex
 
-/** Casts, bind values, and `DateStyle=ISO` text. The cast name is a function of `PgType`, never user text. */
+/** Casts, bind values, and `DateStyle=ISO` text. The cast name is a function of `SqlType`, never user text. */
 private[saferis] object PgWire:
   private val dateFmt: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ROOT)
@@ -151,7 +151,7 @@ private[saferis] object PgWire:
   /** SQL null is `Null` before any JSON parse. JSON null arrives as the text `null`. */
   private def readCell(oid: Int, label: String, raw: js.Any): Either[SaferisError, SqlValue] =
     if isJsNull(raw) then
-      pgType(oid) match
+      sqlType(oid) match
         case Some(tpe) => Right(SqlValue.Null(tpe))
         case None      => unrecognized(label, oid)
     // Scala.js will not match `js.Any` as `String`. A non-string is a cell failure.
@@ -171,23 +171,23 @@ private[saferis] object PgWire:
           case _   => bad(s"expected t or f, found $text")
       case 21 =>
         text.toShortOption match
-          case Some(v) => Right(SqlValue.Int2(v))
+          case Some(v) => Right(SqlValue.SmallInt(v))
           case None    => bad(s"not an int2: $text")
       case 23 =>
         text.toIntOption match
-          case Some(v) => Right(SqlValue.Int4(v))
+          case Some(v) => Right(SqlValue.Integer(v))
           case None    => bad(s"not an int4: $text")
       case 20 =>
         text.toLongOption match
-          case Some(v) => Right(SqlValue.Int8(v))
+          case Some(v) => Right(SqlValue.BigInt(v))
           case None    => bad(s"not an int8: $text")
       case 700 =>
         text.toFloatOption match
-          case Some(v) => Right(SqlValue.Float4(v))
+          case Some(v) => Right(SqlValue.Real(v))
           case None    => bad(s"not a float4: $text")
       case 701 =>
         text.toDoubleOption match
-          case Some(v) => Right(SqlValue.Float8(v))
+          case Some(v) => Right(SqlValue.DoublePrecision(v))
           case None    => bad(s"not a float8: $text")
       case 1700 =>
         numeric(text) match
@@ -197,7 +197,7 @@ private[saferis] object PgWire:
       case 25 | 705              => Right(SqlValue.Text(text))
       case 17                    =>
         decodeBytea(text) match
-          case Right(bytes) => Right(SqlValue.Bytea(bytes))
+          case Right(bytes) => Right(SqlValue.Binary(bytes))
           case Left(detail) => bad(detail)
       case 1082 =>
         parseDate(text) match
@@ -217,9 +217,9 @@ private[saferis] object PgWire:
           case Left(detail) => bad(detail)
       case 1184 =>
         parseTimestamptz(text) match
-          case Right(v)     => Right(SqlValue.Timestamptz(v))
+          case Right(v)     => Right(SqlValue.TimestampTz(v))
           case Left(detail) => bad(detail)
-      case 114 | 3802 => Right(SqlValue.Jsonb(text))
+      case 114 | 3802 => Right(SqlValue.Json(text))
       case 2950       =>
         uuid(text) match
           case Some(v) => Right(SqlValue.Uuid(v))
@@ -232,63 +232,63 @@ private[saferis] object PgWire:
     Left(SaferisError.DecodingError(label, oid.toString, s"unrecognized oid $oid"))
 
   private def typeLabel(oid: Int): String =
-    pgType(oid).fold(oid.toString)(_.productPrefix)
+    sqlType(oid).fold(oid.toString)(_.productPrefix)
 
-  private def pgType(oid: Int): Option[PgType] = oid match
-    case 16                    => Some(PgType.Bool)
-    case 21                    => Some(PgType.Int2)
-    case 23                    => Some(PgType.Int4)
-    case 20                    => Some(PgType.Int8)
-    case 700                   => Some(PgType.Float4)
-    case 701                   => Some(PgType.Float8)
-    case 1700                  => Some(PgType.Numeric)
-    case 1043 | 18 | 19 | 1042 => Some(PgType.VarChar)
-    case 25 | 705              => Some(PgType.Text)
-    case 17                    => Some(PgType.Bytea)
-    case 1082                  => Some(PgType.Date)
-    case 1083 | 1266           => Some(PgType.Time)
-    case 1114                  => Some(PgType.Timestamp)
-    case 1184                  => Some(PgType.Timestamptz)
-    case 114 | 3802            => Some(PgType.Jsonb)
-    case 2950                  => Some(PgType.Uuid)
+  private def sqlType(oid: Int): Option[SqlType] = oid match
+    case 16                    => Some(SqlType.Bool)
+    case 21                    => Some(SqlType.SmallInt)
+    case 23                    => Some(SqlType.Integer)
+    case 20                    => Some(SqlType.BigInt)
+    case 700                   => Some(SqlType.Real)
+    case 701                   => Some(SqlType.DoublePrecision)
+    case 1700                  => Some(SqlType.Numeric)
+    case 1043 | 18 | 19 | 1042 => Some(SqlType.VarChar)
+    case 25 | 705              => Some(SqlType.Text)
+    case 17                    => Some(SqlType.Binary)
+    case 1082                  => Some(SqlType.Date)
+    case 1083 | 1266           => Some(SqlType.Time)
+    case 1114                  => Some(SqlType.Timestamp)
+    case 1184                  => Some(SqlType.TimestampTz)
+    case 114 | 3802            => Some(SqlType.Json)
+    case 2950                  => Some(SqlType.Uuid)
     case _                     => None
 
-  private def cast(tpe: PgType): String = tpe match
-    case PgType.Bool        => "boolean"
-    case PgType.Int2        => "int2"
-    case PgType.Int4        => "int4"
-    case PgType.Int8        => "int8"
-    case PgType.Float4      => "float4"
-    case PgType.Float8      => "float8"
-    case PgType.Numeric     => "numeric"
-    case PgType.VarChar     => "varchar"
-    case PgType.Text        => "text"
-    case PgType.Bytea       => "bytea"
-    case PgType.Date        => "date"
-    case PgType.Time        => "time"
-    case PgType.Timestamp   => "timestamp"
-    case PgType.Timestamptz => "timestamptz"
-    case PgType.Jsonb       => "jsonb"
-    case PgType.Uuid        => "uuid"
+  private def cast(tpe: SqlType): String = tpe match
+    case SqlType.Bool            => "boolean"
+    case SqlType.SmallInt        => "int2"
+    case SqlType.Integer         => "int4"
+    case SqlType.BigInt          => "int8"
+    case SqlType.Real            => "float4"
+    case SqlType.DoublePrecision => "float8"
+    case SqlType.Numeric         => "numeric"
+    case SqlType.VarChar         => "varchar"
+    case SqlType.Text            => "text"
+    case SqlType.Binary          => "bytea"
+    case SqlType.Date            => "date"
+    case SqlType.Time            => "time"
+    case SqlType.Timestamp       => "timestamp"
+    case SqlType.TimestampTz     => "timestamptz"
+    case SqlType.Json            => "jsonb"
+    case SqlType.Uuid            => "uuid"
 
   private def bind(value: SqlValue): js.Any = value match
-    case SqlValue.Null(_)        => jsNull
-    case SqlValue.Bool(v)        => js.Any.fromBoolean(v)
-    case SqlValue.Int2(v)        => js.Any.fromDouble(v.toDouble)
-    case SqlValue.Int4(v)        => js.Any.fromDouble(v.toDouble)
-    case SqlValue.Int8(v)        => v.toString
-    case SqlValue.Float4(v)      => js.Any.fromDouble(v.toDouble)
-    case SqlValue.Float8(v)      => js.Any.fromDouble(v)
-    case SqlValue.Numeric(v)     => v.underlying.toPlainString
-    case SqlValue.VarChar(v)     => v
-    case SqlValue.Text(v)        => v
-    case SqlValue.Bytea(v)       => bytea(v)
-    case SqlValue.Date(v)        => v.toString
-    case SqlValue.Time(v)        => formatTime(v)
-    case SqlValue.Timestamp(v)   => formatTimestamp(v)
-    case SqlValue.Timestamptz(v) => formatTimestamptz(v)
-    case SqlValue.Jsonb(v)       => v
-    case SqlValue.Uuid(v)        => v.toString
+    case SqlValue.Null(_)            => jsNull
+    case SqlValue.Bool(v)            => js.Any.fromBoolean(v)
+    case SqlValue.SmallInt(v)        => js.Any.fromDouble(v.toDouble)
+    case SqlValue.Integer(v)         => js.Any.fromDouble(v.toDouble)
+    case SqlValue.BigInt(v)          => v.toString
+    case SqlValue.Real(v)            => js.Any.fromDouble(v.toDouble)
+    case SqlValue.DoublePrecision(v) => js.Any.fromDouble(v)
+    case SqlValue.Numeric(v)         => v.underlying.toPlainString
+    case SqlValue.VarChar(v)         => v
+    case SqlValue.Text(v)            => v
+    case SqlValue.Binary(v)          => bytea(v)
+    case SqlValue.Date(v)            => v.toString
+    case SqlValue.Time(v)            => formatTime(v)
+    case SqlValue.Timestamp(v)       => formatTimestamp(v)
+    case SqlValue.TimestampTz(v)     => formatTimestamptz(v)
+    case SqlValue.Json(v)            => v
+    case SqlValue.Uuid(v)            => v.toString
 
   /** JS null. Stays inside the bind. Callers see `SqlValue.Null`, not this. */
   private def jsNull: js.Any = null

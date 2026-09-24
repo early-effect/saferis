@@ -56,7 +56,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
 
   private val reads =
     suite("reads raw DateStyle=ISO text")(
-      test("Int8 past 2^53-1 round-trips through $n::int8"):
+      test("BigInt past 2^53-1 round-trips through $n::int8"):
         for
           _        <- sql"drop table if exists pg_int8".dml
           _        <- sql"create table pg_int8 (n bigint)".dml
@@ -95,8 +95,8 @@ object PgSessionSpecs extends ZIOSpecDefault:
           rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(row => Right(row)))
           row = rows.head
         yield assertTrue(
-          row.at(0) == Right(SqlValue.Jsonb("null")),
-          row.at(1) == Right(SqlValue.Null(PgType.Jsonb)),
+          row.at(0) == Right(SqlValue.Json("null")),
+          row.at(1) == Right(SqlValue.Null(SqlType.Json)),
         )
       ,
       test("bpchar round-trips padded"):
@@ -111,7 +111,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
         for
           command <- sql"select ${1} as a, ${2} as a".toCommand
           rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(row => Right(row)))
-        yield assertTrue(rows.head.get("a") == Right(SqlValue.Int4(1)))
+        yield assertTrue(rows.head.get("a") == Right(SqlValue.Integer(1)))
       ,
       test("an unknown oid fails the cell with the oid"):
         for exit <- sql"select '1 day'::interval".queryValue[String].exit
