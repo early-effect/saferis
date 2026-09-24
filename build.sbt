@@ -72,26 +72,30 @@ val pgJsCiSetup = Steps.buildingWith("pg-js-ci") { ctx =>
   )
 }
 
-val prePullPostgres = Steps.built("pre-pull-postgres")(
+/** Pull `image` with retries, so a registry flake does not fail the suite. The tag matches the testkit container. */
+def prePull(id: String, image: String, label: String) = Steps.built(id)(
   Step
     .runRaw(
-      """|set -euo pipefail
-         |image=postgres:17
-         |max=5
-         |for attempt in $(seq 1 "$max"); do
-         |  if docker pull "$image"; then
-         |    exit 0
-         |  fi
-         |  if [ "$attempt" -eq "$max" ]; then
-         |    echo "Failed to pull $image after $max attempts" >&2
-         |    exit 1
-         |  fi
-         |  sleep $((attempt * 10))
-         |done
-         |""".stripMargin
+      s"""|set -euo pipefail
+          |image=$image
+          |max=5
+          |for attempt in $$(seq 1 "$$max"); do
+          |  if docker pull "$$image"; then
+          |    exit 0
+          |  fi
+          |  if [ "$$attempt" -eq "$$max" ]; then
+          |    echo "Failed to pull $$image after $$max attempts" >&2
+          |    exit 1
+          |  fi
+          |  sleep $$((attempt * 10))
+          |done
+          |""".stripMargin
     )
-    .named("Pre-pull Postgres image")
+    .named(s"Pre-pull $label image")
 )
+
+val prePullPostgres = prePull("pre-pull-postgres", "postgres:17", "Postgres")
+val prePullMysql    = prePull("pre-pull-mysql", "mysql:8.4", "MySQL")
 
 zipxJavaVersion      := JdkVersion("25")
 zipxWorkflowDispatch := true
@@ -109,11 +113,13 @@ zipxCapabilities ++= {
         LocalProject("postgresNative") / testFull,
         LocalProject("jdbc") / testFull,
         LocalProject("postgresJdbc") / testFull,
+        LocalProject("mysqlJdbc") / testFull,
+        LocalProject("sqliteJdbc") / testFull,
         LocalProject("docs") / specularSite,
       ),
       // GHA VMs are disposable; skip Ryuk so Hub flakes on testcontainers/ryuk cannot fail CI.
       env = Map("TESTCONTAINERS_RYUK_DISABLED" -> EnvValue.plain("true")),
-      extraSteps = prePullPostgres,
+      extraSteps = prePullPostgres ++ prePullMysql,
     ),
     // Node pg suite. Not part of verify: it needs npm, and it starts Postgres itself.
     // The `test` job must not wait on this one.
@@ -161,8 +167,9 @@ lazy val scalaVersions         = Seq(scala3Version)
 lazy val root = project
   .in(file("."))
   .aggregate(
-    (core.projectRefs ++ postgres.projectRefs ++ jdbc.projectRefs ++ postgresJdbc.projectRefs ++ pg.projectRefs ++
-      testkit.projectRefs ++ Seq[sbt.ProjectReference](docs, pgEsm))*
+    (core.projectRefs ++ postgres.projectRefs ++ jdbc.projectRefs ++ postgresJdbc.projectRefs ++
+      mysqlJdbc.projectRefs ++ sqliteJdbc.projectRefs ++ pg.projectRefs ++ testkit.projectRefs ++
+      Seq[sbt.ProjectReference](docs, pgEsm))*
   )
   .settings(
     name           := "saferis-root",
@@ -246,13 +253,45 @@ lazy val testkit = (projectMatrix in file("testkit"))
 // java.sql session. No database driver. A JdbcAdapter supplies bind, read, and errors.
 lazy val jdbc = (projectMatrix in file("jdbc"))
   .dependsOn(core)
+  // The bring-your-own-database spec runs the portable conformance suite on H2, with no Docker.
+  .dependsOn(testkit % "test->compile;test->test")
   .settings(commonSettings)
   .settings(publishSettings)
   .settings(MyVersions.jdbcLib)
   .settings(MyVersions.coreTest)
+  .settings(MyVersions.jdbcTest)
   .settings(
     name        := "saferis-jdbc",
     description := "JDBC SqlSession. Database behavior is a JdbcAdapter.",
+  )
+  .jvmPlatform(scalaVersions = scalaVersions)
+
+// MySQL JdbcAdapter on Connector/J. Pull this and saferis-jdbc for MySQL.
+lazy val mysqlJdbc = (projectMatrix in file("mysql-jdbc"))
+  .dependsOn(jdbc)
+  .dependsOn(testkit % "test->compile;test->test")
+  .settings(commonSettings)
+  .settings(publishSettings)
+  .settings(MyVersions.mysqlJdbcLib)
+  .settings(MyVersions.coreTest)
+  .settings(MyVersions.mysqlJdbcTest)
+  .settings(
+    name        := "saferis-mysql-jdbc",
+    description := "MySQL JdbcAdapter on Connector/J.",
+  )
+  .jvmPlatform(scalaVersions = scalaVersions)
+
+// SQLite JdbcAdapter on sqlite-jdbc. Pull this and saferis-jdbc for SQLite.
+lazy val sqliteJdbc = (projectMatrix in file("sqlite-jdbc"))
+  .dependsOn(jdbc)
+  .dependsOn(testkit % "test->compile;test->test")
+  .settings(commonSettings)
+  .settings(publishSettings)
+  .settings(MyVersions.sqliteJdbcLib)
+  .settings(MyVersions.coreTest)
+  .settings(
+    name        := "saferis-sqlite-jdbc",
+    description := "SQLite JdbcAdapter on sqlite-jdbc.",
   )
   .jvmPlatform(scalaVersions = scalaVersions)
 

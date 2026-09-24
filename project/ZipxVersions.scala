@@ -22,6 +22,10 @@ object MyVersions extends ZipxVersions:
 
   val postgresqlTc = Lib("org.testcontainers", "postgresql", "1.21.4").java
   val postgresql   = Lib("org.postgresql", "postgresql", "42.7.13").java
+  val mysqlTc      = Lib("org.testcontainers", "mysql", "1.21.4").java
+  val mysql        = Lib("com.mysql", "mysql-connector-j", "26.7.0").java
+  val sqlite       = Lib("org.xerial", "sqlite-jdbc", "3.53.4.0").java
+  val h2           = Lib("com.h2database", "h2", "2.5.250").java
   val slf4jNop     = Lib("org.slf4j", "slf4j-nop", "2.0.18").java
   val scaluzzi     = Lib("com.github.vovapolu", "scaluzzi", "0.1.23")
 
@@ -45,13 +49,17 @@ object MyVersions extends ZipxVersions:
   def coreLib  = library(provided(zio), provided(zioStreams), provided(zioJson))
   def coreTest = library(zioTest.test, zioTestSbt.test)
   def jdbcLib         = library(provided(zio), provided(zioStreams))
+  def jdbcTest        = library(h2.test)
   def postgresJdbcLib = library(provided(zio), provided(zioStreams), postgresql)
   def postgresJdbcTest = library(zioLoggingSlf4j.test, postgresqlTc.test, zioJson.test)
+  def mysqlJdbcLib     = library(provided(zio), provided(zioStreams), mysql)
+  def mysqlJdbcTest    = library(zioLoggingSlf4j.test)
+  def sqliteJdbcLib    = library(provided(zio), provided(zioStreams), sqlite)
   def pgLib    = library(provided(zio), provided(zioStreams))
   def docsLib  = library(zio, zioStreams)
   // postgresql comes from saferis-postgres-jdbc's compile dependency. A second test-scoped copy is redundant.
   def docsTest   = library(specularZioTest, specularTheme, postgresqlTc.test, slf4jNop.test)
-  def testkitJvm     = library(postgresqlTc)
+  def testkitJvm     = library(postgresqlTc, mysqlTc)
   def testkitTest    = library(zioJson.test)
   def nativeJavaTime = library(scalaJavaTime, scalaJavaTimeTzdb)
 end MyVersions

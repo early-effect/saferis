@@ -25,5 +25,5 @@ object PgConformanceSpecs extends ZIOSpecDefault:
     ) >>> NodeSession.layer
 
   def spec =
-    SqlSessionConformance.suite("node", sessions).provideShared(PostgresTestContainer.live)
+    SqlSessionConformance.postgres("node", sessions).provideShared(PostgresTestContainer.live)
 end PgConformanceSpecs

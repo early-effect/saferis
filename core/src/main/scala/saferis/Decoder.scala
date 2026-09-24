@@ -44,20 +44,32 @@ object Decoder:
       case SqlValue.Other(_, v) => Right(v)
       case other                => reject("varchar", other)
 
+  /** Any integer width, when the value fits. SQLite stores every integer as 64 bits, and `count(*)` is `int8` on
+    * Postgres, so the column width alone does not decide the Scala type.
+    */
+  private def integral(value: SqlValue): Option[Long] = value match
+    case SqlValue.Int2(v) => Some(v.toLong)
+    case SqlValue.Int4(v) => Some(v.toLong)
+    case SqlValue.Int8(v) => Some(v)
+    case _                => None
+
+  private def fits(expected: String, value: SqlValue, min: Long, max: Long): Either[DecodeError, Long] =
+    integral(value) match
+      case Some(v) if v >= min && v <= max => Right(v)
+      case Some(v)                         => Left(DecodeError(s"$v does not fit in $expected"))
+      case None                            => reject(expected, value)
+
   given short: Decoder[Short] with
-    def decode(value: SqlValue): Either[DecodeError, Short] = value match
-      case SqlValue.Int2(v) => Right(v)
-      case other            => reject("int2", other)
+    def decode(value: SqlValue): Either[DecodeError, Short] =
+      fits("int2", value, Short.MinValue.toLong, Short.MaxValue.toLong).map(_.toShort)
 
   given int: Decoder[Int] with
-    def decode(value: SqlValue): Either[DecodeError, Int] = value match
-      case SqlValue.Int4(v) => Right(v)
-      case other            => reject("int4", other)
+    def decode(value: SqlValue): Either[DecodeError, Int] =
+      fits("int4", value, Int.MinValue.toLong, Int.MaxValue.toLong).map(_.toInt)
 
   given long: Decoder[Long] with
-    def decode(value: SqlValue): Either[DecodeError, Long] = value match
-      case SqlValue.Int8(v) => Right(v)
-      case other            => reject("int8", other)
+    def decode(value: SqlValue): Either[DecodeError, Long] =
+      fits("int8", value, Long.MinValue, Long.MaxValue)
 
   given boolean: Decoder[Boolean] with
     def decode(value: SqlValue): Either[DecodeError, Boolean] = value match
@@ -72,6 +84,7 @@ object Decoder:
   given double: Decoder[Double] with
     def decode(value: SqlValue): Either[DecodeError, Double] = value match
       case SqlValue.Float8(v) => Right(v)
+      case SqlValue.Float4(v) => Right(v.toDouble)
       case other              => reject("float8", other)
 
   given bigDecimal: Decoder[BigDecimal] with

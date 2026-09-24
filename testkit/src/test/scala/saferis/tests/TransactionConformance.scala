@@ -5,10 +5,34 @@ import saferis.*
 import zio.{test as _, *}
 import zio.test.*
 
-/** Transaction behavior every driver has to share. No pool, listener, or socket assumptions. */
+/** Transaction behavior every driver has to share. No pool, listener, or socket assumptions, and only SQL that every
+  * database Saferis ships speaks.
+  *
+  * @param longStatement
+  *   A statement that runs for several seconds (`pg_sleep(5)`, MySQL `sleep(5)`), on a database that has one. The
+  *   timeout test runs only then.
+  */
 object TransactionConformance:
-  def conformance =
+  def conformance(longStatement: Option[SqlFragment]) =
     suite("transaction semantics")(
+      (portable ++ longStatement.toList.map(timeout))*
+    )
+
+  private def timeout(statement: SqlFragment) =
+    test("a one second cap cancels a long statement"):
+      for
+        command <- statement.withTimeout(1.second).toCommand
+        exit    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(_ => Right(()))).exit
+      yield assertTrue:
+        exit match
+          case Exit.Failure(cause) =>
+            cause.failureOption match
+              case Some(_: SaferisError.Timeout) => true
+              case _                             => false
+          case _ => false
+
+  private def portable =
+    List(
       test("a failed transact rolls back"):
         for
           _    <- sql"drop table if exists conformance_rollback".dml
@@ -75,16 +99,6 @@ object TransactionConformance:
               cause.failureOption match
                 case Some(SaferisError.UniqueViolation(_, message, _)) => message == "unique violation"
                 case _                                                 => false
-            case _ => false
-      ,
-      test("a one second cap cancels pg_sleep"):
-        for exit <- sql"select pg_sleep(5)".withTimeout(1.second).queryValue[Int].exit
-        yield assertTrue:
-          exit match
-            case Exit.Failure(cause) =>
-              cause.failureOption match
-                case Some(_: SaferisError.Timeout) => true
-                case _                             => false
             case _ => false
       ,
       test("catching a failed stream inside transact does not commit"):

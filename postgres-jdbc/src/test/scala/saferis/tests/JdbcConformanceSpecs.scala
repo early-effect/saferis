@@ -5,5 +5,5 @@ import zio.test.*
 object JdbcConformanceSpecs extends ZIOSpecDefault:
   def spec =
     SqlSessionConformance
-      .suite("jdbc", DataSourceProvider.session)
+      .postgres("jdbc", DataSourceProvider.session)
       .provideShared(PostgresTestContainer.live)
