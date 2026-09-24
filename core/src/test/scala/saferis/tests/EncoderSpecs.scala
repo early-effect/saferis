@@ -34,7 +34,7 @@ object EncoderSpecs extends ZIOSpecDefault:
     },
     test("optional none is a typed null") {
       val encoded = summon[Encoder[Option[Int]]].encode(None)
-      assertTrue(encoded == SqlValue.Null(SqlType.Integer))
+      assertTrue(encoded == SqlValue.Null(SqlType.Int4))
     },
     test("NaN and infinities are quoted float and double literals") {
       val floats  = summon[Encoder[Float]]

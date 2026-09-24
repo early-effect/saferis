@@ -12,9 +12,6 @@ final case class PgConfig(
     poolSize: Int = 10,
     ssl: Boolean = false,
     defaultTimeout: Option[Duration] = None,
-    retry: PgErrorInfo => Boolean = e => SqlState.defaultRetryable(e.code),
+    retry: ServerError => Boolean = SqlState.defaultRetryable,
     listener: SqlListener = SqlListener.noop,
 )
-
-/** Fields taken off a rejected `pg` error before classification. */
-final case class PgErrorInfo(code: Option[String], constraint: Option[String], message: String)

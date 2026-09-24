@@ -29,15 +29,15 @@ object SparkDialectSpecs extends ZIOSpecDefault:
       assertTrue(
         dialect.columnType(SqlType.VarChar) == "string" &&
           dialect.columnType(SqlType.Text) == "string" &&
-          dialect.columnType(SqlType.SmallInt) == "smallint" &&
-          dialect.columnType(SqlType.Integer) == "int" &&
-          dialect.columnType(SqlType.BigInt) == "bigint" &&
-          dialect.columnType(SqlType.Real) == "float" &&
-          dialect.columnType(SqlType.DoublePrecision) == "double" &&
+          dialect.columnType(SqlType.Int2) == "smallint" &&
+          dialect.columnType(SqlType.Int4) == "int" &&
+          dialect.columnType(SqlType.Int8) == "bigint" &&
+          dialect.columnType(SqlType.Float4) == "float" &&
+          dialect.columnType(SqlType.Float8) == "double" &&
           dialect.columnType(SqlType.Bool) == "boolean" &&
           dialect.columnType(SqlType.Date) == "date" &&
           dialect.columnType(SqlType.Timestamp) == "timestamp" &&
-          dialect.columnType(SqlType.Binary) == "binary" &&
+          dialect.columnType(SqlType.Bytea) == "binary" &&
           dialect.columnType(SqlType.Uuid) == "string"
       )
     },

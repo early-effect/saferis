@@ -16,12 +16,12 @@ object SQLiteDialect extends Dialect with ReturningSupport with CommonTableExpre
 
   // === Type Mappings ===
   def columnType(tpe: SqlType): String = tpe match
-    case SqlType.Bool                                             => "integer"
-    case SqlType.SmallInt | SqlType.Integer | SqlType.BigInt      => "integer"
-    case SqlType.Real | SqlType.DoublePrecision | SqlType.Numeric => "real"
-    case SqlType.Binary                                           => "blob"
-    case SqlType.VarChar | SqlType.Text | SqlType.Date | SqlType.Time | SqlType.Timestamp | SqlType.TimestampTz |
-        SqlType.Json | SqlType.Uuid =>
+    case SqlType.Bool                                      => "integer"
+    case SqlType.Int2 | SqlType.Int4 | SqlType.Int8        => "integer"
+    case SqlType.Float4 | SqlType.Float8 | SqlType.Numeric => "real"
+    case SqlType.Bytea                                     => "blob"
+    case SqlType.VarChar | SqlType.Text | SqlType.Date | SqlType.Time | SqlType.Timestamp | SqlType.Timestamptz |
+        SqlType.Jsonb | SqlType.Uuid | SqlType.Array(_) | SqlType.Other(_) =>
       "text"
 
   // === Auto-increment Syntax ===

@@ -109,8 +109,8 @@ object PgSessionSpecs extends ZIOSpecDefault:
           rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(row => Right(row)))
           row = rows.head
         yield assertTrue(
-          row.at(0) == Right(SqlValue.Json("null")),
-          row.at(1) == Right(SqlValue.Null(SqlType.Json)),
+          row.at(0) == Right(SqlValue.Jsonb("null")),
+          row.at(1) == Right(SqlValue.Null(SqlType.Jsonb)),
         )
       ,
       test("bpchar round-trips padded"):
@@ -125,16 +125,18 @@ object PgSessionSpecs extends ZIOSpecDefault:
         for
           command <- sql"select ${1} as a, ${2} as a".toCommand
           rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(row => Right(row)))
-        yield assertTrue(rows.head.get("a") == Right(SqlValue.Integer(1)))
+        yield assertTrue(rows.head.get("a") == Right(SqlValue.Int4(1)))
       ,
-      test("an unknown oid fails the cell with the oid"):
-        for exit <- sql"select '1 day'::interval".queryValue[String].exit
+      test("an unknown oid is Other and String reads its text"):
+        for
+          command <- sql"select '1 day'::interval".toCommand
+          rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(row => Right(row)))
+          text    <- sql"select '1 day'::interval".queryValue[String]
+          cell = rows.head.at(0)
         yield assertTrue:
-          exit match
-            case Exit.Failure(cause) =>
-              cause.failureOption match
-                case Some(SaferisError.DecodingError(_, _, detail)) => detail.contains("1186")
-                case _                                              => false
+          cell match
+            case Right(SqlValue.Other(ServerType.Oid(1186), raw)) =>
+              raw.contains("1") && text.exists(_.contains("1"))
             case _ => false
       ,
       test("stream emits rows through the server cursor"):

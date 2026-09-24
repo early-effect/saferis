@@ -5,14 +5,11 @@ import zio.test.*
 
 object RetryableSpecs extends ZIOSpecDefault:
 
-  private def classified(state: String, vendor: Boolean = false, timedOut: Boolean = false): SaferisError =
+  private def classified(state: String, vendor: Boolean = false): SaferisError =
     SqlState.classify(
-      Some(state),
-      s"server $state",
-      Some("constraint_name"),
+      ServerError(Some(state), s"server $state", Some("constraint_name")),
       Some("insert into t values ($1)"),
-      vendor,
-      timedOut,
+      _ => vendor,
     )
 
   private val classifyTests = suite("SqlState.classify")(
@@ -54,8 +51,8 @@ object RetryableSpecs extends ZIOSpecDefault:
     test("42 stays SyntaxError even when the vendor hook matches"):
       assertTrue(classified("42601", vendor = true).isInstanceOf[SaferisError.SyntaxError])
     ,
-    test("timeout wins over a vendor hook"):
-      val err = SqlState.classify(Some("42601"), "cancel", None, Some("select 1"), vendorRetry = true, timedOut = true)
+    test("57014 is Timeout even when the vendor hook matches"):
+      val err = SqlState.classify(ServerError(Some("57014"), "cancel"), Some("select 1"), _ => true)
       assertTrue(err.isInstanceOf[SaferisError.Timeout])
     ,
     test("vendor code is Retryable"):

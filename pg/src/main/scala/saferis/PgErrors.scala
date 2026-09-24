@@ -4,10 +4,10 @@ import scala.scalajs.js
 
 /** Reads `code`, `constraint`, and `message` off a rejected `pg` value. */
 private[saferis] object PgErrors:
-  def info(t: Throwable): PgErrorInfo =
+  def info(t: Throwable): ServerError =
     t match
       case js.JavaScriptException(value) => fromDynamic(value)
-      case other                         => PgErrorInfo(None, None, messageOf(other))
+      case other                         => ServerError(None, messageOf(other))
 
   def message(t: Throwable): String =
     val text = info(t).message
@@ -28,11 +28,15 @@ private[saferis] object PgErrors:
   private def isSqlState(code: String): Boolean =
     code.length == 5 && code.forall(c => c.isDigit || (c >= 'A' && c <= 'Z'))
 
-  private def fromDynamic(value: Any): PgErrorInfo =
-    if value == null then PgErrorInfo(None, None, "connection failed")
+  private def fromDynamic(value: Any): ServerError =
+    if value == null then ServerError(None, "connection failed")
     else
       val dyn = value.asInstanceOf[js.Dynamic]
-      PgErrorInfo(text(dyn, "code"), text(dyn, "constraint"), text(dyn, "message").getOrElse(value.toString))
+      ServerError(
+        text(dyn, "code"),
+        text(dyn, "message").getOrElse(value.toString),
+        text(dyn, "constraint"),
+      )
 
   private def text(dyn: js.Dynamic, name: String): Option[String] =
     val value = dyn.selectDynamic(name)

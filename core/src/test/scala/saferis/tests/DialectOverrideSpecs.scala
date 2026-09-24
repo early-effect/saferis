@@ -48,13 +48,13 @@ object DialectOverrideSpecs extends ZIOSpecDefault:
     test("Switching dialects changes column types for standard types") {
       // Test with default PostgreSQL
       val pgDialect = summon[Dialect]
-      val pgIntType = pgDialect.columnType(SqlType.Integer)
+      val pgIntType = pgDialect.columnType(SqlType.Int4)
 
       // Test with MySQL in a nested scope
       val mysqlIntType =
         import saferis.mysql.given
         val dialect = summon[Dialect]
-        dialect.columnType(SqlType.Integer)
+        dialect.columnType(SqlType.Int4)
 
       assertTrue(pgIntType == "integer") &&
       assertTrue(mysqlIntType == "int")

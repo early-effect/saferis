@@ -58,7 +58,7 @@ object JdbcTypeDefaultsSpecs extends ZIOSpecDefault:
     test("Json[A] encoder uses jsonb") {
       final case class Metadata(tags: List[String], version: Int) derives JsonCodec
       val encoder = summon[Encoder[Json[Metadata]]]
-      assertTrue(encoder.sqlType == SqlType.Json) &&
+      assertTrue(encoder.sqlType == SqlType.Jsonb) &&
       assertTrue(encoder.columnType == "jsonb")
     },
     test("Json[A] can be used in table definitions") {

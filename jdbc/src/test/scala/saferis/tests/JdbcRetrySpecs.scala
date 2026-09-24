@@ -6,12 +6,10 @@ import zio.*
 import zio.test.*
 import zio.test.Assertion.*
 
-import java.sql.SQLException
-
 object JdbcRetrySpecs extends ZIOSpecDefault:
 
-  private val syntaxIsRetryable: SQLException => Boolean =
-    e => Option(e.getSQLState).exists(_.startsWith("42"))
+  private val syntaxIsRetryable: ServerError => Boolean =
+    e => e.sqlState.exists(_.startsWith("42"))
 
   private val customClassifierLayer =
     DataSourceProvider.configured(JdbcSessionConfig(retry = syntaxIsRetryable))

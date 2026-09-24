@@ -4,7 +4,6 @@ import zio.Cause
 import zio.Chunk
 import zio.Clock
 import zio.Duration
-import zio.durationInt
 import zio.Exit
 import zio.IO
 import zio.Ref
@@ -267,18 +266,18 @@ private final class NodeSession(
       exit  <- effect.exit
       end   <- Clock.nanoTime
       outcome = exit match
-        case Exit.Success(value) => Right(rows(value))
-        case Exit.Failure(cause) => Left(failureOf(cause))
+        case Exit.Success(value) => StatementOutcome.Completed(rows(value))
+        case Exit.Failure(cause) =>
+          if cause.isInterruptedOnly then StatementOutcome.Interrupted
+          else
+            cause.failureOption match
+              case Some(err: SaferisError) => StatementOutcome.Failed(err)
+              case _                       => StatementOutcome.Died
       _ <- config.listener.executed(
         SqlExecuted(sql, Duration.fromNanos(math.max(0L, end - start)), timeout, outcome)
       )
       value <- exit.foldExit(ZIO.failCause, ZIO.succeed)
     yield value
-
-  private def failureOf(cause: Cause[Any]): SaferisError =
-    cause.failureOption match
-      case Some(err: SaferisError) => err
-      case _                       => SaferisError.Unexpected("interrupted")
 
   private def guard(state: PgTxn, sql: String)(using Trace): IO[SaferisError, Unit] =
     state.failure.get.flatMap:
@@ -295,10 +294,11 @@ private final class NodeSession(
     ZIO.when(PgErrors.broken(err))(lease.destroy.set(true)).unit
 
   private def classify(t: Throwable, sql: Option[String]): SaferisError =
-    val info     = PgErrors.info(t)
-    val timedOut = info.code.contains("57014")
-    val vendor   = !timedOut && config.retry(info)
-    SqlState.classify(info.code, info.message, info.constraint, sql, vendor, timedOut)
+    val info  = PgErrors.info(t)
+    val error =
+      if info.sqlState.contains("57014") then info
+      else info
+    SqlState.classify(error, sql, config.retry)
 
   private def applied(command: SqlCommand): Option[Duration] =
     command.timeout.orElse(config.defaultTimeout)
@@ -407,33 +407,29 @@ private final class NodeSession(
       outcome  <-
         if txn.isDefined || inFlight || !exit.isSuccess then streamOutcome(count, exit)
         else
-          protocol(lease, "COMMIT").interruptible
-            .timeout(2.seconds)
-            .provideLayer(ZLayer.succeed(Clock.ClockLive))
-            .foldZIO(
-              err => ZIO.succeed(Left(err)),
-              {
-                case Some(_) =>
-                  lease.committed.set(true) *> count.get.map(n => Right(n))
-                case None =>
-                  lease.busy.set(true) *>
-                    lease.destroy.set(true) *>
-                    ZIO.succeed(Left(SaferisError.ConnectionError("cursor commit did not finish")))
-              },
-            )
+          protocol(lease, "COMMIT").interruptible.foldZIO(
+            err => ZIO.succeed(StatementOutcome.Failed(err)),
+            _ => lease.committed.set(true) *> count.get.map(n => StatementOutcome.Completed(n)),
+          )
       _ <- reportCursor(sql, timeout, start, outcome)
     yield ()
 
-  private def streamOutcome(count: Ref[Long], exit: Exit[Any, Any])(using Trace): UIO[Either[SaferisError, Long]] =
+  private def streamOutcome(count: Ref[Long], exit: Exit[Any, Any])(using Trace): UIO[StatementOutcome] =
     exit match
-      case Exit.Success(_)     => count.get.map(n => Right(n))
-      case Exit.Failure(cause) => ZIO.succeed(Left(failureOf(cause)))
+      case Exit.Success(_)     => count.get.map(StatementOutcome.Completed(_))
+      case Exit.Failure(cause) =>
+        ZIO.succeed:
+          if cause.isInterruptedOnly then StatementOutcome.Interrupted
+          else
+            cause.failureOption match
+              case Some(err: SaferisError) => StatementOutcome.Failed(err)
+              case _                       => StatementOutcome.Died
 
   private def reportCursor(
       sql: String,
       timeout: Option[Duration],
       start: Long,
-      outcome: Either[SaferisError, Long],
+      outcome: StatementOutcome,
   )(using Trace): UIO[Unit] =
     Clock.nanoTime.flatMap: end =>
       config.listener.executed(

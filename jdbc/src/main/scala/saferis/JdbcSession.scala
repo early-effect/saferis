@@ -2,11 +2,8 @@ package saferis
 
 import org.postgresql.util.PGobject
 import org.postgresql.util.PSQLException
-import zio.Cause
 import zio.Chunk
-import zio.Clock
 import zio.Duration
-import zio.Exit
 import zio.IO
 import zio.Ref
 import zio.Scope
@@ -32,22 +29,34 @@ import java.util.Locale
 import java.util.UUID
 import javax.sql.DataSource
 
-/** JDBC driver settings. `configure` runs once per checkout, before `BEGIN` or any user statement. */
+/** JDBC driver settings. `configure` runs once per checkout, before `BEGIN` or any user statement. `retry` sees a
+  * `ServerError`, the same type every driver classifies.
+  */
 final case class JdbcSessionConfig(
     defaultTimeout: Option[Duration] = None,
     configure: Connection => Unit = _ => (),
-    retry: SQLException => Boolean = e => SqlState.defaultRetryable(Option(e.getSQLState)),
-    listener: SqlListener = SqlListener.noop,
+    retry: ServerError => Boolean = SqlState.defaultRetryable,
 )
 
 object JdbcSession:
   def layer(config: JdbcSessionConfig = JdbcSessionConfig()): URLayer[DataSource, SqlSession] =
-    ZLayer.fromFunction((ds: DataSource) => new JdbcSession(ds, config, None))
+    ZLayer.fromFunction: (ds: DataSource) =>
+      SqlSession.pooled(checkout(ds, config), config.defaultTimeout)
 
-  private val FetchSize = 256
+  private def checkout(ds: DataSource, config: JdbcSessionConfig): ZIO[Scope, SaferisError, SqlConnection] =
+    ZIO.acquireRelease(
+      for
+        conn      <- ZIO.attemptBlocking(ds.getConnection()).mapError(t => SaferisError.ConnectionError(messageOf(t)))
+        inTxn     <- Ref.make(false)
+        committed <- Ref.make(false)
+        autoCommitOff <- Ref.make(false)
+      yield new JdbcConnection(conn, config, inTxn, committed, autoCommitOff)
+    )(_.close)
+
+  private[saferis] val FetchSize = 256
 
   /** Whole seconds, round up, minimum 1. `setQueryTimeout(0)` means no limit. Infinity is `Int.MaxValue` seconds. */
-  private def toJdbcSeconds(d: Duration): Int =
+  private[saferis] def toJdbcSeconds(d: Duration): Int =
     if d == Duration.Infinity then Int.MaxValue
     else
       val seconds       = d.getSeconds
@@ -57,255 +66,136 @@ object JdbcSession:
       else if nanosFraction > 0 then if seconds + 1L >= Int.MaxValue.toLong then Int.MaxValue else (seconds + 1L).toInt
       else seconds.toInt
 
-  private def jdbcType(tpe: SqlType): Int = tpe match
-    case SqlType.Bool            => java.sql.Types.BOOLEAN
-    case SqlType.SmallInt        => java.sql.Types.SMALLINT
-    case SqlType.Integer         => java.sql.Types.INTEGER
-    case SqlType.BigInt          => java.sql.Types.BIGINT
-    case SqlType.Real            => java.sql.Types.REAL
-    case SqlType.DoublePrecision => java.sql.Types.DOUBLE
-    case SqlType.Numeric         => java.sql.Types.NUMERIC
-    case SqlType.VarChar         => java.sql.Types.VARCHAR
-    case SqlType.Text            => java.sql.Types.LONGVARCHAR
-    case SqlType.Binary          => java.sql.Types.BINARY
-    case SqlType.Date            => java.sql.Types.DATE
-    case SqlType.Time            => java.sql.Types.TIME
-    case SqlType.Timestamp       => java.sql.Types.TIMESTAMP
-    case SqlType.TimestampTz     => java.sql.Types.TIMESTAMP_WITH_TIMEZONE
-    case SqlType.Json            => java.sql.Types.OTHER
-    case SqlType.Uuid            => java.sql.Types.OTHER
+  private[saferis] def jdbcType(tpe: SqlType): Int = tpe match
+    case SqlType.Bool        => java.sql.Types.BOOLEAN
+    case SqlType.Int2        => java.sql.Types.SMALLINT
+    case SqlType.Int4        => java.sql.Types.INTEGER
+    case SqlType.Int8        => java.sql.Types.BIGINT
+    case SqlType.Float4      => java.sql.Types.REAL
+    case SqlType.Float8      => java.sql.Types.DOUBLE
+    case SqlType.Numeric     => java.sql.Types.NUMERIC
+    case SqlType.VarChar     => java.sql.Types.VARCHAR
+    case SqlType.Text        => java.sql.Types.LONGVARCHAR
+    case SqlType.Bytea       => java.sql.Types.BINARY
+    case SqlType.Date        => java.sql.Types.DATE
+    case SqlType.Time        => java.sql.Types.TIME
+    case SqlType.Timestamp   => java.sql.Types.TIMESTAMP
+    case SqlType.Timestamptz => java.sql.Types.TIMESTAMP_WITH_TIMEZONE
+    case SqlType.Jsonb       => java.sql.Types.OTHER
+    case SqlType.Uuid        => java.sql.Types.OTHER
+    case SqlType.Array(_)    => java.sql.Types.ARRAY
+    case SqlType.Other(_)    => java.sql.Types.OTHER
 
-  private def messageOf(t: Throwable): String =
+  private[saferis] def messageOf(t: Throwable): String =
     Option(t.getMessage).filter(_.nonEmpty).getOrElse(t.getClass.getName)
 end JdbcSession
 
-private final class Txn(val connection: Connection, val failure: Ref[Option[SaferisError]])
-
-private final class JdbcSession(
-    dataSource: DataSource,
+private final class JdbcConnection(
+    conn: Connection,
     config: JdbcSessionConfig,
-    txn: Option[Txn],
-) extends SqlSession:
+    inTxn: Ref[Boolean],
+    committed: Ref[Boolean],
+    autoCommitOff: Ref[Boolean],
+) extends SqlConnection:
 
   import JdbcSession.*
 
-  def defaultTimeout: Option[Duration] = config.defaultTimeout
+  def execute(command: SqlCommand): IO[SaferisError, Long] =
+    val sql = render(command)
+    runExec(command, sql, command.timeout)
 
-  def exec(command: SqlCommand): IO[SaferisError, Long] =
-    val sql     = render(command)
-    val timeout = applied(command)
-    observed(sql, timeout, runExec(command, sql, timeout), identity)
+  def query(command: SqlCommand): IO[SaferisError, Chunk[SqlRow]] =
+    val sql = render(command)
+    runRows(command, sql, command.timeout)
 
-  def query[A](command: SqlCommand)(read: SqlRow => Either[SaferisError, A]): IO[SaferisError, Chunk[A]] =
-    val sql     = render(command)
-    val timeout = applied(command)
-    observed(sql, timeout, runQuery(command, sql, timeout, read), rows => rows.length.toLong)
+  def queryAtMostOne(command: SqlCommand): IO[SaferisError, Option[SqlRow]] =
+    val sql = render(command)
+    runAtMostOne(command, sql, command.timeout)
 
-  def queryAtMostOne[A](command: SqlCommand)(read: SqlRow => Either[SaferisError, A]): IO[SaferisError, Option[A]] =
-    val sql     = render(command)
-    val timeout = applied(command)
-    observed(sql, timeout, runQueryAtMostOne(command, sql, timeout, read), row => if row.isDefined then 1L else 0L)
+  def cursor(command: SqlCommand): ZStream[Any, SaferisError, SqlRow] =
+    runCursor(command, render(command), command.timeout)
 
-  def stream[A](command: SqlCommand)(read: SqlRow => Either[SaferisError, A]): ZStream[Any, SaferisError, A] =
-    val sql     = render(command)
-    val timeout = applied(command)
-    ZStream.unwrap:
-      guard(sql).foldZIO(
-        err =>
-          config.listener
-            .executed(SqlExecuted(sql, Duration.Zero, timeout, Left(err)))
-            .as(ZStream.fail(err)),
-        _ => ZIO.succeed(runStream(command, sql, timeout, read)),
-      )
-  end stream
+  def begin: IO[SaferisError, Unit] =
+    configure(conn) *>
+      driver(None, ZIO.attemptBlocking(conn.setAutoCommit(false))) *>
+      autoCommitOff.set(true) *>
+      committed.set(false) *>
+      inTxn.set(true)
 
-  def transact[R, A](body: ZIO[SqlSession & R, SaferisError, A]): ZIO[R, SaferisError, A] =
-    txn match
-      case Some(_) => body.provideSomeLayer[R](ZLayer.succeed[SqlSession](this))
-      case None    =>
-        ZIO.scoped:
-          for
-            conn      <- checkout
-            _         <- configure(conn)
-            _         <- ZIO.attemptBlocking(conn.setAutoCommit(false)).mapError(t => classifyThrowable(t, None))
-            failure   <- Ref.make[Option[SaferisError]](None)
-            committed <- Ref.make(false)
-            _         <- ZIO.addFinalizer(
-              committed.get.flatMap: done =>
-                ZIO.unless(done)(ZIO.attemptBlocking(conn.rollback()).ignore)
-            )
-            child = new JdbcSession(dataSource, config, Some(new Txn(conn, failure)))
-            exit   <- body.provideSomeLayer[R](ZLayer.succeed[SqlSession](child)).exit
-            result <- exit match
-              case Exit.Success(value) =>
-                failure.get.flatMap:
-                  case Some(err) => ZIO.fail(err)
-                  case None      =>
-                    ZIO.attemptBlocking(conn.commit()).mapError(t => classifyThrowable(t, None)) *>
-                      committed.set(true).as(value)
-              case Exit.Failure(cause) => ZIO.failCause(cause)
-          yield result
+  def commit: IO[SaferisError, Unit] =
+    driver(None, ZIO.attemptBlocking(conn.commit())) *> committed.set(true) *> inTxn.set(false)
+
+  def rollback: UIO[Unit] =
+    inTxn.get.flatMap: open =>
+      ZIO.when(open)(ZIO.attemptBlocking(conn.rollback()).ignore *> inTxn.set(false)).unit
+
+  /** Put autocommit back before the pool sees this connection again. */
+  def close: UIO[Unit] =
+    rollback *>
+      autoCommitOff.get.flatMap: touched =>
+        ZIO.when(touched)(ZIO.attemptBlocking(conn.setAutoCommit(true)).ignore) *>
+          ZIO.attemptBlocking(conn.close()).ignore
 
   private def runExec(command: SqlCommand, sql: String, timeout: Option[Duration])(using
       Trace
   ): IO[SaferisError, Long] =
-    guard(sql) *> withConnection: conn =>
-      withStatement(conn, command, sql, timeout, None): ps =>
-        driver(sql, ZIO.attemptBlocking(ps.executeLargeUpdate()))
+    withStatement(conn, command, sql, timeout, None): ps =>
+      driver(Some(sql), ZIO.attemptBlocking(ps.executeLargeUpdate()))
 
-  private def runQuery[A](
+  private def runRows(command: SqlCommand, sql: String, timeout: Option[Duration])(using
+      Trace
+  ): IO[SaferisError, Chunk[SqlRow]] =
+    withStatement(conn, command, sql, timeout, None): ps =>
+      ZIO.acquireReleaseWith(
+        driver(Some(sql), ZIO.attemptBlocking(ps.executeQuery()))
+      )(rs => ZIO.attemptBlocking(rs.close()).ignore): rs =>
+        driver(Some(sql), ZIO.attemptBlocking(JdbcReads.materialize(rs))).flatMap:
+          case Left(err)   => ZIO.fail(err)
+          case Right(rows) => ZIO.succeed(rows)
+
+  private def runAtMostOne(command: SqlCommand, sql: String, timeout: Option[Duration])(using
+      Trace
+  ): IO[SaferisError, Option[SqlRow]] =
+    withStatement(conn, command, sql, timeout, None): ps =>
+      ZIO.acquireReleaseWith(
+        driver(Some(sql), ZIO.attemptBlocking(ps.executeQuery()))
+      )(rs => ZIO.attemptBlocking(rs.close()).ignore): rs =>
+        driver(Some(sql), ZIO.attemptBlocking(rs.next())).flatMap: hasRow =>
+          if !hasRow then ZIO.succeed(None)
+          else
+            driver(Some(sql), ZIO.attemptBlocking(JdbcReads.readRow(rs))).flatMap:
+              case Left(err)  => ZIO.fail(err)
+              case Right(row) => ZIO.succeed(Some(row))
+
+  private def runCursor(
       command: SqlCommand,
       sql: String,
       timeout: Option[Duration],
-      read: SqlRow => Either[SaferisError, A],
-  )(using Trace): IO[SaferisError, Chunk[A]] =
-    guard(sql) *> withConnection: conn =>
-      withStatement(conn, command, sql, timeout, None): ps =>
-        ZIO.acquireReleaseWith(
-          driver(sql, ZIO.attemptBlocking(ps.executeQuery()))
-        )(rs => ZIO.attemptBlocking(rs.close()).ignore): rs =>
-          driver(sql, ZIO.attemptBlocking(JdbcReads.materialize(rs))).flatMap:
-            case Left(err)   => ZIO.fail(err)
-            case Right(rows) => ZIO.fromEither(decodeRows(rows, read))
-
-  private def runQueryAtMostOne[A](
-      command: SqlCommand,
-      sql: String,
-      timeout: Option[Duration],
-      read: SqlRow => Either[SaferisError, A],
-  )(using Trace): IO[SaferisError, Option[A]] =
-    guard(sql) *> withConnection: conn =>
-      withStatement(conn, command, sql, timeout, None): ps =>
-        ZIO.acquireReleaseWith(
-          driver(sql, ZIO.attemptBlocking(ps.executeQuery()))
-        )(rs => ZIO.attemptBlocking(rs.close()).ignore): rs =>
-          driver(sql, ZIO.attemptBlocking(rs.next())).flatMap: hasRow =>
-            if !hasRow then ZIO.succeed(None)
-            else
-              driver(sql, ZIO.attemptBlocking(JdbcReads.readRow(rs))).flatMap:
-                case Left(err)  => ZIO.fail(err)
-                case Right(row) =>
-                  read(row) match
-                    case Left(err)    => ZIO.fail(err)
-                    case Right(value) => ZIO.succeed(Some(value))
-
-  private def runStream[A](
-      command: SqlCommand,
-      sql: String,
-      timeout: Option[Duration],
-      read: SqlRow => Either[SaferisError, A],
-  ): ZStream[Any, SaferisError, A] =
+  ): ZStream[Any, SaferisError, SqlRow] =
     ZStream.unwrapScoped:
       for
-        start     <- Clock.nanoTime
-        count     <- Ref.make(0L)
-        began     <- Ref.make(false)
-        committed <- Ref.make(false)
-        conn      <- txn match
-          case Some(state) => ZIO.succeed(state.connection)
-          case None        => checkout
-        _ <- ZIO.addFinalizerExit(exit => finishStream(conn, began, committed, count, start, sql, timeout, exit))
-        _ <- ZIO.when(txn.isEmpty)(configure(conn))
-        _ <- ZIO.when(txn.isEmpty)(
-          driver(sql, ZIO.attemptBlocking(conn.setAutoCommit(false))) *> began.set(true)
-        )
-        ps <- ZIO.acquireRelease(openStatement(conn, command, sql, timeout, Some(FetchSize)))(closeStatement)
-        rs <- ZIO.acquireRelease(driver(sql, ZIO.attemptBlocking(ps.executeQuery())))(rs =>
+        already <- inTxn.get
+        _       <- ZIO.unless(already)(begin)
+        ps      <- ZIO.acquireRelease(openStatement(conn, command, sql, timeout, Some(FetchSize)))(closeStatement)
+        rs      <- ZIO.acquireRelease(driver(Some(sql), ZIO.attemptBlocking(ps.executeQuery())))(rs =>
           ZIO.attemptBlocking(rs.close()).ignore
         )
       yield
         val pulls = ZStream.repeatZIOOption:
-          driver(sql, ZIO.attemptBlocking(rs.next()))
+          driver(Some(sql), ZIO.attemptBlocking(rs.next()))
             .mapError(err => Some(err))
             .flatMap: hasNext =>
               if !hasNext then ZIO.fail(None)
               else
-                driver(sql, ZIO.attemptBlocking(JdbcReads.readRow(rs)))
+                driver(Some(sql), ZIO.attemptBlocking(JdbcReads.readRow(rs)))
                   .mapError(err => Some(err))
                   .flatMap:
                     case Left(err)  => ZIO.fail(Some(err))
-                    case Right(row) =>
-                      read(row) match
-                        case Left(err)    => ZIO.fail(Some(err))
-                        case Right(value) => count.update(_ + 1).as(value)
+                    case Right(row) => ZIO.succeed(row)
         val commit =
-          if txn.isEmpty then
-            ZStream.execute(
-              ZIO.attemptBlocking(conn.commit()).mapError(t => classifyThrowable(t, Some(sql))) *>
-                committed.set(true)
-            )
-          else ZStream.empty
+          if already then ZStream.empty
+          else ZStream.execute(this.commit)
         pulls ++ commit
-
-  /** Rollback only when a pool read transaction was opened and `COMMIT` did not happen. Cursor and connection close are
-    * the other finalizers. A failed rollback does not replace the stream error. Statement failures are recorded by
-    * `driver`, not here: interrupt, defect, and `DecodingError` do not abort the transaction.
-    */
-  private def finishStream(
-      conn: Connection,
-      began: Ref[Boolean],
-      committed: Ref[Boolean],
-      count: Ref[Long],
-      start: Long,
-      sql: String,
-      timeout: Option[Duration],
-      exit: Exit[Any, Any],
-  )(using Trace): UIO[Unit] =
-    for
-      n       <- count.get
-      started <- began.get
-      done    <- committed.get
-      failed = exit match
-        case Exit.Success(_)     => None
-        case Exit.Failure(cause) => Some(failureOf(cause))
-      _   <- ZIO.when(started && !done)(ZIO.attemptBlocking(conn.rollback()).ignore)
-      end <- Clock.nanoTime
-      outcome = failed.fold[Either[SaferisError, Long]](Right(n))(Left(_))
-      _ <- config.listener.executed(
-        SqlExecuted(sql, Duration.fromNanos(math.max(0L, end - start)), timeout, outcome)
-      )
-    yield ()
-  end finishStream
-
-  private def observed[A](
-      sql: String,
-      timeout: Option[Duration],
-      effect: IO[SaferisError, A],
-      rows: A => Long,
-  )(using Trace): IO[SaferisError, A] =
-    for
-      start <- Clock.nanoTime
-      exit  <- effect.exit
-      end   <- Clock.nanoTime
-      outcome = exit match
-        case Exit.Success(value) => Right(rows(value))
-        case Exit.Failure(cause) => Left(failureOf(cause))
-      _ <- config.listener.executed(
-        SqlExecuted(sql, Duration.fromNanos(math.max(0L, end - start)), timeout, outcome)
-      )
-      value <- exit.foldExit(ZIO.failCause, ZIO.succeed)
-    yield value
-
-  private def failureOf(cause: Cause[Any]): SaferisError =
-    cause.failureOption match
-      case Some(err: SaferisError) => err
-      case _                       => SaferisError.Unexpected("interrupted")
-
-  private def withConnection[A](use: Connection => IO[SaferisError, A])(using Trace): IO[SaferisError, A] =
-    txn match
-      case Some(state) => use(state.connection)
-      case None        =>
-        ZIO.scoped:
-          for
-            conn <- checkout
-            _    <- configure(conn)
-            a    <- use(conn)
-          yield a
-
-  private def checkout(using Trace): ZIO[Scope, SaferisError, Connection] =
-    ZIO.acquireRelease(
-      ZIO.attemptBlocking(dataSource.getConnection()).mapError(t => SaferisError.ConnectionError(messageOf(t)))
-    )(conn => ZIO.attemptBlocking(conn.close()).ignore)
 
   private def configure(conn: Connection)(using Trace): IO[SaferisError, Unit] =
     ZIO.attemptBlocking(config.configure(conn)).mapError(t => SaferisError.ConnectionError(messageOf(t)))
@@ -317,9 +207,9 @@ private final class JdbcSession(
       timeout: Option[Duration],
       fetchSize: Option[Int],
   )(using Trace): IO[SaferisError, PreparedStatement] =
-    driver(sql, ZIO.attemptBlocking(conn.prepareStatement(sql))).flatMap: ps =>
+    driver(Some(sql), ZIO.attemptBlocking(conn.prepareStatement(sql))).flatMap: ps =>
       driver(
-        sql,
+        Some(sql),
         ZIO.attemptBlocking:
           timeout.foreach(d => ps.setQueryTimeout(toJdbcSeconds(d)))
           fetchSize.foreach(ps.setFetchSize)
@@ -341,50 +231,29 @@ private final class JdbcSession(
   private def closeStatement(ps: PreparedStatement): UIO[Unit] =
     ZIO.attemptBlocking(ps.close()).ignore
 
-  private def driver[A](sql: String, effect: IO[Throwable, A])(using Trace): IO[SaferisError, A] =
-    effect.mapError(t => classifyThrowable(t, Some(sql))).tapError(record)
-
-  private def guard(sql: String)(using Trace): IO[SaferisError, Unit] =
-    txn match
-      case None        => ZIO.unit
-      case Some(state) =>
-        state.failure.get.flatMap:
-          case None    => ZIO.unit
-          case Some(_) =>
-            ZIO.fail(
-              SaferisError.QueryError(
-                Some("25P02"),
-                "current transaction is aborted, commands ignored until end of transaction block",
-                Some(sql),
-              )
-            )
-
-  private def record(err: SaferisError)(using Trace): UIO[Unit] =
-    txn match
-      case None        => ZIO.unit
-      case Some(state) =>
-        err match
-          case SaferisError.QueryError(Some("25P02"), _, _) => ZIO.unit
-          case SaferisError.DecodingError(_, _, _)          => ZIO.unit
-          case other                                        => state.failure.update(prev => prev.orElse(Some(other)))
+  private def driver[A](sql: Option[String], effect: IO[Throwable, A])(using Trace): IO[SaferisError, A] =
+    effect.mapError(t => classifyThrowable(t, sql))
 
   private def render(command: SqlCommand): String =
     command.render((_, _) => "?")
 
-  private def applied(command: SqlCommand): Option[Duration] =
-    command.timeout.orElse(config.defaultTimeout)
-
   private def classifyThrowable(t: Throwable, sql: Option[String]): SaferisError = t match
-    case e: SQLException =>
-      val timedOut = e.isInstanceOf[java.sql.SQLTimeoutException] || Option(e.getSQLState).contains("57014")
-      val vendor   = !timedOut && config.retry(e)
+    case e: java.sql.SQLTimeoutException =>
       SqlState.classify(
-        Option(e.getSQLState),
-        Option(e.getMessage).getOrElse(""),
-        constraintOf(e),
+        ServerError(Some("57014"), messageOf(e), constraintOf(e), Some(e.getErrorCode)),
         sql,
-        vendor,
-        timedOut,
+        config.retry,
+      )
+    case e: SQLException =>
+      SqlState.classify(
+        ServerError(
+          Option(e.getSQLState),
+          messageOf(e),
+          constraintOf(e),
+          Some(e.getErrorCode),
+        ),
+        sql,
+        config.retry,
       )
     case e: java.io.IOException => SaferisError.ConnectionLost("08000", messageOf(e), sql)
     case e                      => SaferisError.Unexpected(messageOf(e))
@@ -404,36 +273,68 @@ private final class JdbcSession(
 
   private def bindOne(ps: PreparedStatement, index: Int, value: SqlValue): Unit =
     value match
-      case SqlValue.Null(tpe)          => ps.setNull(index, jdbcType(tpe))
-      case SqlValue.Bool(v)            => ps.setBoolean(index, v)
-      case SqlValue.SmallInt(v)        => ps.setShort(index, v)
-      case SqlValue.Integer(v)         => ps.setInt(index, v)
-      case SqlValue.BigInt(v)          => ps.setLong(index, v)
-      case SqlValue.Real(v)            => ps.setFloat(index, v)
-      case SqlValue.DoublePrecision(v) => ps.setDouble(index, v)
-      case SqlValue.Numeric(v)         => ps.setBigDecimal(index, v.bigDecimal)
-      case SqlValue.VarChar(v)         => ps.setString(index, v)
-      case SqlValue.Text(v)            => ps.setString(index, v)
-      case SqlValue.Binary(v)          => ps.setBytes(index, v.toArray)
-      case SqlValue.Date(v)            => ps.setObject(index, v)
-      case SqlValue.Time(v)            => ps.setObject(index, v)
-      case SqlValue.Timestamp(v)       => ps.setObject(index, v)
-      case SqlValue.TimestampTz(v)     => ps.setObject(index, OffsetDateTime.ofInstant(v, ZoneOffset.UTC))
-      case SqlValue.Json(json)         =>
+      case SqlValue.Null(tpe)      => ps.setNull(index, jdbcType(tpe))
+      case SqlValue.Bool(v)        => ps.setBoolean(index, v)
+      case SqlValue.Int2(v)        => ps.setShort(index, v)
+      case SqlValue.Int4(v)        => ps.setInt(index, v)
+      case SqlValue.Int8(v)        => ps.setLong(index, v)
+      case SqlValue.Float4(v)      => ps.setFloat(index, v)
+      case SqlValue.Float8(v)      => ps.setDouble(index, v)
+      case SqlValue.Numeric(v)     => ps.setBigDecimal(index, v.bigDecimal)
+      case SqlValue.VarChar(v)     => ps.setString(index, v)
+      case SqlValue.Text(v)        => ps.setString(index, v)
+      case SqlValue.Bytea(v)       => ps.setBytes(index, v.toArray)
+      case SqlValue.Date(v)        => ps.setObject(index, v)
+      case SqlValue.Time(v)        => ps.setObject(index, v)
+      case SqlValue.Timestamp(v)   => ps.setObject(index, v)
+      case SqlValue.Timestamptz(v) => ps.setObject(index, OffsetDateTime.ofInstant(v, ZoneOffset.UTC))
+      case SqlValue.Jsonb(json)    =>
         val obj = new PGobject()
         obj.setType("jsonb")
         obj.setValue(json)
         ps.setObject(index, obj)
-      case SqlValue.Uuid(uuid) => ps.setObject(index, uuid)
+      case SqlValue.Uuid(uuid)             => ps.setObject(index, uuid)
+      case SqlValue.Other(_, text)         => ps.setString(index, text)
+      case SqlValue.Array(element, values) =>
+        val members = values.map(arrayMember).toArray
+        val array   = conn.createArrayOf(arrayTypeName(element), members)
+        ps.setArray(index, array)
 
-  private def decodeRows[A](
-      rows: Chunk[SqlRow],
-      read: SqlRow => Either[SaferisError, A],
-  ): Either[SaferisError, Chunk[A]] =
-    rows.foldLeft[Either[SaferisError, Chunk[A]]](Right(Chunk.empty)):
-      case (Left(err), _)    => Left(err)
-      case (Right(acc), row) => read(row).map(acc :+ _)
-end JdbcSession
+  private def arrayTypeName(tpe: SqlType): String = tpe match
+    case SqlType.Bool        => "bool"
+    case SqlType.Int2        => "int2"
+    case SqlType.Int4        => "int4"
+    case SqlType.Int8        => "int8"
+    case SqlType.Float4      => "float4"
+    case SqlType.Float8      => "float8"
+    case SqlType.Numeric     => "numeric"
+    case SqlType.VarChar     => "varchar"
+    case SqlType.Text        => "text"
+    case SqlType.Bytea       => "bytea"
+    case SqlType.Date        => "date"
+    case SqlType.Time        => "time"
+    case SqlType.Timestamp   => "timestamp"
+    case SqlType.Timestamptz => "timestamptz"
+    case SqlType.Jsonb       => "jsonb"
+    case SqlType.Uuid        => "uuid"
+    case SqlType.Array(_)    => "text"
+    case SqlType.Other(_)    => "text"
+
+  private def arrayMember(value: SqlValue): Object = value match
+    case SqlValue.Bool(v)    => Boolean.box(v)
+    case SqlValue.Int2(v)    => Short.box(v)
+    case SqlValue.Int4(v)    => Int.box(v)
+    case SqlValue.Int8(v)    => Long.box(v)
+    case SqlValue.Float4(v)  => Float.box(v)
+    case SqlValue.Float8(v)  => Double.box(v)
+    case SqlValue.Text(v)    => v
+    case SqlValue.VarChar(v) => v
+    case SqlValue.Jsonb(v)   => v
+    case SqlValue.Uuid(v)    => v
+    case SqlValue.Numeric(v) => v.bigDecimal
+    case other               => other.toString
+
+end JdbcConnection
 
 private object JdbcReads:
   def materialize(rs: ResultSet): Either[SaferisError, Chunk[SqlRow]] =
@@ -464,37 +365,35 @@ private object JdbcReads:
     val cells = (1 to width).foldLeft[Either[SaferisError, Chunk[SqlValue]]](Right(Chunk.empty)):
       case (Left(err), _)      => Left(err)
       case (Right(acc), index) =>
-        val label = labels(index - 1)
-        val name  = typeName(meta, index)
-        readCell(rs, index, name, label).map(acc :+ _)
+        val name = typeName(meta, index)
+        readCell(rs, index, name).map(acc :+ _)
     cells.map(values => SqlRow(labels, values))
   end readRow
 
   private def typeName(meta: ResultSetMetaData, index: Int): String =
     Option(meta.getColumnTypeName(index)).getOrElse("").toLowerCase(Locale.ROOT)
 
-  private def readCell(rs: ResultSet, index: Int, name: String, label: String): Either[SaferisError, SqlValue] =
+  private def readCell(rs: ResultSet, index: Int, name: String): Either[SaferisError, SqlValue] =
     def nulled(tpe: SqlType): SqlValue = SqlValue.Null(tpe)
-    def unrecognized                   = Left(SaferisError.DecodingError(label, name, s"unrecognized type $name"))
     name match
       case "bool" =>
         val value = rs.getBoolean(index)
         Right(if rs.wasNull() then nulled(SqlType.Bool) else SqlValue.Bool(value))
       case "int2" | "smallint" | "smallserial" =>
         val value = rs.getShort(index)
-        Right(if rs.wasNull() then nulled(SqlType.SmallInt) else SqlValue.SmallInt(value))
+        Right(if rs.wasNull() then nulled(SqlType.Int2) else SqlValue.Int2(value))
       case "int4" | "integer" | "serial" =>
         val value = rs.getInt(index)
-        Right(if rs.wasNull() then nulled(SqlType.Integer) else SqlValue.Integer(value))
+        Right(if rs.wasNull() then nulled(SqlType.Int4) else SqlValue.Int4(value))
       case "int8" | "bigint" | "bigserial" =>
         val value = rs.getLong(index)
-        Right(if rs.wasNull() then nulled(SqlType.BigInt) else SqlValue.BigInt(value))
+        Right(if rs.wasNull() then nulled(SqlType.Int8) else SqlValue.Int8(value))
       case "float4" =>
         val value = rs.getFloat(index)
-        Right(if rs.wasNull() then nulled(SqlType.Real) else SqlValue.Real(value))
+        Right(if rs.wasNull() then nulled(SqlType.Float4) else SqlValue.Float4(value))
       case "float8" =>
         val value = rs.getDouble(index)
-        Right(if rs.wasNull() then nulled(SqlType.DoublePrecision) else SqlValue.DoublePrecision(value))
+        Right(if rs.wasNull() then nulled(SqlType.Float8) else SqlValue.Float8(value))
       case "numeric" =>
         val value = rs.getBigDecimal(index)
         Right(if rs.wasNull() || value == null then nulled(SqlType.Numeric) else SqlValue.Numeric(BigDecimal(value)))
@@ -506,7 +405,7 @@ private object JdbcReads:
         Right(if rs.wasNull() || value == null then nulled(SqlType.Text) else SqlValue.Text(value))
       case "bytea" =>
         val value = rs.getBytes(index)
-        Right(if rs.wasNull() || value == null then nulled(SqlType.Binary) else SqlValue.Binary(Chunk.fromArray(value)))
+        Right(if rs.wasNull() || value == null then nulled(SqlType.Bytea) else SqlValue.Bytea(Chunk.fromArray(value)))
       case "date" =>
         val value = rs.getObject(index, classOf[LocalDate])
         Right(if rs.wasNull() || value == null then nulled(SqlType.Date) else SqlValue.Date(value))
@@ -523,26 +422,30 @@ private object JdbcReads:
         try
           val value = rs.getObject(index, classOf[OffsetDateTime])
           Right(
-            if rs.wasNull() || value == null then nulled(SqlType.TimestampTz) else SqlValue.TimestampTz(value.toInstant)
+            if rs.wasNull() || value == null then nulled(SqlType.Timestamptz) else SqlValue.Timestamptz(value.toInstant)
           )
         catch
           case _: SQLException =>
             val value = rs.getTimestamp(index)
             Right(
-              if rs.wasNull() || value == null then nulled(SqlType.TimestampTz)
-              else SqlValue.TimestampTz(value.toInstant)
+              if rs.wasNull() || value == null then nulled(SqlType.Timestamptz)
+              else SqlValue.Timestamptz(value.toInstant)
             )
       case "json" | "jsonb" =>
         val value = rs.getObject(index)
-        if rs.wasNull() || value == null then Right(nulled(SqlType.Json))
+        if rs.wasNull() || value == null then Right(nulled(SqlType.Jsonb))
         else
           value match
-            case pg: PGobject => Right(SqlValue.Json(Option(pg.getValue).getOrElse("")))
-            case other        => Right(SqlValue.Json(other.toString))
+            case pg: PGobject => Right(SqlValue.Jsonb(Option(pg.getValue).getOrElse("")))
+            case other        => Right(SqlValue.Jsonb(other.toString))
       case "uuid" =>
         val value = rs.getObject(index, classOf[UUID])
         Right(if rs.wasNull() || value == null then nulled(SqlType.Uuid) else SqlValue.Uuid(value))
-      case _ => unrecognized
+      case _ =>
+        val text = rs.getString(index)
+        Right:
+          if rs.wasNull() || text == null then nulled(SqlType.Other(ServerType.Named(name)))
+          else SqlValue.Other(ServerType.Named(name), text)
     end match
   end readCell
 end JdbcReads

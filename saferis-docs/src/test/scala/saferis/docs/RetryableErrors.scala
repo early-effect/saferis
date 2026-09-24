@@ -6,8 +6,6 @@ import specular.ziotest.DocSpecSuite
 import zio.*
 import zio.test.*
 
-import java.sql.SQLException
-
 object RetryableErrors extends SaferisDocSpecSuite:
 
   @tableName("retryable_errors_users")
@@ -47,17 +45,14 @@ object RetryableErrors extends SaferisDocSpecSuite:
     section("Supplying a vendor hook")(
       md"""Drivers that tunnel over HTTP (Databricks, Snowflake) can surface transport errors as vendor-specific codes. Put a hook on `JdbcSessionConfig.retry`. It does not replace the named states above:""",
       exampleValue {
-        val databricks: SQLException => Boolean =
-          e => e.getErrorCode == 8000
+        val databricks: ServerError => Boolean =
+          e => e.vendorCode.contains(8000)
 
         val session = JdbcSession.layer(JdbcSessionConfig(retry = databricks))
         val vendor  = SqlState.classify(
-          Some("8000"),
-          "http blip",
-          None,
+          ServerError(Some("8000"), "http blip", vendorCode = Some(8000)),
           Some("select 1"),
-          vendorRetry = databricks(new SQLException("http blip", "8000", 8000)),
-          timedOut = false,
+          databricks,
         )
         (vendor, session)
       }.assert { case (classified, _) =>

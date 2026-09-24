@@ -119,14 +119,11 @@ shown below the snippet:""",
       md"""Drivers call `SqlState.classify`. Application code matches the case. There is no `fromThrowable`.""",
       exampleValue {
         val unique = SqlState.classify(
-          Some("23505"),
-          "duplicate key",
-          Some("users_email_key"),
+          ServerError(Some("23505"), "duplicate key", Some("users_email_key")),
           Some("insert into users values ($1)"),
-          vendorRetry = false,
-          timedOut = false,
+          _ => false,
         )
-        val other = SqlState.classify(None, "something went wrong", None, None, vendorRetry = false, timedOut = false)
+        val other = SqlState.classify(ServerError(None, "something went wrong"), None, _ => false)
         (unique, other)
       }.assert {
         case (SaferisError.UniqueViolation(constraint, "unique violation", _), _: SaferisError.QueryError) =>
@@ -152,12 +149,9 @@ shown below the snippet:""",
             e.message
 
         val sample = SqlState.classify(
-          Some("23505"),
-          "duplicate key",
-          Some("users_email_key"),
+          ServerError(Some("23505"), "duplicate key", Some("users_email_key")),
           Some("insert into users values ($1)"),
-          vendorRetry = false,
-          timedOut = false,
+          _ => false,
         )
         logError(sample)
       }.assert(msg => assertTrue(msg.contains("Unique") && msg.contains("violated"))),

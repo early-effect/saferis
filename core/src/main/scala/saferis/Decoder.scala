@@ -37,24 +37,25 @@ object Decoder:
 
   given string: Decoder[String] with
     def decode(value: SqlValue): Either[DecodeError, String] = value match
-      case SqlValue.VarChar(v) => Right(v)
-      case SqlValue.Text(v)    => Right(v)
-      case other               => reject("varchar", other)
+      case SqlValue.VarChar(v)  => Right(v)
+      case SqlValue.Text(v)     => Right(v)
+      case SqlValue.Other(_, v) => Right(v)
+      case other                => reject("varchar", other)
 
   given short: Decoder[Short] with
     def decode(value: SqlValue): Either[DecodeError, Short] = value match
-      case SqlValue.SmallInt(v) => Right(v)
-      case other                => reject("int2", other)
+      case SqlValue.Int2(v) => Right(v)
+      case other            => reject("int2", other)
 
   given int: Decoder[Int] with
     def decode(value: SqlValue): Either[DecodeError, Int] = value match
-      case SqlValue.Integer(v) => Right(v)
-      case other               => reject("int4", other)
+      case SqlValue.Int4(v) => Right(v)
+      case other            => reject("int4", other)
 
   given long: Decoder[Long] with
     def decode(value: SqlValue): Either[DecodeError, Long] = value match
-      case SqlValue.BigInt(v) => Right(v)
-      case other              => reject("int8", other)
+      case SqlValue.Int8(v) => Right(v)
+      case other            => reject("int8", other)
 
   given boolean: Decoder[Boolean] with
     def decode(value: SqlValue): Either[DecodeError, Boolean] = value match
@@ -63,13 +64,13 @@ object Decoder:
 
   given float: Decoder[Float] with
     def decode(value: SqlValue): Either[DecodeError, Float] = value match
-      case SqlValue.Real(v) => Right(v)
-      case other            => reject("float4", other)
+      case SqlValue.Float4(v) => Right(v)
+      case other              => reject("float4", other)
 
   given double: Decoder[Double] with
     def decode(value: SqlValue): Either[DecodeError, Double] = value match
-      case SqlValue.DoublePrecision(v) => Right(v)
-      case other                       => reject("float8", other)
+      case SqlValue.Float8(v) => Right(v)
+      case other              => reject("float8", other)
 
   given bigDecimal: Decoder[BigDecimal] with
     def decode(value: SqlValue): Either[DecodeError, BigDecimal] = value match
@@ -83,12 +84,12 @@ object Decoder:
 
   given chunkByte: Decoder[Chunk[Byte]] with
     def decode(value: SqlValue): Either[DecodeError, Chunk[Byte]] = value match
-      case SqlValue.Binary(v) => Right(v)
-      case other              => reject("bytea", other)
+      case SqlValue.Bytea(v) => Right(v)
+      case other             => reject("bytea", other)
 
   given instant: Decoder[Instant] with
     def decode(value: SqlValue): Either[DecodeError, Instant] = value match
-      case SqlValue.TimestampTz(v) => Right(v)
+      case SqlValue.Timestamptz(v) => Right(v)
       case other                   => reject("timestamptz", other)
 
   given localDateTime: Decoder[LocalDateTime] with
@@ -108,12 +109,12 @@ object Decoder:
 
   given zonedDateTime: Decoder[ZonedDateTime] with
     def decode(value: SqlValue): Either[DecodeError, ZonedDateTime] = value match
-      case SqlValue.TimestampTz(v) => Right(ZonedDateTime.ofInstant(v, ZoneOffset.UTC))
+      case SqlValue.Timestamptz(v) => Right(ZonedDateTime.ofInstant(v, ZoneOffset.UTC))
       case other                   => reject("timestamptz", other)
 
   given offsetDateTime: Decoder[OffsetDateTime] with
     def decode(value: SqlValue): Either[DecodeError, OffsetDateTime] = value match
-      case SqlValue.TimestampTz(v) => Right(OffsetDateTime.ofInstant(v, ZoneOffset.UTC))
+      case SqlValue.Timestamptz(v) => Right(OffsetDateTime.ofInstant(v, ZoneOffset.UTC))
       case other                   => reject("timestamptz", other)
 
   given defaultUuidDecoder: Decoder[UUID] = postgres.uuidDecoder
@@ -121,7 +122,7 @@ object Decoder:
   def fromJsonCodec[T](using codec: zio.json.JsonCodec[T]): Decoder[T] =
     new Decoder[T]:
       def decode(value: SqlValue): Either[DecodeError, T] = value match
-        case SqlValue.Json(json) =>
+        case SqlValue.Jsonb(json) =>
           codec.decoder.decodeJson(json).left.map(e => DecodeError(s"Failed to decode JSON: $e"))
         case SqlValue.Null(_) => Left(DecodeError("null value"))
         case other            => Left(DecodeError(s"expected jsonb, found ${other.productPrefix}"))

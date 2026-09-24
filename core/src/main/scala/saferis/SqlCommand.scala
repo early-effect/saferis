@@ -16,6 +16,13 @@ final class SqlCommand private (
   def render(placeholder: (Int, SqlType) => String): String =
     SqlPieces.render(pieces, placeholder)
 
+  /** `$n` text with no casts and no bound values. The same string for every driver. */
+  def inspection: String = SqlPieces.postgres(pieces)
+
+  def withTimeout(timeout: Option[Duration]): SqlCommand =
+    new SqlCommand(pieces, timeout)
+end SqlCommand
+
 object SqlCommand:
   private[saferis] def apply(pieces: Chunk[SqlPiece], timeout: Option[Duration]): SqlCommand =
     new SqlCommand(pieces, timeout)
