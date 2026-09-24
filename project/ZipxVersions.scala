@@ -6,8 +6,8 @@ import zipx.*
   *
   * Parent `Lib` vals used only for `.mod` are catalog rows; they are not `library()`-selected when another selected
   * module already pulls them (specular-core / specular-site via the docs theme). Core selects zio directly, so zio stays
-  * a selected row. Core selects zio-json as provided (JSONB helpers). Docs do not: the docs theme already pulls it
-  * (zio-schema-json still pins 0.10.0; a docs-selected 1.0.0 row fails early-semver eviction).
+  * a selected row. Core selects zio-json as provided (JSONB helpers). The docs theme is the same early-effect
+  * release, so it does not pin an older zio-json.
   */
 object MyVersions extends ZipxVersions:
   val sbt: SbtVersion     = SbtVersion("2.1.0-M2")
@@ -15,7 +15,7 @@ object MyVersions extends ZipxVersions:
 
   val zio             = Lib("dev.zio", "zio", "2.1.26")
   val zioStreams      = zio.mod("zio-streams")
-  val zioJson         = Lib("dev.zio", "zio-json", "0.10.0")
+  val zioJson         = Lib("dev.zio", "zio-json", "1.1.0")
   val zioTest    = zio.mod("zio-test")
   val zioTestSbt = zio.mod("zio-test-sbt")
   val zioLoggingSlf4j = Lib("dev.zio", "zio-logging-slf4j2-bridge", "2.5.3")
@@ -25,12 +25,12 @@ object MyVersions extends ZipxVersions:
   val slf4jNop     = Lib("org.slf4j", "slf4j-nop", "2.0.18").java
   val scaluzzi     = Lib("com.github.vovapolu", "scaluzzi", "0.1.23")
 
-  val specular        = Lib("rocks.earlyeffect", "specular-core", "0.14.1")
+  val specular        = Lib("rocks.earlyeffect", "specular-core", "0.17.0")
   val specularZioTest = specular.mod("specular-zio-test").test
   val specularTheme   = specular.mod("early-effect-docs-theme").test
 
   val scalafmt       = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
-  val specularPlugin = Plugin("rocks.earlyeffect", "sbt-specular", "0.14.1")
+  val specularPlugin = Plugin("rocks.earlyeffect", "sbt-specular", "0.17.0")
   val scalafix       = Plugin("ch.epfl.scala", "sbt-scalafix", "0.14.7")
   val dynverCi       = Plugin("rocks.earlyeffect", "sbt-dynver-ci", "0.2.3")
   val scoverage      = Plugin("org.scoverage", "sbt-scoverage", "2.4.4")
