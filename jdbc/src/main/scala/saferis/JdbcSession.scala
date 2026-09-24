@@ -1,4 +1,6 @@
-package saferis
+package saferis.jdbc
+
+import saferis.*
 
 import org.postgresql.util.PGobject
 import org.postgresql.util.PSQLException
@@ -53,10 +55,10 @@ object JdbcSession:
       yield new JdbcConnection(conn, config, inTxn, committed, autoCommitOff)
     )(_.close)
 
-  private[saferis] val FetchSize = 256
+  private[jdbc] val FetchSize = 256
 
   /** Whole seconds, round up, minimum 1. `setQueryTimeout(0)` means no limit. Infinity is `Int.MaxValue` seconds. */
-  private[saferis] def toJdbcSeconds(d: Duration): Int =
+  private[jdbc] def toJdbcSeconds(d: Duration): Int =
     if d == Duration.Infinity then Int.MaxValue
     else
       val seconds       = d.getSeconds
@@ -66,7 +68,7 @@ object JdbcSession:
       else if nanosFraction > 0 then if seconds + 1L >= Int.MaxValue.toLong then Int.MaxValue else (seconds + 1L).toInt
       else seconds.toInt
 
-  private[saferis] def jdbcType(tpe: SqlType): Int = tpe match
+  private[jdbc] def jdbcType(tpe: SqlType): Int = tpe match
     case SqlType.Bool        => java.sql.Types.BOOLEAN
     case SqlType.Int2        => java.sql.Types.SMALLINT
     case SqlType.Int4        => java.sql.Types.INTEGER
@@ -86,7 +88,7 @@ object JdbcSession:
     case SqlType.Array(_)    => java.sql.Types.ARRAY
     case SqlType.Other(_)    => java.sql.Types.OTHER
 
-  private[saferis] def messageOf(t: Throwable): String =
+  private[jdbc] def messageOf(t: Throwable): String =
     Option(t.getMessage).filter(_.nonEmpty).getOrElse(t.getClass.getName)
 end JdbcSession
 

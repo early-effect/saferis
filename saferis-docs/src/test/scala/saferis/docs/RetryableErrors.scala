@@ -1,6 +1,7 @@
 package saferis.docs
 
 import saferis.*
+import saferis.jdbc.*
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.*

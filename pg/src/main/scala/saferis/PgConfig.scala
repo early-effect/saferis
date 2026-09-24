@@ -1,17 +1,15 @@
-package saferis
+package saferis.pg
+
+import saferis.ServerError
+import saferis.SqlState
+import saferis.postgres.PgConnectionConfig
 
 import zio.Duration
 
-/** Node `pg` pool settings. Retry sees SQLSTATE, constraint, and message. It does not see a throwable. */
+/** Node pool settings around a [[PgConnectionConfig]]. */
 final case class PgConfig(
-    host: String,
-    port: Int,
-    database: String,
-    user: String,
-    password: String,
+    connection: PgConnectionConfig,
     poolSize: Int = 10,
-    ssl: Boolean = false,
     defaultTimeout: Option[Duration] = None,
     retry: ServerError => Boolean = SqlState.defaultRetryable,
-    listener: SqlListener = SqlListener.noop,
 )

@@ -3,27 +3,16 @@ package saferis.tests
 import org.testcontainers.containers.PostgreSQLContainer
 import zio.*
 
-final case class ContainerConfig(
-    initScriptPath: String = "init.sql",
-    imageName: String = s"${PostgreSQLContainer.IMAGE}:latest",
-)
-object ContainerConfig:
-  val default: ULayer[ContainerConfig] = ZLayer.succeed(ContainerConfig())
-
 private[tests] object PostgresTestContainerPlatform:
-  /** Started Postgres. The scope stops the container. */
+  /** Started Postgres. The scope stops the container. Trust auth, same init script as Node. */
   val live: ZLayer[Any, Throwable, PostgresTestContainer] =
-    ContainerConfig.default >>> started
-
-  private val started: ZLayer[ContainerConfig, Throwable, PostgresTestContainer] =
     ZLayer.scoped:
-      ZIO.serviceWithZIO[ContainerConfig]: config =>
-        ZIO.acquireRelease(ZIO.attempt(open(config)))(container => ZIO.succeed(container.stop())).map(expose)
+      ZIO.acquireRelease(ZIO.attempt(open()))(container => ZIO.succeed(container.stop())).map(expose)
 
-  private def open(config: ContainerConfig): PostgreSQLContainer[?] =
+  private def open(): PostgreSQLContainer[?] =
     val container: PostgreSQLContainer[?] =
-      new PostgreSQLContainer(config.imageName).withEnv("POSTGRES_HOST_AUTH_METHOD", "trust")
-    container.withInitScript(config.initScriptPath)
+      new PostgreSQLContainer(PostgresTestContainer.Image).withEnv("POSTGRES_HOST_AUTH_METHOD", "trust")
+    container.withInitScript("init.sql")
     container.start()
     container
 

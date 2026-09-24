@@ -1,4 +1,4 @@
-package saferis
+package saferis.pg
 
 import zio.Ref
 import zio.Task
@@ -13,7 +13,7 @@ import scala.util.control.NonFatal
   * `busy` is cleared only when the promise settles and the fiber is still waiting. `onLate` runs when the value arrives
   * after cancellation, so `connect` can `release(true)` a client this fiber no longer owns.
   */
-private[saferis] object PgPromises:
+private[pg] object PgPromises:
   val swallow: js.Function1[js.Any, Unit] = (_: js.Any) => ()
 
   def complete[A](busy: Option[Ref[Boolean]], thunk: => js.Promise[A], onLate: A => Unit)(using Trace): Task[A] =

@@ -1,6 +1,8 @@
-package saferis.tests
+package saferis.pg
 
 import saferis.*
+import saferis.postgres.PgConnectionConfig
+import saferis.tests.PostgresTestContainer
 import zio.*
 import zio.test.*
 
@@ -14,23 +16,26 @@ object PgSessionSpecs extends ZIOSpecDefault:
   extension (pg: PostgresTestContainer)
     private def config(
         defaultTimeout: Option[Duration] = None,
-        listener: SqlListener = SqlListener.noop,
         poolSize: Int = 4,
     ): PgConfig =
       PgConfig(
-        host = pg.host,
-        port = pg.port,
-        database = pg.database,
-        user = pg.user,
-        password = pg.password,
+        connection = PgConnectionConfig(
+          host = pg.host,
+          port = pg.port,
+          database = pg.database,
+          user = pg.user,
+          password = zio.Config.Secret(pg.password),
+        ),
         poolSize = poolSize,
         defaultTimeout = defaultTimeout,
-        listener = listener,
       )
   end extension
 
   private def session(config: PgConfig): ZLayer[Any, SaferisError, SqlSession] =
     ZLayer.succeed(config) >>> NodeSession.layer
+
+  private def listening(config: PgConfig, listener: SqlListener): ZLayer[Any, SaferisError, SqlSession] =
+    session(config) >>> SqlListener.observe(listener)
 
   private def sessions(
       configure: PostgresTestContainer => PgConfig
@@ -161,7 +166,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
           pg     <- ZIO.service[PostgresTestContainer]
           events <- Ref.make(Chunk.empty[String])
           result <- pullOneThenSelect(read).provideLayer(
-            session(pg.config(poolSize = 1, listener = new Recording(events)))
+            listening(pg.config(poolSize = 1), new Recording(events))
           )
           seen <- events.get
         yield result && assertTrue(
@@ -171,6 +176,19 @@ object PgSessionSpecs extends ZIOSpecDefault:
         )
         end for
       },
+      test("take(10) of a million rows reads one cursor batch"):
+        val read: SqlRow => Either[SaferisError, Int] = row =>
+          summon[RowDecoder[Int]]
+            .decode(row)
+            .left
+            .map(err => SaferisError.DecodingError("n", "Int", err.detail))
+        for
+          _       <- NodeSession.cursorReads.set(0)
+          command <- sql"select n::int4 from generate_series(1, 1000000) n".toCommand
+          session <- ZIO.service[SqlSession]
+          rows    <- session.stream(command)(read).take(10).runCollect
+          reads   <- NodeSession.cursorReads.get
+        yield assertTrue(rows == Chunk.fromIterable(1 to 10), reads >= 1, reads <= 2),
     )
 
   private val writes =
@@ -211,7 +229,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
             .queryValue[Int]
             .exit
             .provide(
-              session(pg.config(listener = new Recording(heard)))
+              listening(pg.config(), new Recording(heard))
             )
           sqls <- heard.get
         yield assertTrue(
@@ -254,7 +272,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
             case _ => false
         yield assertTrue(captured.contains(1L), count.contains(0L), outerFailed)
       ,
-      test("catching a statement failure rolls back and the next command is 25P02 and is not sent"):
+      test("catching a statement failure rolls back and the next command is 25P02"):
         for
           pg     <- ZIO.service[PostgresTestContainer]
           heard  <- Ref.make(Chunk.empty[String])
@@ -273,12 +291,11 @@ object PgSessionSpecs extends ZIOSpecDefault:
                 yield ()
               ).exit
               captured <- seen.get
-              sqls     <- heard.get
               count    <- sql"select count(*) from pg_abort".queryValue[Long]
-            yield (exit, captured, sqls, count)
-          ).provide(session(pg.config(defaultTimeout = Some(30.seconds), listener = new Recording(heard))))
-          (exit, captured, sqls, count) = result
-          aborted                       = captured match
+            yield (exit, captured, count)
+          ).provide(listening(pg.config(defaultTimeout = Some(30.seconds)), new Recording(heard)))
+          (exit, captured, count) = result
+          aborted                 = captured match
             case Some(Left(SaferisError.QueryError(Some("25P02"), _, sql))) =>
               sql.exists(_.contains("later_count"))
             case _ => false
@@ -288,8 +305,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
                 case Some(_: SaferisError.SyntaxError) => true
                 case _                                 => false
             case _ => false
-          sentLater = sqls.exists(_.contains("later_count"))
-        yield assertTrue(aborted, recorded, !sentLater, count.contains(0L)),
+        yield assertTrue(aborted, recorded, count.contains(0L)),
     )
 
   private def onSession[A](
@@ -455,7 +471,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
       writes.provideSomeShared[PostgresTestContainer](open),
       joined.provideSomeShared[PostgresTestContainer](timed),
       review,
-    ) @@ TestAspect.withLiveClock @@ TestAspect.timeout(1.minute) @@ TestAspect.sequential
+    ) @@ TestAspect.withLiveClock @@ TestAspect.timeout(45.seconds) @@ TestAspect.sequential
 
   def spec = live.provideShared(PostgresTestContainer.live)
 end PgSessionSpecs

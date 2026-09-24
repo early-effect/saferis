@@ -75,7 +75,7 @@ val prePullPostgres = Steps.built("pre-pull-postgres")(
   Step
     .runRaw(
       """|set -euo pipefail
-         |image=postgres:latest
+         |image=postgres:17
          |max=5
          |for attempt in $(seq 1 "$max"); do
          |  if docker pull "$image"; then
@@ -102,6 +102,8 @@ zipxCapabilities ++= {
       command = zipxTasks.session(
         LocalProject("core") / testFull,
         LocalProject("coreJS") / testFull,
+        LocalProject("postgres") / testFull,
+        LocalProject("postgresJS") / testFull,
         LocalProject("jdbc") / testFull,
         LocalProject("docs") / specularSite,
       ),
@@ -113,7 +115,7 @@ zipxCapabilities ++= {
     // The `test` job must not wait on this one.
     Capability.once(
       name = CapabilityName("test-pg"),
-      command = zipxTasks.session(LocalProject("pgJS") / testFull),
+      command = zipxTasks.session(LocalProject("pgJS") / testFull, LocalProject("pgEsm") / fastLinkJS),
       extraSteps = pgJsCiSetup ++ prePullPostgres,
       // GHA VMs are disposable; skip Ryuk so Hub flakes on testcontainers/ryuk cannot fail CI.
       env = Map("TESTCONTAINERS_RYUK_DISABLED" -> EnvValue.plain("true")),
@@ -154,7 +156,10 @@ lazy val scalaVersions         = Seq(scala3Version)
 // Root project aggregates all modules but is not published
 lazy val root = project
   .in(file("."))
-  .aggregate((core.projectRefs ++ jdbc.projectRefs ++ pg.projectRefs ++ Seq[sbt.ProjectReference](docs))*)
+  .aggregate(
+    (core.projectRefs ++ postgres.projectRefs ++ jdbc.projectRefs ++ pg.projectRefs ++ testkit.projectRefs ++
+      Seq[sbt.ProjectReference](docs, pgEsm))*
+  )
   .settings(
     name           := "saferis-root",
     publish / skip := true,
@@ -173,9 +178,61 @@ lazy val core = (projectMatrix in file("core"))
   .jvmPlatform(scalaVersions = scalaVersions)
   .jsPlatform(scalaVersions = scalaVersions)
 
+// Postgres text codec and connection settings. JVM and Scala.js. No driver.
+lazy val postgres = (projectMatrix in file("postgres"))
+  .dependsOn(core)
+  .settings(commonSettings)
+  .settings(publishSettings)
+  .settings(MyVersions.coreLib)
+  .settings(MyVersions.coreTest)
+  .settings(
+    name        := "saferis-postgres",
+    description := "Postgres text codec and connection settings shared by drivers.",
+  )
+  .jvmPlatform(scalaVersions = scalaVersions)
+  .jsPlatform(scalaVersions = scalaVersions)
+
+// Test container and the conformance suite. Not published: it starts Docker.
+lazy val testkit = (projectMatrix in file("testkit"))
+  .dependsOn(core)
+  .settings(commonSettings)
+  .settings(
+    name           := "saferis-testkit",
+    description    := "Postgres test container and the driver conformance suite.",
+    publish / skip := true,
+    MyVersions.coreLib,
+    MyVersions.coreTest,
+    MyVersions.testkitTest,
+    // The driver projects run these suites. Discovering them here would start them with no session.
+    Test / definedTests := Seq.empty,
+  )
+  .jvmPlatform(scalaVersions = scalaVersions, MyVersions.testkitJvm)
+  .jsPlatform(
+    scalaVersions = scalaVersions,
+    settings = Seq(
+      scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.CommonJSModule)),
+      Compile / sourceGenerators += Def.task {
+        val in  = (ThisBuild / baseDirectory).value / "testkit" / "src" / "main" / "resources" / "init.sql"
+        val out = (Compile / sourceManaged).value / "saferis" / "tests" / "InitScript.scala"
+        val body = sbt.io.IO.read(in).replace("\"\"\"", "\\\"\\\"\\\"")
+        sbt.io.IO.write(
+          out,
+          s"""|package saferis.tests
+              |
+              |private[tests] object InitScript:
+              |  val sql: String =
+              |    \"\"\"$body\"\"\"
+              |""".stripMargin,
+        )
+        Seq(out)
+      }.taskValue,
+    ),
+  )
+
 // JDBC driver. JVM only. Depends on the core JVM row.
 lazy val jdbc = (projectMatrix in file("jdbc"))
   .dependsOn(core)
+  .dependsOn(testkit % "test->compile;test->test")
   .settings(commonSettings)
   .settings(publishSettings)
   .settings(MyVersions.jdbcLib)
@@ -184,18 +241,13 @@ lazy val jdbc = (projectMatrix in file("jdbc"))
   .settings(
     name        := "saferis-jdbc",
     description := "JDBC SqlSession for Postgres.",
-    Test / unmanagedSourceDirectories ++= Def.uncached(
-      Seq(
-        (ThisBuild / baseDirectory).value / "testkit" / "src" / "scala",
-        (ThisBuild / baseDirectory).value / "testkit" / "src" / "jvm" / "scala",
-      )
-    ),
   )
   .jvmPlatform(scalaVersions = scalaVersions)
 
-// Node pg driver. Scala.js only. Depends on the core JS row.
+// Node pg driver. Scala.js only. Depends on the core JS row and the shared Postgres codec.
 lazy val pg = (projectMatrix in file("pg"))
-  .dependsOn(core)
+  .dependsOn(core, postgres)
+  .dependsOn(testkit % "test->compile;test->test")
   .settings(commonSettings)
   .settings(publishSettings)
   .settings(MyVersions.pgLib)
@@ -203,18 +255,28 @@ lazy val pg = (projectMatrix in file("pg"))
   .settings(
     name        := "saferis-pg",
     description := "Node pg SqlSession for Postgres.",
-    Test / unmanagedSourceDirectories ++= Def.uncached(
-      Seq(
-        (ThisBuild / baseDirectory).value / "testkit" / "src" / "scala",
-        (ThisBuild / baseDirectory).value / "testkit" / "src" / "js" / "scala",
-      )
-    ),
   )
   .jsPlatform(
     scalaVersions = scalaVersions,
     Seq(
       scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.CommonJSModule)),
     ),
+  )
+
+// Second link of the Node driver as an ES module. Sources are the pg module. Not published.
+lazy val pgEsm = project
+  .in(file("pg/esm"))
+  .enablePlugins(ScalaJSPlugin)
+  .dependsOn(core.js(scala3Version), postgres.js(scala3Version))
+  .settings(commonSettings)
+  .settings(MyVersions.pgLib)
+  .settings(
+    name           := "saferis-pg-esm",
+    publish / skip := true,
+    Compile / unmanagedSourceDirectories += Def.uncached(
+      (ThisBuild / baseDirectory).value / "pg" / "src" / "main" / "scala"
+    ),
+    scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.ESModule)),
   )
 
 lazy val docs = project

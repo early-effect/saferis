@@ -6,6 +6,12 @@ import zio.test.*
 
 object QuerySpecs extends ZIOSpecDefault:
 
+  private def arrayLength(fragment: SqlFragment): Int =
+    fragment.pieces
+      .collect:
+        case SqlPiece.Param(SqlValue.Array(_, values)) => values.length
+      .sum
+
   // Test tables
   @tableName("users")
   final case class User(@generated @key id: Int, name: String, email: String, age: Int) derives Table
@@ -299,45 +305,66 @@ object QuerySpecs extends ZIOSpecDefault:
           sql.contains("not in (select userId from orders as orders_ref_1)")
         )
       },
-      test("inList with a Iterable produces parameterized IN") {
+      test("inList is one array parameter") {
         val q = Query[User].where(_.id).inList(List(1, 2, 3)).build
         assertTrue(
-          q.sql.contains("in ($1, $2, $3)"),
-          q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 3,
+          q.sql.contains("= ANY($1)"),
+          q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1,
+          arrayLength(q) == 3,
           q.issues.isEmpty,
         )
       },
-      test("notInList produces parameterized NOT IN") {
+      test("notInList is one array parameter") {
         val q = Query[User].where(_.id).notInList(List(1, 2, 3)).build
-        assertTrue(q.sql.contains("not in ($1, $2, $3)"), q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 3)
+        assertTrue(q.sql.contains("<> ALL($1)"), q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1)
       },
-      test("in varargs produces parameterized IN") {
+      test("in varargs is one array parameter") {
         val q = Query[User].where(_.name).in("active", "pending").build
-        assertTrue(q.sql.contains("in ($1, $2)"), q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 2)
+        assertTrue(
+          q.sql.contains("= ANY($1)"),
+          q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1,
+          arrayLength(q) == 2,
+        )
       },
-      test("notIn varargs produces parameterized NOT IN") {
+      test("notIn varargs is one array parameter") {
         val q = Query[User].where(_.name).notIn("archived").build
-        assertTrue(q.sql.contains("not in ($1)"), q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1)
+        assertTrue(q.sql.contains("<> ALL($1)"), q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1)
       },
       test("inList with single element") {
         val q = Query[User].where(_.id).inList(List(42)).build
-        assertTrue(q.sql.contains("in ($1)"), q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1)
+        assertTrue(q.sql.contains("= ANY($1)"), q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1)
       },
       test("inList accepts a Set") {
         val q = Query[User].where(_.id).inList(Set(1, 2, 3)).build
-        assertTrue(q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 3, q.sql.contains("in ($1, $2, $3)"))
+        assertTrue(
+          q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1,
+          arrayLength(q) == 3,
+          q.sql.contains("= ANY($1)"),
+        )
       },
       test("inList accepts a Vector") {
         val q = Query[User].where(_.id).inList(Vector(1, 2, 3)).build
-        assertTrue(q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 3, q.sql.contains("in ($1, $2, $3)"))
+        assertTrue(
+          q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1,
+          arrayLength(q) == 3,
+          q.sql.contains("= ANY($1)"),
+        )
       },
       test("inList deduplicates input") {
         val q = Query[User].where(_.id).inList(List(1, 1, 2)).build
-        assertTrue(q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 2, q.sql.contains("in ($1, $2)"))
+        assertTrue(
+          q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1,
+          arrayLength(q) == 2,
+          q.sql.contains("= ANY($1)"),
+        )
       },
       test("varargs in dedupes too") {
         val q = Query[User].where(_.id).in(1, 1, 2, 2, 3).build
-        assertTrue(q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 3, q.sql.contains("in ($1, $2, $3)"))
+        assertTrue(
+          q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1,
+          arrayLength(q) == 3,
+          q.sql.contains("= ANY($1)"),
+        )
       },
       test("inSubquery still works alongside the literal in/inList overloads") {
         val subquery = Query[Order].select(_.userId)
@@ -348,13 +375,13 @@ object QuerySpecs extends ZIOSpecDefault:
         val q = Query[User].where(_.name).eq("Bob").where(_.id).inList(List(1, 2, 3)).build
         assertTrue(
           q.sql.contains("name = $1"),
-          q.sql.contains("in ($2, $3, $4)"),
-          q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 4,
+          q.sql.contains("= ANY($2)"),
+          q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 2,
         )
       },
       test("two inList calls on different columns accumulate writes") {
         val q = Query[User].where(_.id).inList(List(1, 2)).where(_.name).inList(List("a", "b", "c")).build
-        assertTrue(q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 5)
+        assertTrue(q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 2, arrayLength(q) == 5)
       },
       test("inList(empty) does not throw — fragment carries one issue tagged WhereBuilder.inList") {
         val q = Query[User].where(_.id).inList(List.empty[Int]).build
@@ -378,7 +405,7 @@ object QuerySpecs extends ZIOSpecDefault:
       },
       test("all-duplicates collapsing to one is NOT an error") {
         val q = Query[User].where(_.id).inList(List(7, 7, 7)).build
-        assertTrue(q.issues.isEmpty, q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1, q.sql.contains("in ($1)"))
+        assertTrue(q.issues.isEmpty, q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1, q.sql.contains("= ANY($1)"))
       },
       test("two empty inList calls produce two accumulated issues") {
         val q = Query[User].where(_.id).inList(List.empty[Int]).where(_.name).inList(List.empty[String]).build

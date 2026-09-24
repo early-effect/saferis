@@ -100,27 +100,26 @@ Query[SubUser].where(_.id).inSubquery(statuses).build.sql
           .in("Alice", "Bob")
           .build
           .sql
-      }.assert(sql => assertTrue(sql.toLowerCase.contains("in"))),
+      }.assert(sql => assertTrue(sql.toLowerCase.contains("any"))),
       exampleValue {
-        // Iterable form — for runtime collections (List, Set, Vector, LinkedHashSet, ranges, ...)
-        val ids = List(1, 2, 3, 3) // duplicates are removed automatically
+        // Iterable form. Duplicates are removed. One array parameter.
+        val ids = List(1, 2, 3, 3)
         Query[SubUser]
           .where(_.id)
           .inList(ids)
           .build
           .sql
-      }.assert(sql => assertTrue(sql.toLowerCase.contains("in"))),
+      }.assert(sql => assertTrue(sql.toLowerCase.contains("any"))),
       exampleValue {
-        // Same helpers in raw sql"..." interpolation:
         val ids = List(1, 2, 3)
-        val a   = sql"select * from sub_users where id in ${in(ids)}".sql
-        val b   = sql"select * from sub_users where name in ${in("Alice", "Bob")}".sql
+        val a   = sql"select * from sub_users where id ${in(ids)}".sql
+        val b   = sql"select * from sub_users where name ${in("Alice", "Bob")}".sql
         (a, b)
-      }.assert { case (a, b) => assertTrue(a.toLowerCase.contains("in") && b.toLowerCase.contains("in")) },
+      }.assert { case (a, b) => assertTrue(a.toLowerCase.contains("any") && b.toLowerCase.contains("any")) },
       md"""`notIn` / `notInList` are symmetric. `inSubquery` / `notInSubquery` (renamed from `in`/`notIn` on `SelectQuery`) cover
 the subquery case shown above.""",
       section("Empty collections fail at construction, not in the database")(
-        md"""An empty (or all-duplicates-collapse-to-empty) input would produce invalid SQL (`IN ()`) on every supported dialect.
+        md"""An empty (or all-duplicates-collapse-to-empty) input would produce invalid SQL (`= ANY()`) on every supported dialect.
 Saferis does **not** throw at the call site — instead the resulting fragment carries one
 `FragmentIssue.EmptyCollection` per offending helper. When the fragment is run, execution fails with
 `SaferisError.InvalidStatement(issues)` *before* any JDBC call.

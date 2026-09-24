@@ -124,6 +124,7 @@ See [SQL Injection Prevention](sql-injection-prevention.html) for the complete s
 
 ```scala
 import saferis.*
+import saferis.jdbc.*
 import zio.*
 import javax.sql.DataSource
 
@@ -138,7 +139,7 @@ val result: ZIO[SqlSession, SaferisError, Chunk[User]] =
   sql"SELECT * FROM $${Table[User]}".query[User]
 ```
 
-`JdbcSessionConfig` carries the session-wide statement timeout, a JDBC `configure` callback, a vendor retry hook, and an `SqlListener`. A connection pool already queues callers. The session does not add a second semaphore.
+`JdbcSessionConfig` carries the session-wide statement timeout, a JDBC `configure` callback, and a vendor retry hook. Statement observation is `SqlListener.observe`, not a field on the driver config. A connection pool already queues callers. The session does not add a second semaphore.
 
 Open a transaction with `transact`. Nested `transact` joins the outer transaction: one commit, one rollback. See [Statement Timeouts](statement-timeouts.html) for `defaultTimeout`."""
     ),

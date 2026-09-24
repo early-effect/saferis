@@ -16,7 +16,25 @@ object GettingStarted extends SaferisDocSpecSuite:
       md"""Add Saferis to your `build.sbt`:
 
 ```scala
-libraryDependencies += "rocks.earlyeffect" %% "saferis" % "0.18.0"
+libraryDependencies ++= Seq(
+  "rocks.earlyeffect" %% "saferis" % "0.18.0",
+  "rocks.earlyeffect" %% "saferis-jdbc" % "0.18.0",
+)
+```
+
+The JDBC artifact is a separate module. `org.postgresql:postgresql` is a compile dependency of `saferis-jdbc` because the driver binds `PGobject` and reads `PSQLException`. It is not `provided`.
+
+A Node application depends on the Scala.js artifacts and on npm packages. The versions below are the ones this repository tests. A missing `require` fails when the bundle loads.
+
+```scala
+libraryDependencies ++= Seq(
+  "rocks.earlyeffect" %%% "saferis" % "0.18.0",
+  "rocks.earlyeffect" %%% "saferis-pg" % "0.18.0",
+)
+```
+
+```bash
+npm install pg@8.16.3 pg-cursor@2.22.0
 ```
 
 Saferis requires ZIO as a provided dependency:
@@ -57,6 +75,7 @@ flowchart TB
 
 ```scala
 import saferis.*
+import saferis.jdbc.*
 import zio.*
 import javax.sql.DataSource
 

@@ -7,13 +7,12 @@ import saferis.mysql.MySQLDialect
 import saferis.postgres.PostgresDialect
 import saferis.spark.SparkDialect
 import saferis.sqlite.SQLiteDialect
-import saferis.tests.DataSourceProvider
 import zio.*
 import zio.test.*
 
 /** Integration tests for Schema validation feature. */
 object SchemaValidationSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default
+  def spec = suite("run from SqlSessionConformance")()
 
   given Dialect = PostgresDialect
 
@@ -54,7 +53,7 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
         case Exit.Success(_) =>
           ZIO.die(new IllegalStateException("verify succeeded"))
 
-  val spec = suite("Schema Validation")(
+  def conformance = suite("Schema Validation")(
     suite("Basic verification")(
       test("verify succeeds when schema matches") {
         val schema = Schema[User].build
@@ -385,6 +384,6 @@ object SchemaValidationSpecs extends ZIOSpecDefault:
         yield mysql && sqlite && spark
       }
     ),
-  ).provideShared(xaLayer) @@ TestAspect.sequential
+  ) @@ TestAspect.sequential
 
 end SchemaValidationSpecs

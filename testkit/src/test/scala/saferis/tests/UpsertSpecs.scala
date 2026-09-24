@@ -1,14 +1,13 @@
 package saferis.tests
 
 import saferis.*
-import saferis.tests.DataSourceProvider
 import zio.*
 import zio.test.*
 
 import java.time.Instant
 
 object UpsertSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default
+  def spec = suite("run from SqlSessionConformance")()
 
   // Test table for upsert - simulates a lock/lease table
   @tableName("upsert_locks")
@@ -151,9 +150,9 @@ object UpsertSpecs extends ZIOSpecDefault:
           assertTrue(results.head.nodeId == "node-1")
       end res
       res,
-  ).provideShared(xaLayer) @@ TestAspect.sequential
+  ) @@ TestAspect.sequential
 
-  override def spec = suite("UpsertSpecs")(
+  def conformance = suite("UpsertSpecs")(
     integrationTests
   )
 end UpsertSpecs

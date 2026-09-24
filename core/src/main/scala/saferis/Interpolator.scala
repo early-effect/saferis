@@ -13,38 +13,33 @@ export Interpolator.in
 
 object Interpolator:
 
-  /** Splice a collection of values as `($1, $2, ...)` for an IN clause:
+  /** One array parameter: `= ANY($1)`. The driver casts that parameter to the element type.
     *
     * {{{
-    *   sql"select * from $table where ${table.id} in ${in(ids)}"
+    *   sql"select * from $table where ${table.id} ${in(ids)}"
     * }}}
     *
-    * Accepts any `Iterable[A]` (`Seq`, `List`, `Set`, `LinkedHashSet`, etc.). Duplicates are removed before placeholder
-    * construction. Each remaining element binds one parameter via the implicit `Encoder[A]`.
+    * Accepts any `Iterable[A]` (`Seq`, `List`, `Set`, `LinkedHashSet`, etc.). Duplicates are removed. The remaining
+    * values are one `SqlValue.Array`.
     *
     * On empty (or degenerate-empty-after-dedupe) input, the resulting placeholder carries a
     * [[FragmentIssue.EmptyCollection]] that surfaces as [[SaferisError.InvalidStatement]] at execution. No DB
     * round-trip on failure.
     */
   def in[A](values: Iterable[A])(using Encoder[A]): Placeholder =
-    Placeholder.concat(
-      Placeholder.raw("("),
-      Placeholder.listTagged(values, helper = "in", origin = Placeholder.captureOrigin()),
-      Placeholder.raw(")"),
-    )
+    anyOf(Placeholder.listTagged(values, helper = "in", origin = Placeholder.captureOrigin()))
 
   /** Varargs convenience overload. At least one element by construction.
     *
     * {{{
-    *   sql"... where ${table.status} in ${in("active", "pending")}"
+    *   sql"... where ${table.status} ${in("active", "pending")}"
     * }}}
     */
   def in[A](first: A, rest: A*)(using Encoder[A]): Placeholder =
-    Placeholder.concat(
-      Placeholder.raw("("),
-      Placeholder.listTagged(first +: rest, helper = "in", origin = Placeholder.captureOrigin()),
-      Placeholder.raw(")"),
-    )
+    anyOf(Placeholder.listTagged(first +: rest, helper = "in", origin = Placeholder.captureOrigin()))
+
+  private def anyOf(list: Placeholder): Placeholder =
+    Placeholder.concat(Placeholder.raw("= ANY("), list, Placeholder.raw(")"))
 
   extension (inline sc: StringContext)
     /** Interpolates a string context creating an [[SqlFragment]].

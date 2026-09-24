@@ -1,9 +1,9 @@
 package saferis.tests
 
 import org.postgresql.ds.PGSimpleDataSource
-import saferis.JdbcSession
-import saferis.JdbcSessionConfig
 import saferis.SqlSession
+import saferis.jdbc.JdbcSession
+import saferis.jdbc.JdbcSessionConfig
 import zio.*
 
 import javax.sql.DataSource

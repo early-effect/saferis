@@ -61,9 +61,9 @@ private final class PooledSession(
             result <- exit match
               case zio.Exit.Success(value) =>
                 failure.get.flatMap:
-                  case Some(err) => ZIO.fail(err)
+                  case Some(err) => connection.rollback *> ZIO.fail(err)
                   case None      => connection.commit.as(value)
-              case zio.Exit.Failure(cause) => ZIO.failCause(cause)
+              case zio.Exit.Failure(cause) => connection.rollback *> ZIO.failCause(cause)
           yield result
 
   private def applied(command: SqlCommand): SqlCommand =

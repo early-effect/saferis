@@ -4,19 +4,18 @@ import saferis.*
 import saferis.ddl.*
 import saferis.dml.*
 import saferis.postgres.given
-import saferis.tests.DataSourceProvider
 import zio.*
 import zio.test.*
 
 object PagedStreamSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default
+  def spec = suite("run from SqlSessionConformance")()
 
   @tableName("paged_stream_users")
   final case class PagedUser(@generated @key id: Int, name: String, age: Int) derives Table
 
   val userTable = Table[PagedUser]
 
-  val spec = suite("Paged Stream Specs")(
+  def conformance = suite("Paged Stream Specs")(
     suite("pagedStream")(
       test("returns pages with correct size") {
         for
@@ -194,6 +193,6 @@ object PagedStreamSpecs extends ZIOSpecDefault:
         yield assertTrue(count == 100)
       },
     ),
-  ).provideShared(xaLayer) @@ TestAspect.sequential
+  ) @@ TestAspect.sequential
 
 end PagedStreamSpecs

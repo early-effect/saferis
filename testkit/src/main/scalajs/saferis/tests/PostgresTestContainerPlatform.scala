@@ -1,6 +1,5 @@
 package saferis.tests
 
-import saferis.PgPromises
 import zio.*
 
 import scala.annotation.unused
@@ -8,15 +7,12 @@ import scala.scalajs.js
 import scala.scalajs.js.annotation.JSImport
 
 private[tests] object PostgresTestContainerPlatform:
-  /** Same tag as jdbc `ContainerConfig`: `postgres:latest`. */
-  private val Image = "postgres:latest"
-
-  /** Started Postgres. `@testcontainers/postgresql` is `require`d from Node, same as `pg`. The scope stops it. */
+  /** Started Postgres. `@testcontainers/postgresql` is `require`d from Node. The scope stops it. */
   val live: ZLayer[Any, Throwable, PostgresTestContainer] =
     ZLayer.scoped:
       ZIO.uninterruptible:
         for
-          started <- PgPromises.complete(None, new PostgreSqlContainer(Image).start(), _ => ())
+          started <- await(open().start())
           _       <- ZIO.addFinalizer(stop(started))
         yield NodePostgres(
           host = started.getHost(),
@@ -26,15 +22,43 @@ private[tests] object PostgresTestContainerPlatform:
           password = started.getPassword(),
         )
 
+  private def open(): PostgreSqlContainer =
+    new PostgreSqlContainer(PostgresTestContainer.Image)
+      .withEnvironment(js.Dictionary("POSTGRES_HOST_AUTH_METHOD" -> "trust"))
+      .withCopyContentToContainer(
+        js.Array(
+          js.Dynamic.literal(
+            content = InitScript.sql,
+            target = PostgresTestContainer.InitScript,
+          )
+        )
+      )
+
+  /** The suite's clock is the live clock. This finalizer does not replace it. */
   private def stop(started: StartedPostgreSqlContainer): UIO[Unit] =
-    PgPromises
-      .complete(None, started.stop(), _ => ())
+    await(started.stop()).orDie
       .timeout(20.seconds)
-      .provideLayer(ZLayer.succeed(Clock.ClockLive))
       .flatMap:
         case Some(_) => ZIO.unit
         case None    => ZIO.dieMessage("Postgres container stop timed out")
-      .orDie
+
+  private def await[A](p: js.Promise[A]): Task[A] =
+    ZIO.asyncInterrupt[Any, Throwable, A]: register =>
+      var settled = false
+      p.`then`[Unit](
+        (value: A) =>
+          if !settled then
+            settled = true
+            register(ZIO.succeed(value))
+          else (),
+        (err: scala.Any) =>
+          if !settled then
+            settled = true
+            val message = if err == null then "container call failed" else err.toString
+            register(ZIO.fail(new RuntimeException(message)))
+          else (),
+      )
+      Left(ZIO.succeed { settled = true })
 
   private final class NodePostgres(
       val host: String,
@@ -44,11 +68,12 @@ private[tests] object PostgresTestContainerPlatform:
       val password: String,
   ) extends PostgresTestContainer
 
-  /** CommonJS `require("@testcontainers/postgresql").PostgreSqlContainer`. */
   @js.native
   @JSImport("@testcontainers/postgresql", "PostgreSqlContainer")
   private class PostgreSqlContainer(@unused image: String) extends js.Object:
-    def start(): js.Promise[StartedPostgreSqlContainer] = js.native
+    def withEnvironment(environment: js.Dictionary[String]): PostgreSqlContainer       = js.native
+    def withCopyContentToContainer(contents: js.Array[js.Object]): PostgreSqlContainer = js.native
+    def start(): js.Promise[StartedPostgreSqlContainer]                                = js.native
 
   @js.native
   private trait StartedPostgreSqlContainer extends js.Object:

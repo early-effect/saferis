@@ -4,7 +4,6 @@ import saferis.*
 import saferis.ddl.*
 import saferis.dml.*
 import saferis.postgres.given
-import saferis.tests.DataSourceProvider
 import zio.*
 import zio.stream.*
 import zio.test.*
@@ -12,7 +11,7 @@ import zio.test.*
 import java.util.concurrent.atomic.AtomicInteger
 
 object StreamSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default
+  def spec = suite("run from SqlSessionConformance")()
 
   @tableName("stream_test_users")
   final case class StreamUser(@generated @key id: Int, name: String, age: Int) derives Table
@@ -24,7 +23,7 @@ object StreamSpecs extends ZIOSpecDefault:
   val userTable = Table[StreamUser]
   val itemTable = Table[StreamItem]
 
-  val spec = suite("Stream Specs")(
+  def conformance = suite("Stream Specs")(
     suite("Basic Streaming")(
       test("queryStream returns same results as query for small datasets") {
         for
@@ -306,6 +305,6 @@ object StreamSpecs extends ZIOSpecDefault:
         yield assertTrue(count == 100L)
       },
     ),
-  ).provideShared(xaLayer) @@ TestAspect.sequential
+  ) @@ TestAspect.sequential
 
 end StreamSpecs

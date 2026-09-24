@@ -2,12 +2,11 @@ package saferis.tests
 
 import saferis.*
 import saferis.dml.*
-import saferis.tests.DataSourceProvider
 import zio.*
 import zio.test.*
 
 object DataManipulationLayerSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default
+  def spec = suite("run from SqlSessionConformance")()
 
   val dmlTests = suiteAll("should handle DML operations"):
 
@@ -315,5 +314,5 @@ object DataManipulationLayerSpecs extends ZIOSpecDefault:
 
   final case class CountResult(count: Long) derives Table
 
-  val spec = suite("DML Operations")(dmlTests).provideShared(xaLayer) @@ TestAspect.sequential
+  def conformance = suite("DML Operations")(dmlTests) @@ TestAspect.sequential
 end DataManipulationLayerSpecs

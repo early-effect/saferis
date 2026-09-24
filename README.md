@@ -23,7 +23,25 @@
 Add to your `build.sbt`:
 
 ```scala
-libraryDependencies += "rocks.earlyeffect" %% "saferis" % "<version>"
+// JVM. saferis-jdbc talks to Postgres. postgresql is a compile dependency of that
+// artifact (PGobject, PSQLException), not a provided dependency you add yourself.
+libraryDependencies ++= Seq(
+  "rocks.earlyeffect" %% "saferis" % "<version>",
+  "rocks.earlyeffect" %% "saferis-jdbc" % "<version>",
+)
+```
+
+Node (Scala.js) uses `saferis-pg`. Compile does not download `pg`. Install the same versions this repository links against, or `require` fails when the bundle loads:
+
+```scala
+libraryDependencies ++= Seq(
+  "rocks.earlyeffect" %%% "saferis" % "<version>",
+  "rocks.earlyeffect" %%% "saferis-pg" % "<version>",
+)
+```
+
+```bash
+npm install pg@8.16.3 pg-cursor@2.22.0
 ```
 
 ## Database Dialects

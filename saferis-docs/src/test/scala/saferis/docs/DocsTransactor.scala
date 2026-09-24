@@ -2,8 +2,8 @@ package saferis.docs
 
 import org.postgresql.ds.PGSimpleDataSource
 import org.testcontainers.containers.PostgreSQLContainer
-import saferis.JdbcSession
 import saferis.SqlSession
+import saferis.jdbc.JdbcSession
 import zio.*
 
 import javax.sql.DataSource
@@ -16,7 +16,7 @@ object DocsTransactor:
     val previous = thread.getContextClassLoader()
     thread.setContextClassLoader(getClass.getClassLoader())
     try
-      val c = new PostgreSQLContainer("postgres:16")
+      val c = new PostgreSQLContainer("postgres:17")
       c.withEnv("POSTGRES_HOST_AUTH_METHOD", "trust")
       c.start()
       c

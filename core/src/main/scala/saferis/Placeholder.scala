@@ -53,12 +53,13 @@ object Placeholder:
   def list[A](first: A, rest: A*)(using Encoder[A]): Placeholder =
     listTagged(first +: rest, helper = "Placeholder.list", origin = captureOrigin())
 
+  /** One array parameter. Empty input is an issue, not `IN ()`. */
   private[saferis] def listTagged[A](values: Iterable[A], helper: String, origin: Option[StackTraceElement])(using
       encoder: Encoder[A]
   ): Placeholder =
     val deduped = values.iterator.distinct.toVector
     if deduped.isEmpty then Derived(Chunk.empty, List(FragmentIssue.EmptyCollection(helper, origin)), None)
-    else join(deduped.map(a => param(encoder.encode(a))), ", ")
+    else param(SqlValue.Array(encoder.sqlType, Chunk.fromIterable(deduped.map(encoder.encode))))
 
   private[saferis] def captureOrigin(): Option[StackTraceElement] =
     val st = new Throwable().getStackTrace

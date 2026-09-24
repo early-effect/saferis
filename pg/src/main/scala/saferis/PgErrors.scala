@@ -1,9 +1,11 @@
-package saferis
+package saferis.pg
+
+import saferis.*
 
 import scala.scalajs.js
 
 /** Reads `code`, `constraint`, and `message` off a rejected `pg` value. */
-private[saferis] object PgErrors:
+private[pg] object PgErrors:
   def info(t: Throwable): ServerError =
     t match
       case js.JavaScriptException(value) => fromDynamic(value)

@@ -3,8 +3,10 @@
   "private": true,
   "type": "commonjs",
   "dependencies": {
-    "@testcontainers/postgresql": "12.1.0",
     "pg": "8.16.3",
-    "pg-query-stream": "4.10.3"
+    "pg-cursor": "2.22.0"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "12.1.0"
   }
 }

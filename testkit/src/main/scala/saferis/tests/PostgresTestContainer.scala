@@ -11,5 +11,11 @@ trait PostgresTestContainer:
   def password: String
 
 object PostgresTestContainer:
+  /** Same image on every platform. CI pre-pulls this tag. */
+  val Image = "postgres:17"
+
+  /** Runs once, on first start, from the image entrypoint. */
+  val InitScript = "/docker-entrypoint-initdb.d/init.sql"
+
   val live: ZLayer[Any, Throwable, PostgresTestContainer] =
     PostgresTestContainerPlatform.live

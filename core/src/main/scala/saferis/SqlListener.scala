@@ -75,7 +75,9 @@ object SqlListener:
           .ensuringWith(exit => report(command, start, count, exit))
 
     def transact[R, A](body: ZIO[SqlSession & R, SaferisError, A]): ZIO[R, SaferisError, A] =
-      inner.transact(body.provideSomeLayer[R](ZLayer.succeed[SqlSession](this)))
+      inner.transact:
+        ZIO.serviceWithZIO[SqlSession]: child =>
+          body.provideSomeLayer[R](ZLayer.succeed[SqlSession](Observed(child, listener)))
 
     private def timed[A](command: SqlCommand, effect: zio.IO[SaferisError, A], rows: A => Long)(using
         Trace

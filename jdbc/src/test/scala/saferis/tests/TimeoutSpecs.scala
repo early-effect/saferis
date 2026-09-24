@@ -1,6 +1,7 @@
 package saferis.tests
 
 import saferis.*
+import saferis.jdbc.JdbcSessionConfig
 import saferis.tests.DataSourceProvider
 import zio.*
 import zio.test.*

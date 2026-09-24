@@ -13,7 +13,7 @@ sealed trait FragmentIssue:
 object FragmentIssue:
 
   /** An IN/NOT-IN/list helper was called with an empty (or degenerate-empty-after-dedupe) collection. The resulting SQL
-    * would be invalid (`IN ()` / empty placeholder list).
+    * would be invalid (`= ANY()` / an empty array parameter).
     *
     * @param helper
     *   Name of the helper that produced the issue (e.g. "in", "Placeholder.list", "WhereBuilder.in"). Used in the error

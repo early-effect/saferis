@@ -2,6 +2,7 @@ package saferis.tests
 
 import saferis.*
 import saferis.ddl.*
+import saferis.jdbc.JdbcSessionConfig
 import saferis.dml.*
 import saferis.postgres.given
 import saferis.tests.DataSourceProvider
@@ -13,9 +14,6 @@ import java.sql.Connection
 object TransactorSpecs extends ZIOSpecDefault:
   val serializable = DataSourceProvider.configured(
     JdbcSessionConfig(configure = _.setTransactionIsolation(Connection.TRANSACTION_SERIALIZABLE))
-  )
-  val readCommitted = DataSourceProvider.configured(
-    JdbcSessionConfig(configure = _.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED))
   )
   val defaultTransactor = DataSourceProvider.default
 
@@ -304,8 +302,8 @@ object TransactorSpecs extends ZIOSpecDefault:
   end transactionSuite
 
   val concurrencyTestsUnlimited =
-    suiteAll("should handle unlimited concurrency"):
-      test("concurrent access with no semaphore limit"):
+    suiteAll("concurrent inserts"):
+      test("concurrent inserts all commit"):
         @tableName("test_transactor_unlimited")
         final case class UnlimitedTable(@key id: Int, name: String) derives Table
 
@@ -324,48 +322,6 @@ object TransactorSpecs extends ZIOSpecDefault:
           assertTrue(count.map(_.count).contains(10))
         end for
 
-  val concurrencyTestsLimited =
-    suiteAll("should handle limited concurrency"):
-      test("concurrent access with semaphore limit of 2"):
-        @tableName("test_transactor_limited")
-        final case class LimitedTable(@key id: Int, name: String) derives Table
-
-        for
-          _ <-
-            sql"drop table if exists test_transactor_limited".dml
-          _ <-
-            sql"create table test_transactor_limited (id integer primary key, name varchar(255))".dml
-          // Run operations concurrently - only 2 should run at once due to semaphore
-          results <- ZIO.collectAllPar:
-            (1 to 5).map: i =>
-              insert(LimitedTable(i, s"Limited $i"))
-          count <-
-            sql"select count(*) as count from test_transactor_limited".queryOne[CountResult]
-        yield assertTrue(results.forall(_ == 1)) &&
-          assertTrue(count.map(_.count).contains(5))
-        end for
-
-  val concurrencyTestsSerialized =
-    suiteAll("should handle serialized concurrency"):
-      test("concurrent access with semaphore limit of 1"):
-        @tableName("test_transactor_serialized")
-        final case class SerializedTable(@key id: Int, name: String) derives Table
-
-        for
-          _ <-
-            sql"drop table if exists test_transactor_serialized".dml
-          _ <-
-            sql"create table test_transactor_serialized (id integer primary key, name varchar(255))".dml
-          // Run operations concurrently - but they should be effectively serialized
-          results <- ZIO.collectAllPar:
-            (1 to 3).map: i =>
-              insert(SerializedTable(i, s"Serialized $i"))
-          count <-
-            sql"select count(*) as count from test_transactor_serialized".queryOne[CountResult]
-        yield assertTrue(results.forall(_ == 1)) &&
-          assertTrue(count.map(_.count).contains(3))
-        end for
-
   val configuratorTests =
     suiteAll("should apply configurator"):
       test("configurator sets transaction isolation"):
@@ -379,12 +335,10 @@ object TransactorSpecs extends ZIOSpecDefault:
   final case class CountResult(count: Long) derives Table
   final case class ValueResult(value: Int) derives Table
 
-  val all = suiteAll("A transactor"):
+  val all = suiteAll("session"):
     runSuite.provideShared(defaultTransactor)
     transactionSuite.provideShared(serializable)
     concurrencyTestsUnlimited.provideShared(defaultTransactor)
-    concurrencyTestsLimited.provideShared(readCommitted)
-    concurrencyTestsSerialized.provideShared(serializable)
     configuratorTests.provideShared(serializable)
 
   val spec = all @@ TestAspect.sequential

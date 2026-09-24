@@ -1,7 +1,6 @@
 package saferis.tests
 
 import saferis.*
-import saferis.tests.DataSourceProvider
 import zio.*
 import zio.test.*
 
@@ -15,7 +14,7 @@ import zio.test.*
   *     `.catchSome`.
   */
 object InCollectionIntegrationSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default
+  def spec = suite("run from SqlSessionConformance")()
 
   @tableName("in_collection_users")
   final case class InUser(@key id: Int, name: String) derives Table
@@ -70,13 +69,13 @@ object InCollectionIntegrationSpecs extends ZIOSpecDefault:
     test("Raw sql with in(List) returns rows matching the spliced ids"):
       for
         _    <- seedTable
-        rows <- (sql"select * from in_collection_users where id in ${in(List(2, 4))}".query[InUser])
+        rows <- (sql"select * from in_collection_users where id ${in(List(2, 4))}".query[InUser])
       yield assertTrue(rows.map(_.id).toSet == Set(2, 4))
 
     test("Raw sql with varargs in(...) returns rows matching the inline ids"):
       for
         _    <- seedTable
-        rows <- (sql"select * from in_collection_users where id in ${in(2, 4)}".query[InUser])
+        rows <- (sql"select * from in_collection_users where id ${in(2, 4)}".query[InUser])
       yield assertTrue(rows.map(_.id).toSet == Set(2, 4))
 
     // === Dedupe end-to-end ===
@@ -114,7 +113,7 @@ object InCollectionIntegrationSpecs extends ZIOSpecDefault:
       for
         _      <- seedTable
         result <-
-          (sql"select * from in_collection_users where id in ${in(List.empty[Int])}".query[InUser]).either
+          (sql"select * from in_collection_users where id ${in(List.empty[Int])}".query[InUser]).either
       yield assertTrue(result match
         case Left(SaferisError.InvalidStatement(issues)) =>
           issues.exists {
@@ -159,5 +158,5 @@ object InCollectionIntegrationSpecs extends ZIOSpecDefault:
 
   end tests
 
-  val spec = suite("InCollectionIntegrationSpecs")(tests).provideShared(xaLayer) @@ TestAspect.sequential
+  def conformance = suite("InCollectionIntegrationSpecs")(tests) @@ TestAspect.sequential
 end InCollectionIntegrationSpecs

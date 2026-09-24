@@ -5,7 +5,6 @@ import saferis.Schema.*
 import saferis.ddl.*
 import saferis.dml.*
 import saferis.postgres.PostgresDialect
-import saferis.tests.DataSourceProvider
 import zio.*
 import zio.json.*
 import zio.test.*
@@ -14,7 +13,7 @@ import zio.test.*
   * actual database behavior.
   */
 object SchemaIntegrationSpecs extends ZIOSpecDefault:
-  val xaLayer = DataSourceProvider.default
+  def spec = suite("run from SqlSessionConformance")()
 
   // Provide PostgresDialect for JSON operators
   given (Dialect & JsonSupport) = PostgresDialect
@@ -72,7 +71,7 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
   @tableName("Prd.Foo")
   final case class PrdFoo(@key id: Int, name: String) derives Table
 
-  val spec = suite("Schema Integration Tests")(
+  def conformance = suite("Schema Integration Tests")(
     // === Partial Index Creation ===
     suite("Partial index creation")(
       test("creates partial index with WHERE clause") {
@@ -625,6 +624,6 @@ object SchemaIntegrationSpecs extends ZIOSpecDefault:
         end for
       },
     ),
-  ).provideShared(xaLayer) @@ TestAspect.sequential
+  ) @@ TestAspect.sequential
 
 end SchemaIntegrationSpecs
