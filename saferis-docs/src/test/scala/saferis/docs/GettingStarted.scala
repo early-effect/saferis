@@ -22,7 +22,16 @@ libraryDependencies ++= Seq(
 )
 ```
 
-`saferis-postgres-jdbc` is the Postgres driver. It is the module that depends on pgjdbc. `saferis-jdbc` is `java.sql` only: bind, read, and server errors come from a `JdbcAdapter`.
+Add `saferis` and the one adapter for your database. `saferis-jdbc` is `java.sql` only, and each adapter supplies what its database does differently (bind, read, server errors, cursors) and brings its own JDBC driver:
+
+| Database | Adapter module | Layer |
+|----------|----------------|-------|
+| PostgreSQL | `saferis-postgres-jdbc` (pgjdbc) | `PostgresJdbc.layer()` |
+| MySQL | `saferis-mysql-jdbc` (Connector/J) | `MySqlJdbc.layer()` with `import saferis.mysql.given` |
+| SQLite | `saferis-sqlite-jdbc` (sqlite-jdbc) | `SqliteJdbc.layer()` with `import saferis.sqlite.given` |
+| H2, for fast in-memory tests | `saferis-h2-jdbc` | `H2Jdbc.layer()` with `import saferis.h2.given` |
+
+A database Saferis does not ship needs a `Dialect` and a `JdbcAdapter`. Extend `StandardJdbcAdapter`, override what your driver does differently, and pass it to `JdbcSession.layer`.
 
 A Node application depends on the Scala.js artifacts and on npm packages. The versions below are the ones this repository tests. A missing `require` fails when the bundle loads.
 

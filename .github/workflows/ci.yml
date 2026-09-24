@@ -115,12 +115,28 @@ jobs:
             sleep $((attempt * 10))
           done
 
+      - name: Pre-pull MySQL image
+        run: |
+          set -euo pipefail
+          image=mysql:8.4
+          max=5
+          for attempt in $(seq 1 "$max"); do
+            if docker pull "$image"; then
+              exit 0
+            fi
+            if [ "$attempt" -eq "$max" ]; then
+              echo "Failed to pull $image after $max attempts" >&2
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
+
       - name: test
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
-            sbt 'cleanFull; core/testFull; coreJS/testFull; coreNative/testFull; postgres/testFull; postgresJS/testFull; postgresNative/testFull; jdbc/testFull; postgresJdbc/testFull; docs/specularSite'
+            sbt 'cleanFull; core/testFull; coreJS/testFull; coreNative/testFull; postgres/testFull; postgresJS/testFull; postgresNative/testFull; jdbc/testFull; postgresJdbc/testFull; mysqlJdbc/testFull; sqliteJdbc/testFull; h2Jdbc/testFull; docs/specularSite'
           else
-            sbt 'core/testFull; coreJS/testFull; coreNative/testFull; postgres/testFull; postgresJS/testFull; postgresNative/testFull; jdbc/testFull; postgresJdbc/testFull; docs/specularSite'
+            sbt 'core/testFull; coreJS/testFull; coreNative/testFull; postgres/testFull; postgresJS/testFull; postgresNative/testFull; jdbc/testFull; postgresJdbc/testFull; mysqlJdbc/testFull; sqliteJdbc/testFull; h2Jdbc/testFull; docs/specularSite'
           fi
         env:
           ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
@@ -303,7 +319,7 @@ jobs:
         env:
           PGP_SECRET: ${{ secrets.PGP_SECRET }}
       - name: publish
-        run: sbt 'core/publishSigned; coreJS/publishSigned; coreNative/publishSigned; jdbc/publishSigned; postgres/publishSigned; postgresJS/publishSigned; postgresNative/publishSigned; pgJS/publishSigned; postgresJdbc/publishSigned; sonaRelease'
+        run: sbt 'core/publishSigned; coreJS/publishSigned; coreNative/publishSigned; postgres/publishSigned; postgresJS/publishSigned; postgresNative/publishSigned; jdbc/publishSigned; pgJS/publishSigned; h2Jdbc/publishSigned; mysqlJdbc/publishSigned; postgresJdbc/publishSigned; sqliteJdbc/publishSigned; sonaRelease'
   github-packages:
     name: github-packages
     runs-on: ubuntu-latest
@@ -333,7 +349,7 @@ jobs:
           local-cache: "true"
           cache-epoch: ""
       - name: github-packages
-        run: sbt 'core/publish; coreJS/publish; coreNative/publish; jdbc/publish; postgres/publish; postgresJS/publish; postgresNative/publish; pgJS/publish; postgresJdbc/publish'
+        run: sbt 'core/publish; coreJS/publish; coreNative/publish; postgres/publish; postgresJS/publish; postgresNative/publish; jdbc/publish; pgJS/publish; h2Jdbc/publish; mysqlJdbc/publish; postgresJdbc/publish; sqliteJdbc/publish'
   docs:
     name: docs
     if: ((startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch')) && (github.repository == 'early-effect/saferis')

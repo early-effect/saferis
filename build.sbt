@@ -115,6 +115,7 @@ zipxCapabilities ++= {
         LocalProject("postgresJdbc") / testFull,
         LocalProject("mysqlJdbc") / testFull,
         LocalProject("sqliteJdbc") / testFull,
+        LocalProject("h2Jdbc") / testFull,
         LocalProject("docs") / specularSite,
       ),
       // GHA VMs are disposable; skip Ryuk so Hub flakes on testcontainers/ryuk cannot fail CI.
@@ -168,7 +169,7 @@ lazy val root = project
   .in(file("."))
   .aggregate(
     (core.projectRefs ++ postgres.projectRefs ++ jdbc.projectRefs ++ postgresJdbc.projectRefs ++
-      mysqlJdbc.projectRefs ++ sqliteJdbc.projectRefs ++ pg.projectRefs ++ testkit.projectRefs ++
+      mysqlJdbc.projectRefs ++ sqliteJdbc.projectRefs ++ h2Jdbc.projectRefs ++ pg.projectRefs ++ testkit.projectRefs ++
       Seq[sbt.ProjectReference](docs, pgEsm))*
   )
   .settings(
@@ -278,6 +279,21 @@ lazy val mysqlJdbc = (projectMatrix in file("mysql-jdbc"))
   .settings(
     name        := "saferis-mysql-jdbc",
     description := "MySQL JdbcAdapter on Connector/J.",
+  )
+  .jvmPlatform(scalaVersions = scalaVersions)
+
+// H2 JdbcAdapter and dialect. Pull this and saferis-jdbc for fast in-memory tests.
+lazy val h2Jdbc = (projectMatrix in file("h2-jdbc"))
+  .dependsOn(jdbc)
+  .dependsOn(testkit % "test->compile;test->test")
+  .settings(commonSettings)
+  .settings(publishSettings)
+  .settings(MyVersions.h2JdbcLib)
+  .settings(MyVersions.coreTest)
+  .settings(MyVersions.h2JdbcTest)
+  .settings(
+    name        := "saferis-h2-jdbc",
+    description := "H2 JdbcAdapter and dialect, for fast in-memory tests.",
   )
   .jvmPlatform(scalaVersions = scalaVersions)
 
