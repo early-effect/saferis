@@ -16,9 +16,8 @@ object MyVersions extends ZipxVersions:
   val zio             = Lib("dev.zio", "zio", "2.1.26")
   val zioStreams      = zio.mod("zio-streams")
   val zioJson         = Lib("dev.zio", "zio-json", "0.10.0")
-  val zioTest         = zio.mod("zio-test")
-  val zioTestSbt      = zio.mod("zio-test-sbt")
-  val zioTestMagnolia = zio.mod("zio-test-magnolia")
+  val zioTest    = zio.mod("zio-test")
+  val zioTestSbt = zio.mod("zio-test-sbt")
   val zioLoggingSlf4j = Lib("dev.zio", "zio-logging-slf4j2-bridge", "2.5.3")
 
   val postgresqlTc = Lib("org.testcontainers", "postgresql", "1.21.4").java
@@ -36,17 +35,22 @@ object MyVersions extends ZipxVersions:
   val dynverCi       = Plugin("rocks.earlyeffect", "sbt-dynver-ci", "0.2.3")
   val scoverage      = Plugin("org.scoverage", "sbt-scoverage", "2.4.4")
   val scalajs        = Plugin("org.scala-js", "sbt-scalajs", "1.22.0")
+  val scalaNative    = Plugin("org.scala-native", "sbt-scala-native", "0.5.12")
+
+  val scalaJavaTime     = Lib("io.github.cquiroz", "scala-java-time", "2.7.0")
+  val scalaJavaTimeTzdb = scalaJavaTime.mod("scala-java-time-tzdb")
 
   private def provided(lib: Lib): Lib = lib.copy(config = Some("provided"))
 
   def coreLib  = library(provided(zio), provided(zioStreams), provided(zioJson))
-  def coreTest = library(zioTest.test, zioTestSbt.test, zioTestMagnolia.test)
+  def coreTest = library(zioTest.test, zioTestSbt.test)
   def jdbcLib  = library(provided(zio), provided(zioStreams), postgresql)
   def jdbcTest = library(zioLoggingSlf4j.test, postgresqlTc.test, zioJson.test)
   def pgLib    = library(provided(zio), provided(zioStreams))
   def docsLib  = library(zio, zioStreams)
   // postgresql comes from saferis-jdbc's compile dependency. A second test-scoped copy is redundant.
   def docsTest   = library(specularZioTest, specularTheme, postgresqlTc.test, slf4jNop.test)
-  def testkitJvm  = library(postgresqlTc)
-  def testkitTest = library(zioJson.test)
+  def testkitJvm     = library(postgresqlTc)
+  def testkitTest    = library(zioJson.test)
+  def nativeJavaTime = library(scalaJavaTime, scalaJavaTimeTzdb)
 end MyVersions

@@ -1,5 +1,6 @@
 import org.scalajs.linker.interface.ModuleKind
 import org.scalajs.sbtplugin.ScalaJSPlugin.autoImport.*
+import scala.scalanative.sbtplugin.ScalaNativePlugin.autoImport.nativeConfig
 // sbt has its own `Exec` (a queued command). This is the shell AST's simple command.
 import zipx.shell.Exec
 
@@ -102,6 +103,7 @@ zipxCapabilities ++= {
       command = zipxTasks.session(
         LocalProject("core") / testFull,
         LocalProject("coreJS") / testFull,
+        LocalProject("coreNative") / testFull,
         LocalProject("postgres") / testFull,
         LocalProject("postgresJS") / testFull,
         LocalProject("jdbc") / testFull,
@@ -165,7 +167,16 @@ lazy val root = project
     publish / skip := true,
   )
 
-// Core library. JVM and Scala.js. No JDBC.
+// Core library. JVM, Scala.js, and Scala Native. No JDBC.
+lazy val nativeCore =
+  MyVersions.nativeJavaTime ++ Seq(
+    nativeConfig ~= (_.withMultithreading(true)),
+    libraryDependencySchemes += "org.scala-native" % "test-interface_native0.5_3" % "early-semver",
+    dependencyOverrides += Def.uncached(
+      "org.scala-native" % "test-interface_native0.5_3" % (MyVersions.scalaNative.version: String)
+    ),
+  )
+
 lazy val core = (projectMatrix in file("core"))
   .settings(commonSettings)
   .settings(publishSettings)
@@ -177,6 +188,7 @@ lazy val core = (projectMatrix in file("core"))
   )
   .jvmPlatform(scalaVersions = scalaVersions)
   .jsPlatform(scalaVersions = scalaVersions)
+  .nativePlatform(scalaVersions = scalaVersions, nativeCore)
 
 // Postgres text codec and connection settings. JVM and Scala.js. No driver.
 lazy val postgres = (projectMatrix in file("postgres"))

@@ -263,11 +263,13 @@ object InterpolatorSpecs extends ZIOSpecDefault:
         val frag = sql"select * from t where a ${in(List(1, 2))} or b ${in(List.empty[Int])}"
         assertTrue(frag.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1, frag.issues.size == 1)
 
-      test("origin frame is non-null and outside the saferis package"):
+      test("origin frame is the caller, outside the saferis package"):
         val ph = in(List.empty[Int])
         assertTrue(ph.issues.exists {
           case FragmentIssue.EmptyCollection(_, Some(frame)) =>
-            frame.getFileName != null && !frame.getClassName.startsWith("saferis.")
+            // Native stack traces omit the file name. The class is still the caller.
+            val file = Option(frame.getFileName).forall(_.nonEmpty)
+            file && !frame.getClassName.startsWith("saferis.")
           case _ => false
         })
 
