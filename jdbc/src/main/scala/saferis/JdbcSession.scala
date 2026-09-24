@@ -17,7 +17,6 @@ import zio.stream.ZStream
 import java.sql.Connection
 import java.sql.PreparedStatement
 import java.sql.ResultSet
-import java.sql.ResultSetMetaData
 import java.sql.SQLException
 import java.util.Locale
 import javax.sql.DataSource
@@ -39,7 +38,10 @@ object JdbcSession:
     ZLayer.fromFunction: (ds: DataSource) =>
       SqlSession.pooled(checkout(ds, adapter, config), config.defaultTimeout)
 
-  private def checkout(
+  /** One checked-out connection, closed when the scope ends. Public so an adapter can wrap it, for example to serialize
+    * checkouts on a database with one writer, and hand the result to [[SqlSession.pooled]].
+    */
+  def checkout(
       ds: DataSource,
       adapter: JdbcAdapter,
       config: JdbcSessionConfig,
@@ -67,8 +69,7 @@ object JdbcSession:
       else if nanosFraction > 0 then if seconds + 1L >= Int.MaxValue.toLong then Int.MaxValue else (seconds + 1L).toInt
       else seconds.toInt
 
-  private[jdbc] def messageOf(t: Throwable): String =
-    Option(t.getMessage).filter(_.nonEmpty).getOrElse(t.getClass.getName)
+  private[jdbc] def messageOf(t: Throwable): String = StandardJdbcAdapter.messageOf(t)
 end JdbcSession
 
 private final class JdbcConnection(
@@ -147,7 +148,7 @@ private final class JdbcConnection(
         driver(Some(sql), ZIO.attemptBlocking(rs.next())).flatMap: hasRow =>
           if !hasRow then ZIO.succeed(None)
           else
-            driver(Some(sql), ZIO.attemptBlocking(JdbcReads.readRow(adapter, rs))).flatMap:
+            driver(Some(sql), ZIO.attemptBlocking(JdbcReads.readRow(adapter, rs, JdbcReads.columns(rs)))).flatMap:
               case Left(err)  => ZIO.fail(err)
               case Right(row) => ZIO.succeed(Some(row))
 
@@ -159,18 +160,16 @@ private final class JdbcConnection(
     ZStream.unwrapScoped:
       for
         already <- inTxn.get
-        strategy = adapter.cursor
-        owned    = strategy match
-          case CursorStrategy.Fetch(_, true) if !already => true
-          case _                                         => false
-        fetch = strategy match
-          case CursorStrategy.Fetch(size, _) => Some(size)
-          case CursorStrategy.Buffered       => None
+        (fetch, owned) = adapter.cursor match
+          case CursorStrategy.Buffered                 => (None, false)
+          case CursorStrategy.Fetch(size)              => (Some(size), false)
+          case CursorStrategy.FetchInTransaction(size) => (Some(size), !already)
         _  <- ZIO.when(owned)(begin)
         ps <- ZIO.acquireRelease(openStatement(conn, command, sql, timeout, fetch))(closeStatement)
         rs <- ZIO.acquireRelease(
           blocking(Some(sql), ps)(ps.executeQuery())
         )(rs => ZIO.attemptBlocking(rs.close()).ignore)
+        columns <- driver(Some(sql), ZIO.attemptBlocking(JdbcReads.columns(rs)))
       yield
         val pulls = ZStream.repeatZIOOption:
           driver(Some(sql), ZIO.attemptBlocking(rs.next()))
@@ -178,7 +177,7 @@ private final class JdbcConnection(
             .flatMap: hasNext =>
               if !hasNext then ZIO.fail(None)
               else
-                driver(Some(sql), ZIO.attemptBlocking(JdbcReads.readRow(adapter, rs)))
+                driver(Some(sql), ZIO.attemptBlocking(JdbcReads.readRow(adapter, rs, columns)))
                   .mapError(err => Some(err))
                   .flatMap:
                     case Left(err)  => ZIO.fail(Some(err))
@@ -202,10 +201,11 @@ private final class JdbcConnection(
           timeout.foreach(d => ps.setQueryTimeout(toJdbcSeconds(d)))
           fetchSize.foreach(ps.setFetchSize)
           bind(ps, command.pieces),
-      ).foldCauseZIO(
-        cause => ZIO.attemptBlocking(ps.close()).ignore *> ZIO.failCause(cause),
-        _ => ZIO.succeed(ps),
-      )
+      ).flatMap(ZIO.fromEither(_))
+        .foldCauseZIO(
+          cause => ZIO.attemptBlocking(ps.close()).ignore *> ZIO.failCause(cause),
+          _ => ZIO.succeed(ps),
+        )
 
   private def withStatement[A](
       conn: Connection,
@@ -219,16 +219,12 @@ private final class JdbcConnection(
   private def closeStatement(ps: PreparedStatement): UIO[Unit] =
     ZIO.attemptBlocking(ps.close()).ignore
 
-  /** Forks the call so the wait can be interrupted. `cancel` is what stops `pg_sleep`: pgjdbc ignores
+  /** Interrupting the wait calls `Statement.cancel`. JDBC drivers stop a running statement that way, not through
     * `Thread.interrupt`.
     */
   private def blocking[A](sql: Option[String], ps: PreparedStatement)(thunk: => A)(using Trace): IO[SaferisError, A] =
     ZIO
-      .attemptBlocking(thunk)
-      .fork
-      .flatMap { fiber =>
-        fiber.join.onInterrupt(ZIO.attemptBlocking(ps.cancel()).ignore)
-      }
+      .attemptBlockingCancelable(thunk)(ZIO.attemptBlocking(ps.cancel()).ignore)
       .mapError(t => classifyThrowable(t, sql))
 
   private def driver[A](sql: Option[String], effect: IO[Throwable, A])(using Trace): IO[SaferisError, A] =
@@ -249,50 +245,45 @@ private final class JdbcConnection(
     case e: java.io.IOException => SaferisError.ConnectionLost("08000", messageOf(e), sql)
     case e                      => SaferisError.Unexpected(messageOf(e))
 
-  private def bind(ps: PreparedStatement, pieces: Chunk[SqlPiece]): Unit =
-    val _ = pieces.foldLeft(1): (index, piece) =>
-      piece match
-        case SqlPiece.Text(_)      => index
-        case SqlPiece.Param(value) =>
-          adapter.bind(ps, index, value)
-          index + 1
+  /** Parameters bind in order. The first value the adapter refuses stops the bind. */
+  private def bind(ps: PreparedStatement, pieces: Chunk[SqlPiece]): Either[SaferisError, Unit] =
+    pieces
+      .collect { case SqlPiece.Param(value) => value }
+      .zipWithIndex
+      .foldLeft[Either[SaferisError, Unit]](Right(())):
+        case (Left(err), _)             => Left(err)
+        case (Right(_), (value, index)) => adapter.bind(ps, index + 1, value)
 end JdbcConnection
 
 private object JdbcReads:
+  /** Described once per result set, not once per row. */
+  def columns(rs: ResultSet): Chunk[JdbcColumn] =
+    val meta = rs.getMetaData
+    Chunk.fromIterable:
+      (1 to meta.getColumnCount).map: index =>
+        JdbcColumn(
+          index = index,
+          label = Option(meta.getColumnLabel(index)).getOrElse(""),
+          typeName = Option(meta.getColumnTypeName(index)).getOrElse("").toLowerCase(Locale.ROOT),
+          jdbcType = meta.getColumnType(index),
+        )
+  end columns
+
   def materialize(adapter: JdbcAdapter, rs: ResultSet): Either[SaferisError, Chunk[SqlRow]] =
-    val meta   = rs.getMetaData
-    val width  = meta.getColumnCount
-    val labels = Chunk.fromIterable((1 to width).map(i => Option(meta.getColumnLabel(i)).getOrElse("")))
-    val rows   = Chunk.newBuilder[SqlRow]
+    val described                    = columns(rs)
+    val rows                         = Chunk.newBuilder[SqlRow]
     var failed: Option[SaferisError] = None
     while failed.isEmpty && rs.next() do
-      readRow(adapter, rs, meta, labels, width) match
+      readRow(adapter, rs, described) match
         case Left(err)  => failed = Some(err)
         case Right(row) => rows += row
     failed.fold[Either[SaferisError, Chunk[SqlRow]]](Right(rows.result()))(Left(_))
   end materialize
 
-  def readRow(adapter: JdbcAdapter, rs: ResultSet): Either[SaferisError, SqlRow] =
-    val meta   = rs.getMetaData
-    val width  = meta.getColumnCount
-    val labels = Chunk.fromIterable((1 to width).map(i => Option(meta.getColumnLabel(i)).getOrElse("")))
-    readRow(adapter, rs, meta, labels, width)
-
-  private def readRow(
-      adapter: JdbcAdapter,
-      rs: ResultSet,
-      meta: ResultSetMetaData,
-      labels: Chunk[String],
-      width: Int,
-  ): Either[SaferisError, SqlRow] =
-    val cells = (1 to width).foldLeft[Either[SaferisError, Chunk[SqlValue]]](Right(Chunk.empty)):
-      case (Left(err), _)      => Left(err)
-      case (Right(acc), index) =>
-        val name = typeName(meta, index)
-        adapter.read(rs, index, name).map(acc :+ _)
-    cells.map(values => SqlRow(labels, values))
-  end readRow
-
-  private def typeName(meta: ResultSetMetaData, index: Int): String =
-    Option(meta.getColumnTypeName(index)).getOrElse("").toLowerCase(Locale.ROOT)
+  def readRow(adapter: JdbcAdapter, rs: ResultSet, columns: Chunk[JdbcColumn]): Either[SaferisError, SqlRow] =
+    columns
+      .foldLeft[Either[SaferisError, Chunk[SqlValue]]](Right(Chunk.empty)):
+        case (Left(err), _)       => Left(err)
+        case (Right(acc), column) => adapter.read(rs, column).map(acc :+ _)
+      .map(values => SqlRow(columns.map(_.label), values))
 end JdbcReads

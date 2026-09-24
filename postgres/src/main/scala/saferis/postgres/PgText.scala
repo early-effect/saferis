@@ -70,6 +70,33 @@ object PgText:
         Some(SqlType.Array(sqlType(element).getOrElse(SqlType.Other(ServerType.Oid(element)))))
       case None => scalarType(oid)
 
+  /** Scalar OID for a Postgres type name, including the SQL-standard spellings. Drivers that report names, not OIDs,
+    * use this.
+    */
+  def oidOf(typeName: String): Option[Int] = typeName.toLowerCase(Locale.ROOT) match
+    case "bool" | "boolean"                  => Some(16)
+    case "bytea"                             => Some(17)
+    case "char"                              => Some(18)
+    case "name"                              => Some(19)
+    case "int8" | "bigint" | "bigserial"     => Some(20)
+    case "int2" | "smallint" | "smallserial" => Some(21)
+    case "int4" | "integer" | "serial"       => Some(23)
+    case "text"                              => Some(25)
+    case "json"                              => Some(114)
+    case "float4" | "real"                   => Some(700)
+    case "float8" | "double precision"       => Some(701)
+    case "bpchar"                            => Some(1042)
+    case "varchar"                           => Some(1043)
+    case "date"                              => Some(1082)
+    case "time"                              => Some(1083)
+    case "timestamp"                         => Some(1114)
+    case "timestamptz"                       => Some(1184)
+    case "timetz"                            => Some(1266)
+    case "numeric"                           => Some(1700)
+    case "uuid"                              => Some(2950)
+    case "jsonb"                             => Some(3802)
+    case _                                   => None
+
   private def scalarType(oid: Int): Option[SqlType] = oid match
     case 16                    => Some(SqlType.Bool)
     case 21                    => Some(SqlType.Int2)
