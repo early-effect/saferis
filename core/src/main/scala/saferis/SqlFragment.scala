@@ -37,15 +37,20 @@ final class SqlFragment private (
   def :+(other: SqlFragment): SqlFragment = append(other)
 
   def validate(using Trace): IO[SaferisError, SqlFragment] =
-    if issues.isEmpty then ZIO.succeed(this)
-    else ZIO.fail(SaferisError.InvalidStatement(issues))
+    val all = allIssues
+    if all.isEmpty then ZIO.succeed(this)
+    else ZIO.fail(SaferisError.InvalidStatement(all))
 
   /** Fails with `InvalidStatement` before a connection is checked out. Timeout is this fragment, else the fiber ref. */
   def toCommand(using Trace): IO[SaferisError, SqlCommand] =
-    if issues.nonEmpty then ZIO.fail(SaferisError.InvalidStatement(issues))
+    val all = allIssues
+    if all.nonEmpty then ZIO.fail(SaferisError.InvalidStatement(all))
     else
       Saferis.timeoutFiberRef.get.map: aspect =>
         SqlCommand(pieces, timeout.orElse(aspect))
+
+  private def allIssues: List[FragmentIssue] =
+    issues ++ SqlPieces.arrayIssues(pieces)
 
   inline def query[E](using table: Table[E])(using Trace): ZIO[SqlSession, SaferisError, Chunk[E]] =
     val read = SqlFragment.readTable[E]

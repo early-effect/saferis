@@ -399,6 +399,31 @@ object QuerySpecs extends ZIOSpecDefault:
         val q = Query[User].where(_.id).inList(List.empty[Int]).where(_.name).inList(List.empty[String]).build
         assertTrue(q.issues.isEmpty, q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 2)
       },
+      test("inList on a dialect without arrays is one parameter per distinct value") {
+        given Dialect = saferis.mysql.MySQLDialect
+        val q         = Query[User].where(_.id).inList(List(1, 1, 2, 3)).build
+        assertTrue(
+          q.sql.contains("in ($1, $2, $3)"),
+          q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 3,
+          arrayLength(q) == 0,
+        )
+      },
+      test("notInList on a dialect without arrays is not in") {
+        given Dialect = saferis.mysql.MySQLDialect
+        val q         = Query[User].where(_.id).notInList(List(1, 2)).build
+        assertTrue(q.sql.contains("not in ($1, $2)"))
+      },
+      test("an empty inList on a dialect without arrays is false, and notInList is true") {
+        given Dialect = saferis.mysql.MySQLDialect
+        val none      = Query[User].where(_.id).inList(List.empty[Int]).build
+        val all       = Query[User].where(_.id).notInList(List.empty[Int]).build
+        assertTrue(
+          none.sql.contains("1 = 0"),
+          all.sql.contains("1 = 1"),
+          none.issues.isEmpty,
+          all.issues.isEmpty,
+        )
+      },
       test("SqlFragment.validate succeeds for a valid query") {
         val q = Query[User].where(_.id).inList(List(1, 2)).build
         for r <- q.validate

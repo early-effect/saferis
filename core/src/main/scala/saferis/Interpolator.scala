@@ -9,18 +9,42 @@ class silent extends Annotation
 
 export Interpolator.sql
 export Interpolator.sqlEcho
+export Interpolator.in
 export Interpolator.array
 
 object Interpolator:
 
-  /** One array value. Write the operator in the SQL string.
+  /** Splice a collection as a parenthesized list, `($1, $2, $3)`, for an IN clause. Works on every dialect.
+    *
+    * {{{
+    *   sql"select * from $table where ${table.id} in ${in(ids)}"
+    * }}}
+    *
+    * Duplicates are removed, and each remaining value binds one parameter. On Postgres, `= any(${array(ids)})` binds
+    * one array parameter instead, which keeps the statement text the same for every list length.
+    *
+    * On empty (or degenerate-empty-after-dedupe) input, the placeholder carries a [[FragmentIssue.EmptyCollection]]
+    * that surfaces as [[SaferisError.InvalidStatement]] at execution, with no database round trip.
+    */
+  def in[A](values: Iterable[A])(using Encoder[A]): Placeholder =
+    parenthesized(Placeholder.listTagged(values, helper = "in", origin = Placeholder.captureOrigin()))
+
+  /** Varargs form. At least one element by construction. */
+  def in[A](first: A, rest: A*)(using Encoder[A]): Placeholder =
+    parenthesized(Placeholder.listTagged(first +: rest, helper = "in", origin = Placeholder.captureOrigin()))
+
+  private def parenthesized(list: Placeholder): Placeholder =
+    Placeholder.concat(Placeholder.raw("("), list, Placeholder.raw(")"))
+
+  /** One array value. Write the operator in the SQL string. Postgres only.
     *
     * {{{
     *   sql"select * from $table where ${table.id} = any(${array(ids)})"
     *   sql"select * from $table where ${table.id} <> all(${array(names)})"
     * }}}
     *
-    * Accepts any `Iterable[A]`. Duplicates are removed. An empty collection is one empty array parameter.
+    * Accepts any `Iterable[A]`. The values are kept as given, duplicates included, so the same helper can store an
+    * array column. An empty collection is one empty array parameter.
     */
   def array[A](values: Iterable[A])(using Encoder[A]): Placeholder =
     Placeholder.array(values)

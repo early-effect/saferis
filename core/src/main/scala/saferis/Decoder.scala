@@ -2,6 +2,8 @@ package saferis
 
 import zio.Chunk
 
+import scala.util.NotGiven
+
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -119,7 +121,8 @@ object Decoder:
 
   given defaultUuidDecoder: Decoder[UUID] = postgres.uuidDecoder
 
-  def array[A](using element: Decoder[A]): Decoder[Chunk[A]] = new Decoder[Chunk[A]]:
+  /** A Postgres array column. `Chunk[Byte]` stays `bytea` ([[chunkByte]]). */
+  given array[A](using element: Decoder[A], notBytes: NotGiven[A =:= Byte]): Decoder[Chunk[A]] with
     def decode(value: SqlValue): Either[DecodeError, Chunk[A]] = value match
       case SqlValue.Array(_, values) =>
         values.foldLeft[Either[DecodeError, Chunk[A]]](Right(Chunk.empty)):

@@ -47,22 +47,44 @@ object Placeholder:
   def commaList(placeholders: Placeholder*): Placeholder =
     join(placeholders, ", ")
 
+  /** Splice a collection as comma-separated parameters, `$1, $2, $3`, one per distinct value.
+    *
+    * Accepts any `Iterable[A]` (`Seq`, `List`, `Set`, `LinkedHashSet`, etc.). Duplicates are removed (set semantics,
+    * matching typical IN-clause use), and order follows the input iterator. Useful for VALUES rows and other
+    * comma-separated list contexts. For IN clauses prefer the top-level `in` helper, which adds the parentheses. Works
+    * on every dialect. For a Postgres array value use [[array]].
+    *
+    * On empty (or degenerate-empty-after-dedupe) input, returns a placeholder carrying a
+    * [[FragmentIssue.EmptyCollection]], which surfaces as [[SaferisError.InvalidStatement]] when the fragment is run.
+    */
   def list[A](values: Iterable[A])(using Encoder[A]): Placeholder =
-    array(values)
+    listTagged(values, helper = "Placeholder.list", origin = captureOrigin())
 
+  /** Varargs form. At least one element by construction. */
   def list[A](first: A, rest: A*)(using Encoder[A]): Placeholder =
-    array(first +: rest)
+    listTagged(first +: rest, helper = "Placeholder.list", origin = captureOrigin())
 
-  /** One array parameter. An empty collection is `'{}'`: `= ANY('{}')` is false and `<> ALL('{}')` is true. */
+  /** Shared by `list` and `Interpolator.in`, so each tags the issue with the helper the user actually called. */
+  private[saferis] def listTagged[A](values: Iterable[A], helper: String, origin: Option[StackTraceElement])(using
+      encoder: Encoder[A]
+  ): Placeholder =
+    val deduped = values.iterator.distinct.toVector
+    if deduped.isEmpty then Derived(Chunk.empty, List(FragmentIssue.EmptyCollection(helper, origin)), None)
+    else join(deduped.map(a => param(encoder.encode(a))), ", ")
+
+  /** The first stack frame outside the `saferis` package: the user's call site. */
+  private[saferis] def captureOrigin(): Option[StackTraceElement] =
+    val st = new Throwable().getStackTrace
+    st.find(f => !f.getClassName.startsWith("saferis."))
+
+  /** One array parameter holding the values as given, duplicates included. An empty collection is `'{}'`: `= ANY('{}')`
+    * is false and `<> ALL('{}')` is true. A member that is not the element type fails at `toCommand`.
+    */
   def array[A](values: Iterable[A])(using encoder: Encoder[A]): Placeholder =
-    param(members(values, encoder))
+    param(SqlValue.Array(encoder.sqlType, Chunk.fromIterable(values).map(encoder.encode)))
 
   def array[A](first: A, rest: A*)(using encoder: Encoder[A]): Placeholder =
     array(first +: rest)
-
-  private def members[A](values: Iterable[A], encoder: Encoder[A]): SqlValue =
-    val encoded = Chunk.fromIterable(values).distinct.map(encoder.encode)
-    SqlValue.array(encoder.sqlType, encoded).getOrElse(SqlValue.Array(encoder.sqlType, encoded))
 
   private[saferis] def allIssues(ps: Seq[Placeholder]): List[FragmentIssue] =
     ps.toList.flatMap(_.issues)

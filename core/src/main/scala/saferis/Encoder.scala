@@ -2,6 +2,8 @@ package saferis
 
 import zio.Chunk
 
+import scala.util.NotGiven
+
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -98,11 +100,12 @@ object Encoder:
 
   given defaultUuidEncoder: Encoder[UUID] = postgres.uuidEncoder
 
-  def array[A](using element: Encoder[A]): Encoder[Chunk[A]] = new Encoder[Chunk[A]]:
+  /** A Postgres array column. `Chunk[Byte]` stays `bytea` ([[chunkByte]]). A member whose type disagrees with
+    * `element.sqlType` fails at `toCommand` as [[FragmentIssue.MalformedArray]].
+    */
+  given array[A](using element: Encoder[A], notBytes: NotGiven[A =:= Byte]): Encoder[Chunk[A]] with
     def sqlType: SqlType                   = SqlType.Array(element.sqlType)
-    def encode(values: Chunk[A]): SqlValue =
-      val members = values.map(element.encode)
-      SqlValue.array(element.sqlType, members).getOrElse(SqlValue.Array(element.sqlType, members))
+    def encode(values: Chunk[A]): SqlValue = SqlValue.Array(element.sqlType, values.map(element.encode))
 
   def fromJsonCodec[T](using codec: zio.json.JsonCodec[T]): Encoder[T] = new Encoder[T]:
     def sqlType: SqlType       = SqlType.Jsonb

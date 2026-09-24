@@ -91,11 +91,18 @@ enum SqlValue:
 end SqlValue
 
 object SqlValue:
-  /** Every member is `element` or `Null(element)`. A mismatch is not an array. */
+  /** Every member is `element` or `Null(element)`, nested arrays included. A mismatch is not an array. */
   def array(element: SqlType, values: Chunk[SqlValue]): Either[String, SqlValue] =
-    val mismatch = values.indexWhere(value => !memberOf(element, value))
-    if mismatch < 0 then Right(Array(element, values))
-    else Left(s"element $mismatch is ${values(mismatch).sqlType}, expected $element")
+    val candidate = Array(element, values)
+    malformed(candidate).toLeft(candidate)
+
+  /** Why an array value breaks the member rule, or `None`. Scalars are never malformed. */
+  private[saferis] def malformed(value: SqlValue): Option[String] = value match
+    case Array(element, values) =>
+      val mismatch = values.indexWhere(member => !memberOf(element, member))
+      if mismatch >= 0 then Some(s"element $mismatch is ${values(mismatch).sqlType}, expected $element")
+      else values.iterator.map(malformed).collectFirst { case Some(detail) => detail }
+    case _ => None
 
   private def memberOf(element: SqlType, value: SqlValue): Boolean = value match
     case Null(tpe) => tpe == element

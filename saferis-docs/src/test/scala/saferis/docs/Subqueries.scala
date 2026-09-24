@@ -91,13 +91,14 @@ Query[SubUser].where(_.id).inSubquery(statuses).build.sql
 """).assert(errs => assertTrue(errs.nonEmpty)),
     ),
     section("IN Literal Collections")(
-      md"""For membership over runtime values (not subqueries), use `.in` / `.inList` on the query builder, or write the operator yourself with `array`:
+      md"""For membership over runtime values (not subqueries), use `.in` / `.inList` on the query builder. The builder picks the form for the dialect: Postgres binds one array parameter (`id = ANY($$1)`), so the statement text is the same for every list length, and MySQL and SQLite bind one parameter per value (`id in ($$1, $$2)`).
+
+In a raw `sql` string, `in(...)` splices a parenthesized list and works on every dialect. On Postgres you can bind one array value instead with `array(...)` and write the operator yourself:
 
 ```sql
-where id = any($$ids)
-```
-
-`array` is only the value. The query builder methods emit the whole predicate.""",
+where id in ($$1, $$2, $$3)   -- in(ids)
+where id = any($$1)           -- array(ids), Postgres
+```""",
       exampleValue {
         // Varargs form — natural for inline literals
         Query[SubUser]
@@ -117,14 +118,18 @@ where id = any($$ids)
       }.assert(sql => assertTrue(sql.toLowerCase.contains("any"))),
       exampleValue {
         val ids = List(1, 2, 3)
+        sql"select * from sub_users where id in ${in(ids)}".sql
+      }.assert(sql => assertTrue(sql == "select * from sub_users where id in ($1, $2, $3)")),
+      exampleValue {
+        val ids = List(1, 2, 3)
         val a   = sql"select * from sub_users where id = any(${array(ids)})".sql
         val b   = sql"select * from sub_users where name = any(${array("Alice", "Bob")})".sql
         (a, b)
       }.assert { case (a, b) => assertTrue(a.toLowerCase.contains("any") && b.toLowerCase.contains("any")) },
-      md"""`notIn` / `notInList` are symmetric. `inSubquery` / `notInSubquery` (renamed from `in`/`notIn` on `SelectQuery`) cover
+      md"""`in` removes duplicates, like `IN` itself. `array` keeps values as given, so the same helper can store an array column. `notIn` / `notInList` are symmetric. `inSubquery` / `notInSubquery` (renamed from `in`/`notIn` on `SelectQuery`) cover
 the subquery case shown above.""",
-      section("An empty array is legal SQL")(
-        md"""`= ANY('{}')` is false and `<> ALL('{}')` is true, so an empty collection is one array parameter. It does not fail at construction.""",
+      section("Empty collections")(
+        md"""The query builder treats an empty collection as false for `inList` and true for `notInList` on every dialect: `= ANY('{}')` on Postgres, and a constant predicate elsewhere. A raw `in(...)` cannot rewrite the SQL around it, so an empty `in(...)` fails with `InvalidStatement` before a connection is checked out.""",
         exampleValue {
           val built = Query[SubUser].where(_.id).inList(List.empty[Int]).build
           (built.sql.toLowerCase, built.issues.isEmpty)

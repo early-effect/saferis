@@ -66,10 +66,6 @@ object Codec:
   given defaultUuidCodec: Codec[UUID] =
     make(Encoder.defaultUuidEncoder, Decoder.defaultUuidDecoder)
 
-  /** One column of `element` values. `Chunk[Byte]` stays `bytea` via [[Encoder.chunkByte]]. Summon this explicitly. */
-  def array[A](using element: Codec[A]): Codec[Chunk[A]] =
-    make(Encoder.array(using element.encoder), Decoder.array(using element.decoder))
-
   /** Postgres enum as [[SqlValue.Other]] text. The server type name is not matched: drivers disagree on name versus
     * OID.
     */

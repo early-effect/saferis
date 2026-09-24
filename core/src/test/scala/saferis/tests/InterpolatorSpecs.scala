@@ -114,29 +114,54 @@ object InterpolatorSpecs extends ZIOSpecDefault:
           query.sql == "SELECT * FROM \"users\" WHERE \"name\" = $1"
         }
 
-      // === Placeholder.list ===
+      // === Placeholder.list and in ===
 
-      test("Placeholder.list is one array parameter"):
+      test("Placeholder.list is one parameter per value"):
         val ph = Placeholder.list(List(1, 2, 3))
         assertTrue(
-          ph.sql == "$1",
-          ph.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1,
-          arrayLength(ph) == 3,
+          ph.sql == "$1, $2, $3",
+          ph.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 3,
           ph.issues.isEmpty,
         )
-
-      test("Placeholder.list single-element edge"):
-        val ph = Placeholder.list(List("only"))
-        assertTrue(ph.sql == "$1", ph.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1, arrayLength(ph) == 1)
 
       test("Placeholder.list varargs overload matches Iterable form"):
         val viaVarargs  = Placeholder.list(1, 2, 3)
         val viaIterable = Placeholder.list(List(1, 2, 3))
-        assertTrue(viaVarargs.sql == viaIterable.sql, arrayLength(viaVarargs) == arrayLength(viaIterable))
+        assertTrue(viaVarargs.sql == viaIterable.sql)
 
-      test("Placeholder.list deduplicates inside the array"):
+      test("Placeholder.list deduplicates"):
         val ph = Placeholder.list(List("a", "a", "b", "b", "c"))
-        assertTrue(ph.sql == "$1", arrayLength(ph) == 3)
+        assertTrue(ph.sql == "$1, $2, $3")
+
+      test("Placeholder.list of an empty collection is an EmptyCollection issue"):
+        val ph = Placeholder.list(List.empty[String])
+        assertTrue:
+          ph.issues match
+            case List(FragmentIssue.EmptyCollection("Placeholder.list", _)) => true
+            case _                                                          => false
+
+      test("in is a parenthesized list that follows the keyword"):
+        val ids  = List(10, 20, 30)
+        val frag = sql"select * from t where id in ${in(ids)}"
+        assertTrue(
+          frag.sql == "select * from t where id in ($1, $2, $3)",
+          frag.show == "select * from t where id in (10, 20, 30)",
+        )
+
+      test("in varargs"):
+        val frag = sql"select * from t where status in ${in("active", "pending")}"
+        assertTrue(frag.sql == "select * from t where status in ($1, $2)")
+
+      test("an empty in fails as InvalidStatement before a connection"):
+        val frag = sql"select * from t where id in ${in(List.empty[Int])}"
+        for exit <- frag.toCommand.exit
+        yield assertTrue:
+          exit match
+            case Exit.Failure(cause) =>
+              cause.failureOption match
+                case Some(SaferisError.InvalidStatement(List(FragmentIssue.EmptyCollection("in", _)))) => true
+                case _                                                                                 => false
+            case _ => false
 
       // === array (top-level helper) ===
 
@@ -192,26 +217,32 @@ object InterpolatorSpecs extends ZIOSpecDefault:
         val ph = array(1 to 3)
         assertTrue(arrayLength(ph) == 3, ph.sql == "$1")
 
-      test("array deduplicates"):
+      test("array keeps duplicates, so it can store an array column as given"):
         val ph   = array(List(1, 1, 2, 2, 3))
         val show = sql"x = any($ph)".show
-        assertTrue(ph.sql == "$1", arrayLength(ph) == 3, show == "x = any(ARRAY[1, 2, 3])")
-
-      test("Placeholder.list dedupes single-element collapse"):
-        val ph = Placeholder.list(List("a", "a"))
-        assertTrue(ph.sql == "$1", arrayLength(ph) == 1)
-
-      test("array with all-duplicates collapses to one"):
-        val ph = array(List(1, 1, 1))
-        assertTrue(ph.sql == "$1", arrayLength(ph) == 1, ph.issues.isEmpty)
+        assertTrue(ph.sql == "$1", arrayLength(ph) == 5, show == "x = any(ARRAY[1, 1, 2, 2, 3])")
 
       test("an empty array is one parameter and has no issues"):
         val ph = array(List.empty[String])
         assertTrue(ph.sql == "$1", ph.issues.isEmpty, arrayLength(ph) == 0)
 
-      test("Placeholder.list of an empty collection is an empty array"):
-        val ph = Placeholder.list(List.empty[String])
-        assertTrue(ph.sql == "$1", ph.issues.isEmpty, arrayLength(ph) == 0)
+      test("an array whose encoder disagrees with its members fails at toCommand"):
+        val lying: Encoder[Int] = new Encoder[Int]:
+          def sqlType: SqlType         = SqlType.Int4
+          def encode(a: Int): SqlValue = SqlValue.Text(a.toString)
+        val frag = sql"select * from t where x = any(${array(List(1, 2))(using lying)})"
+        for exit <- frag.toCommand.exit
+        yield assertTrue:
+          exit match
+            case Exit.Failure(cause) =>
+              cause.failureOption match
+                case Some(SaferisError.InvalidStatement(List(FragmentIssue.MalformedArray(1, _)))) => true
+                case _                                                                             => false
+            case _ => false
+
+      test("SqlValue.array rejects a nested member of the wrong type"):
+        val nested = SqlValue.array(SqlType.Int4, Chunk(SqlValue.Int4(1), SqlValue.Text("x")))
+        assertTrue(nested.isLeft)
 
       test("mixed splice keeps writes in argument order"):
         val name = "Bob"

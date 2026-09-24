@@ -99,7 +99,7 @@ trait WhereBuilderOps[Parent, T]:
 
   // === Literal collection operators ===
 
-  /** Varargs membership. One array parameter: `col = ANY($1)`. At least one element is supplied.
+  /** Varargs membership. At least one element is supplied.
     *
     * {{{
     *   Query[User].where(_.status).in("active", "pending")
@@ -107,35 +107,62 @@ trait WhereBuilderOps[Parent, T]:
     *
     * For runtime collections use [[inList]] instead. For subqueries use [[inSubquery]].
     */
-  def in(first: T, rest: T*)(using Encoder[T]): Parent =
+  def in(first: T, rest: T*)(using Encoder[T], Dialect): Parent =
     inList(first +: rest)
 
-  /** Membership for any `Iterable[T]`. Duplicates are removed. One array parameter: `col = ANY($1)`.
+  /** Membership for any `Iterable[T]`. Duplicates are removed.
     *
-    * An empty collection is `= ANY('{}')`, which is false. No separate empty-collection failure.
+    * A dialect with [[ArraySupport]] (Postgres) binds one array parameter, `col = ANY($1)`, so the statement text is
+    * the same for every list length. Other dialects bind one parameter per value, `col in ($1, $2)`. An empty
+    * collection is false on every dialect.
     *
     * {{{
     *   Query[User].where(_.id).inList(runIds)
     * }}}
     */
-  def inList(values: Iterable[T])(using Encoder[T]): Parent =
-    membership("= ANY(", values)
+  def inList(values: Iterable[T])(using Encoder[T], Dialect): Parent =
+    membership(Membership.In, values)
 
-  /** Varargs exclusion. One array parameter: `col <> ALL($1)`. */
-  def notIn(first: T, rest: T*)(using Encoder[T]): Parent =
+  /** Varargs exclusion. */
+  def notIn(first: T, rest: T*)(using Encoder[T], Dialect): Parent =
     notInList(first +: rest)
 
-  /** Exclusion for any `Iterable[T]`. Same array rules as [[inList]]: `col <> ALL($1)`. */
-  def notInList(values: Iterable[T])(using Encoder[T]): Parent =
-    membership("<> ALL(", values)
+  /** Exclusion for any `Iterable[T]`: `col <> ALL($1)` or `col not in ($1, $2)`, per [[inList]]. An empty collection is
+    * true.
+    */
+  def notInList(values: Iterable[T])(using Encoder[T], Dialect): Parent =
+    membership(Membership.NotIn, values)
 
-  private def membership(op: String, values: Iterable[T])(using Encoder[T]): Parent =
-    val list      = Placeholder.array(values)
-    val whereFrag =
-      SqlFragment
-        .text(s"${whereAlias.toSql}.${whereColumn.label} $op")
-        .append(SqlFragment(list))
-        .append(SqlFragment.text(")"))
-    addPredicate(whereFrag)
+  private enum Membership:
+    case In, NotIn
+
+  /** Membership ignores duplicates, so they are removed here and not in [[Placeholder.array]]. */
+  private def membership(kind: Membership, values: Iterable[T])(using encoder: Encoder[T], dialect: Dialect): Parent =
+    val distinct  = values.toSeq.distinct
+    val column    = s"${whereAlias.toSql}.${whereColumn.label}"
+    val predicate =
+      dialect match
+        case _: ArraySupport =>
+          val op = kind match
+            case Membership.In    => "= ANY("
+            case Membership.NotIn => "<> ALL("
+          SqlFragment
+            .text(s"$column $op")
+            .append(SqlFragment(Placeholder.array(distinct)))
+            .append(SqlFragment.text(")"))
+        case _ if distinct.isEmpty =>
+          kind match
+            case Membership.In    => SqlFragment.text("1 = 0")
+            case Membership.NotIn => SqlFragment.text("1 = 1")
+        case _ =>
+          val op = kind match
+            case Membership.In    => "in ("
+            case Membership.NotIn => "not in ("
+          SqlFragment
+            .text(s"$column $op")
+            .append(SqlFragment(Placeholder.join(distinct.map(value => Placeholder.param(encoder.encode(value))))))
+            .append(SqlFragment.text(")"))
+    addPredicate(predicate)
+  end membership
 
 end WhereBuilderOps

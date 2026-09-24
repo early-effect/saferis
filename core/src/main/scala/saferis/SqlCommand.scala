@@ -65,6 +65,14 @@ private[saferis] object SqlPieces:
       case SqlPiece.Param(value) => sb.append(SqlValue.literal(value))
     sb.toString
 
+  /** One issue per array parameter that breaks the member rule. Every construction path meets here, in `toCommand`. */
+  def arrayIssues(pieces: Chunk[SqlPiece]): List[FragmentIssue] =
+    pieces
+      .collect { case SqlPiece.Param(value) => value }
+      .zipWithIndex
+      .toList
+      .flatMap((value, index) => SqlValue.malformed(value).map(FragmentIssue.MalformedArray(index + 1, _)))
+
   /** Postgres inspection form. The first parameter is `$1`. */
   def postgres(pieces: Chunk[SqlPiece]): String =
     render(pieces, (n, _) => s"$$$n")

@@ -14,15 +14,7 @@ object ValueConformance:
   enum Mood:
     case sad, ok
 
-  given mood: Codec[Mood]                             = Codec.pgEnum[Mood]("mood")
-  given ints: Codec[Chunk[Int]]                       = Codec.array[Int]
-  given intOptions: Codec[Chunk[Option[Int]]]         = Codec.array[Option[Int]]
-  given Decoder[Mood]                                 = mood
-  given chunkInts: Decoder[Chunk[Int]]                = ints
-  given chunkOpts: Decoder[Chunk[Option[Int]]]        = intOptions
-  given Encoder[Mood]                                 = mood
-  given Encoder[Chunk[Int]]                           = ints
-  given chunkOptsEncoder: Encoder[Chunk[Option[Int]]] = intOptions
+  given Codec[Mood] = Codec.pgEnum[Mood]("mood")
 
   def conformance =
     suite("values")(
