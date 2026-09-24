@@ -190,12 +190,16 @@ object SchemaIntrospection:
     t.toLowerCase.replaceAll("\\(.*\\)", "").trim
 
   private def areTypesInSameFamily(t1: String, t2: String): Boolean =
-    val integerTypes   = Set("integer", "int", "int4", "serial", "bigint", "int8", "bigserial", "smallint", "int2")
-    val textTypes      = Set("varchar", "text", "character varying", "char", "character", "bpchar")
-    val numericTypes   = Set("numeric", "decimal", "real", "float", "float4", "float8", "double precision", "double")
-    val boolTypes      = Set("boolean", "bool", "bit")
-    val timestampTypes = Set("timestamp", "timestamptz", "timestamp with time zone", "timestamp without time zone")
-    val jsonTypes      = Set("json", "jsonb")
+    val integerTypes =
+      Set("integer", "int", "int4", "serial", "bigint", "int8", "bigserial", "smallint", "int2", "mediumint", "tinyint")
+    val textTypes =
+      Set("varchar", "text", "character varying", "char", "character", "bpchar", "tinytext", "mediumtext", "longtext")
+    val numericTypes = Set("numeric", "decimal", "real", "float", "float4", "float8", "double precision", "double")
+    // MySQL stores `boolean` as `tinyint(1)`.
+    val boolTypes      = Set("boolean", "bool", "bit", "tinyint")
+    val timestampTypes =
+      Set("timestamp", "timestamptz", "timestamp with time zone", "timestamp without time zone", "datetime")
+    val jsonTypes = Set("json", "jsonb")
 
     val families = Seq(integerTypes, textTypes, numericTypes, boolTypes, timestampTypes, jsonTypes)
     families.exists(family => family.contains(t1) && family.contains(t2))

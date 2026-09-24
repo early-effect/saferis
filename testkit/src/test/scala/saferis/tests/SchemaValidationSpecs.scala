@@ -3,7 +3,6 @@ package saferis.tests
 import saferis.*
 import saferis.Schema.*
 import saferis.ddl.*
-import saferis.mysql.MySQLDialect
 import saferis.postgres.PostgresDialect
 import saferis.spark.SparkDialect
 import saferis.sqlite.SQLiteDialect
@@ -363,7 +362,7 @@ object SchemaValidationSpecs:
       }
     ),
     suite("Dialects without catalogs")(
-      test("MySQL, SQLite, and Spark verify fail with Unsupported") {
+      test("SQLite and Spark verify fail with Unsupported") {
         def unsupported(dialect: Dialect) =
           Schema[User]
             .verify(using dialect)
@@ -377,10 +376,9 @@ object SchemaValidationSpecs:
                       case _                                       => false
                   case Exit.Success(_) => false
         for
-          mysql  <- unsupported(MySQLDialect)
           sqlite <- unsupported(SQLiteDialect)
           spark  <- unsupported(SparkDialect)
-        yield mysql && sqlite && spark
+        yield sqlite && spark
       }
     ),
   ) @@ TestAspect.sequential

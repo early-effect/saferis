@@ -1,61 +1,49 @@
 package saferis.tests
 
 import saferis.Dialect
-import saferis.SqlFragment
+import saferis.SaferisError
 import saferis.SqlSession
-import saferis.postgres.PostgresDialect
-import saferis.sql
 
-import zio.ZLayer
+import zio.ZIO
 import zio.durationInt
 import zio.test.*
 
-/** The same suites for every driver. The session layer and the dialect are the only things that change. */
+/** One suite for every database. A driver proves itself by providing a `SqlSession` and a [[DatabaseTarget]]:
+  *
+  * {{{
+  *   SqlSessionConformance.suite.provideShared(session ++ ZLayer.succeed(DatabaseTarget(MySQLDialect, ...)))
+  * }}}
+  *
+  * The portable tests always run. A group gated by a [[Capability]] runs only when the target declares it.
+  */
 object SqlSessionConformance:
-
-  /** Behavior every database Saferis ships has to share, with SQL the dialect renders.
-    *
-    * @param longStatement
-    *   A statement that runs for several seconds, on a database that has one. The timeout test runs only then.
-    */
-  def portable[R, E](
-      driver: String,
-      session: ZLayer[R, E, SqlSession],
-      longStatement: Option[SqlFragment],
-  )(using Dialect): Spec[R, Any] =
-    zio.test
-      .suite(s"$driver portable conformance")(
-        TransactionConformance.conformance(longStatement),
-        PortableDmlConformance.conformance,
-      )
-      .provideSomeShared[R](session)
+  val suite: Spec[SqlSession & DatabaseTarget, Any] =
+    zio.test.suite("conformance")(
+      TransactionConformance.conformance,
+      PortableDmlConformance.conformance,
+      SchemaConformance.conformance.whenZIO(has(Capability.Catalog)),
+      postgresSql.whenZIO(has(Capability.PostgresSql)),
+    )
       @@ TestAspect.sequential
       @@ TestAspect.withLiveClock
       @@ TestAspect.timeout(30.seconds)
 
-  /** The portable suite plus everything Postgres adds: arrays, enums, `jsonb`, catalog verification, and upsert. */
-  def postgres[E](
-      driver: String,
-      session: ZLayer[PostgresTestContainer, E, SqlSession],
-  ): Spec[PostgresTestContainer, Any] =
-    given Dialect = PostgresDialect
-    zio.test.suite(s"$driver conformance")(
-      portable(driver, session, Some(sql"select pg_sleep(5)")),
-      zio.test
-        .suite(s"$driver Postgres conformance")(
-          ValueConformance.conformance,
-          InCollectionIntegrationSpecs.conformance,
-          DataManipulationLayerSpecs.conformance,
-          SchemaIntegrationSpecs.conformance,
-          SchemaValidationSpecs.conformance,
-          StreamSpecs.conformance,
-          PagedStreamSpecs.conformance,
-          UpsertSpecs.conformance,
-        )
-        .provideSomeShared[PostgresTestContainer](session)
-        @@ TestAspect.sequential
-        @@ TestAspect.withLiveClock
-        @@ TestAspect.timeout(30.seconds),
-    ) @@ TestAspect.sequential
-  end postgres
+  /** Run `body` with the target's dialect as the given `Dialect`. */
+  def withDialect[R, A](body: Dialect ?=> ZIO[R, SaferisError, A]): ZIO[R & DatabaseTarget, SaferisError, A] =
+    ZIO.serviceWithZIO[DatabaseTarget](target => body(using target.dialect))
+
+  private def has(capability: Capability) =
+    ZIO.serviceWith[DatabaseTarget](_.has(capability))
+
+  private def postgresSql =
+    zio.test.suite("Postgres SQL")(
+      ValueConformance.conformance,
+      InCollectionIntegrationSpecs.conformance,
+      DataManipulationLayerSpecs.conformance,
+      SchemaIntegrationSpecs.conformance,
+      SchemaValidationSpecs.conformance,
+      StreamSpecs.conformance,
+      PagedStreamSpecs.conformance,
+      UpsertSpecs.conformance,
+    )
 end SqlSessionConformance

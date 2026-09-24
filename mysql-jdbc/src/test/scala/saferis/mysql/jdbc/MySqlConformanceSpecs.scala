@@ -2,6 +2,8 @@ package saferis.mysql.jdbc
 
 import saferis.*
 import saferis.mysql.MySQLDialect
+import saferis.tests.Capability
+import saferis.tests.DatabaseTarget
 import saferis.tests.MySqlTestContainer
 import saferis.tests.SqlSessionConformance
 
@@ -28,9 +30,13 @@ object MySqlConformanceSpecs extends ZIOSpecDefault:
   val session: ZLayer[MySqlTestContainer, Nothing, SqlSession] =
     dataSource >>> MySqlJdbc.layer()
 
+  val target: ULayer[DatabaseTarget] =
+    ZLayer.succeed(DatabaseTarget(MySQLDialect, Set(Capability.Catalog), Some(sql"select sleep(5)")))
+
+  /** MySQL proves itself by providing its session and target to the common suite, then runs what only MySQL does. */
   def spec =
     suite("mysql")(
-      SqlSessionConformance.portable("mysql", session, Some(sql"select sleep(5)")),
-      MySqlValueSpecs.spec.provideSomeShared[MySqlTestContainer](session),
-    ).provideShared(MySqlTestContainer.live) @@ TestAspect.sequential
+      SqlSessionConformance.suite,
+      MySqlValueSpecs.spec,
+    ).provideShared(MySqlTestContainer.live >>> session, target) @@ TestAspect.sequential
 end MySqlConformanceSpecs

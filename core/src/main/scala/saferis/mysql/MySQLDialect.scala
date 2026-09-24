@@ -12,9 +12,17 @@ given Dialect = MySQLDialect
   *   - MySQL uses backticks for identifier escaping
   *   - MySQL has different type names for some SQL types
   */
-object MySQLDialect extends Dialect with JsonSupport with WindowFunctionSupport with CommonTableExpressionSupport:
+object MySQLDialect
+    extends Dialect
+    with JsonSupport
+    with WindowFunctionSupport
+    with CommonTableExpressionSupport
+    with SchemaIntrospectionSupport:
 
   val name: String = "MySQL"
+
+  def introspectTable(tableName: String)(using zio.Trace): zio.ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
+    MySQLCatalog.introspect(tableName)
 
   /** `decimal` alone is `decimal(10,0)` in MySQL and drops the fraction, so `Numeric` asks for the widest scale.
     * `datetime(6)` is a local timestamp and `timestamp(6)` an instant: MySQL converts only `timestamp` through the

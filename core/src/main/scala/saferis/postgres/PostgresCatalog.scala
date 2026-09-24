@@ -1,11 +1,11 @@
 package saferis.postgres
 
 import saferis.*
-import zio.Chunk
 import zio.Trace
 import zio.ZIO
 
 private[saferis] object PostgresCatalog:
+  import CatalogRows.*
 
   def introspect(rawName: String)(using Trace): ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
     // One transaction session is one connection. Do not overlap these reads.
@@ -19,49 +19,9 @@ private[saferis] object PostgresCatalog:
             uniqueRows <- run(uniqueQuery(rawName))(readConstraint)
             fkRows     <- run(foreignKeyQuery(rawName))(readForeignKey)
             indexRows  <- run(indexQuery(rawName))(readIndex)
-            keys = orderedNames(keyRows)
-          yield Some(
-            DatabaseTable(
-              tableName = stored,
-              columns = columnModels(columnRows, keys),
-              primaryKeyColumns = keys,
-              indexes = indexModels(indexRows),
-              uniqueConstraints = uniqueModels(uniqueRows),
-              foreignKeys = foreignKeyModels(fkRows),
-            )
-          )
+          yield Some(CatalogRows.table(stored, columnRows, keyRows, uniqueRows, fkRows, indexRows))
 
   private final case class ParsedName(schema: Option[String], table: String)
-
-  private final case class ColumnRow(
-      name: String,
-      dataType: String,
-      nullable: Boolean,
-      defaultValue: Option[String],
-      ordinal: Int,
-  )
-
-  private final case class OrdinalName(name: String, ordinal: Int)
-
-  private final case class ConstraintColumn(constraint: String, name: String, ordinal: Int)
-
-  private final case class ForeignKeyRow(
-      constraint: String,
-      fromColumn: String,
-      toTable: String,
-      toColumn: String,
-      onUpdate: String,
-      onDelete: String,
-      ordinal: Int,
-  )
-
-  private final case class IndexRow(
-      indexName: String,
-      column: String,
-      isUnique: Boolean,
-      whereClause: Option[String],
-      ordinal: Int,
-  )
 
   private def parsedName(raw: String): ParsedName =
     val dot = raw.lastIndexOf('.')
@@ -109,7 +69,7 @@ private[saferis] object PostgresCatalog:
     selectWhere(
       """
         |select c.column_name::text as column_name,
-        |       c.udt_name::text as udt_name,
+        |       c.udt_name::text as data_type,
         |       c.is_nullable::text as is_nullable,
         |       c.column_default::text as column_default,
         |       c.ordinal_position::int as ordinal_position
@@ -218,108 +178,4 @@ private[saferis] object PostgresCatalog:
       " order by i.relname, cols.ord",
     )
 
-  private def run[A](fragment: SqlFragment)(read: SqlRow => Either[SaferisError, A])(using
-      Trace
-  ): ZIO[SqlSession, SaferisError, Chunk[A]] =
-    fragment.toCommand.flatMap: command =>
-      ZIO.serviceWithZIO[SqlSession](_.query(command)(read))
-
-  private def cell[A: Decoder](row: SqlRow, label: String, expected: String): Either[SaferisError, A] =
-    row
-      .get(label)
-      .flatMap(summon[Decoder[A]].decode)
-      .left
-      .map(err => SaferisError.DecodingError(label, expected, err.detail))
-
-  private def readTable(row: SqlRow): Either[SaferisError, String] =
-    cell[String](row, "table_name", "text")
-
-  private def readColumn(row: SqlRow): Either[SaferisError, ColumnRow] =
-    for
-      name     <- cell[String](row, "column_name", "text")
-      dataType <- cell[String](row, "udt_name", "text")
-      nullable <- cell[String](row, "is_nullable", "text")
-      default  <- cell[Option[String]](row, "column_default", "text")
-      ordinal  <- cell[Int](row, "ordinal_position", "int4")
-    yield ColumnRow(name, dataType, nullable.equalsIgnoreCase("YES"), default, ordinal)
-
-  private def readOrdinal(row: SqlRow): Either[SaferisError, OrdinalName] =
-    for
-      name    <- cell[String](row, "column_name", "text")
-      ordinal <- cell[Int](row, "ordinal_position", "int4")
-    yield OrdinalName(name, ordinal)
-
-  private def readConstraint(row: SqlRow): Either[SaferisError, ConstraintColumn] =
-    for
-      constraint <- cell[String](row, "constraint_name", "text")
-      name       <- cell[String](row, "column_name", "text")
-      ordinal    <- cell[Int](row, "ordinal_position", "int4")
-    yield ConstraintColumn(constraint, name, ordinal)
-
-  private def readForeignKey(row: SqlRow): Either[SaferisError, ForeignKeyRow] =
-    for
-      constraint <- cell[String](row, "constraint_name", "text")
-      fromColumn <- cell[String](row, "from_column", "text")
-      toTable    <- cell[String](row, "to_table", "text")
-      toColumn   <- cell[String](row, "to_column", "text")
-      onUpdate   <- cell[String](row, "update_rule", "text")
-      onDelete   <- cell[String](row, "delete_rule", "text")
-      ordinal    <- cell[Int](row, "ordinal_position", "int4")
-    yield ForeignKeyRow(constraint, fromColumn, toTable, toColumn, onUpdate, onDelete, ordinal)
-
-  private def readIndex(row: SqlRow): Either[SaferisError, IndexRow] =
-    for
-      indexName   <- cell[String](row, "index_name", "text")
-      column      <- cell[String](row, "column_name", "text")
-      isUnique    <- cell[Boolean](row, "is_unique", "bool")
-      whereClause <- cell[Option[String]](row, "where_clause", "text")
-      ordinal     <- cell[Int](row, "ordinal_position", "int4")
-    yield IndexRow(indexName, column, isUnique, whereClause, ordinal)
-
-  private def orderedNames(rows: Chunk[OrdinalName]): Seq[String] =
-    rows.toSeq.sortBy(_.ordinal).map(_.name)
-
-  private def columnModels(rows: Chunk[ColumnRow], keys: Seq[String]): Seq[DatabaseColumn] =
-    val keyNames = keys.toSet
-    rows.toSeq
-      .sortBy(_.ordinal)
-      .map: row =>
-        DatabaseColumn(
-          name = row.name,
-          dataType = row.dataType,
-          isNullable = row.nullable,
-          isPrimaryKey = keyNames.contains(row.name),
-          defaultValue = row.defaultValue,
-          ordinalPosition = row.ordinal,
-        )
-  end columnModels
-
-  private def grouped[A](rows: Chunk[A])(name: A => String, ordinal: A => Int): Seq[Seq[A]] =
-    rows.groupBy(name).values.map(_.toSeq.sortBy(ordinal)).toSeq
-
-  private def uniqueModels(rows: Chunk[ConstraintColumn]): Seq[DatabaseUniqueConstraint] =
-    grouped(rows)(_.constraint, _.ordinal).flatMap: ordered =>
-      ordered.headOption.map(head => DatabaseUniqueConstraint(head.constraint, ordered.map(_.name)))
-
-  private def foreignKeyModels(rows: Chunk[ForeignKeyRow]): Seq[DatabaseForeignKey] =
-    grouped(rows)(_.constraint, _.ordinal).flatMap: ordered =>
-      ordered.headOption.map: head =>
-        DatabaseForeignKey(
-          constraintName = head.constraint,
-          fromColumns = ordered.map(_.fromColumn),
-          toTable = head.toTable,
-          toColumns = ordered.map(_.toColumn),
-          onDelete = head.onDelete,
-          onUpdate = head.onUpdate,
-        )
-
-  private def indexModels(rows: Chunk[IndexRow]): Seq[DatabaseIndex] =
-    grouped(rows)(_.indexName, _.ordinal).flatMap: ordered =>
-      ordered.headOption.map: head =>
-        DatabaseIndex(
-          indexName = head.indexName,
-          columns = ordered.map(_.column),
-          isUnique = head.isUnique,
-          whereClause = head.whereClause,
-        )
 end PostgresCatalog

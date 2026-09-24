@@ -3,6 +3,7 @@ package external
 import saferis.*
 import saferis.jdbc.JdbcSession
 import saferis.jdbc.StandardJdbcAdapter
+import saferis.tests.DatabaseTarget
 import saferis.tests.SqlSessionConformance
 
 import org.h2.jdbcx.JdbcDataSource
@@ -47,7 +48,6 @@ end H2Dialect
 object H2Adapter extends StandardJdbcAdapter
 
 object BringYourOwnDatabaseSpecs extends ZIOSpecDefault:
-  given Dialect = H2Dialect
 
   /** `DATABASE_TO_LOWER` folds unquoted names the way Postgres does, so a quoted `drop table` finds them. */
   private val dataSource: ULayer[DataSource] =
@@ -56,10 +56,11 @@ object BringYourOwnDatabaseSpecs extends ZIOSpecDefault:
       ds.setURL("jdbc:h2:mem:saferis_byo;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE")
       ds
 
+  /** The portable core only: no catalog, no Postgres SQL, and no long statement to cancel. */
+  private val target: ULayer[DatabaseTarget] = ZLayer.succeed(DatabaseTarget(H2Dialect))
+
+  /** A database brought from outside `saferis` proves itself the same way the shipped ones do. */
   def spec =
-    SqlSessionConformance.portable(
-      "h2, brought from outside saferis",
-      dataSource >>> JdbcSession.layer(H2Adapter),
-      None,
-    )
+    suite("h2, brought from outside saferis")(SqlSessionConformance.suite)
+      .provideShared(dataSource >>> JdbcSession.layer(H2Adapter), target)
 end BringYourOwnDatabaseSpecs

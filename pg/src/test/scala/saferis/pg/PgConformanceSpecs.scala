@@ -3,6 +3,7 @@ package saferis.pg
 import saferis.SaferisError
 import saferis.SqlSession
 import saferis.postgres.PgConnectionConfig
+import saferis.tests.DatabaseTarget
 import saferis.tests.PostgresTestContainer
 import saferis.tests.SqlSessionConformance
 
@@ -24,6 +25,8 @@ object PgConformanceSpecs extends ZIOSpecDefault:
         )
     ) >>> NodeSession.layer
 
+  /** Postgres over Node proves itself by providing its session and target to the common suite. */
   def spec =
-    SqlSessionConformance.postgres("node", sessions).provideShared(PostgresTestContainer.live)
+    suite("postgres node")(SqlSessionConformance.suite)
+      .provideShared(PostgresTestContainer.live >>> sessions, DatabaseTarget.postgres)
 end PgConformanceSpecs
