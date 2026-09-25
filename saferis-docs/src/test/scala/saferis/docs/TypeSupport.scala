@@ -132,8 +132,28 @@ case class JsonEvent(
       },
       md"""The `Json[A]` wrapper:
 - Requires a `zio.json.JsonCodec[A]` instance for the wrapped type
-- Uses `Types.OTHER` JDBC type which maps to `jsonb` in PostgreSQL
-- Provides `.value` extension to unwrap: `event.metadata.value` returns `Metadata`""",
+- Binds as `jsonb` on PostgreSQL and as a `json` column on MySQL, SQLite, and H2
+- Provides `.value` extension to unwrap: `event.metadata.value` returns `Metadata`
+
+A JSON column decodes as `Json[A]`, not as `String`: `Decoder[String]` reads text columns only. Store the JSON as `Text` if you want the raw document as a string.""",
+    ),
+    section("Integer Widths")(
+      md"""Integer decoders read by value, not by column width. `Decoder[Int]` accepts an `int8` value that fits, so `select count(*)` decodes as `Int` on PostgreSQL, and every SQLite integer (which SQLite stores as 64 bits) decodes as `Short`, `Int`, or `Long`. A value that does not fit fails with a `DecodingError` instead of wrapping."""
+    ),
+    section("Enumerations")(
+      md"""`Codec.enumeration` binds a database enumeration by its labels. For a parameterless Scala 3 enum, the case names are the labels:
+
+```scala
+enum Mood:
+  case sad, ok
+
+given Codec[Mood] = Codec.enumeration[Mood]("mood")
+```
+
+On PostgreSQL the value binds uncast, so the server infers the enum type from the column (`create type mood as enum ('sad', 'ok')`). MySQL stores it in an `enum('sad', 'ok')` column, and SQLite and H2 in a text column. It decodes from the enum, `text`, or `varchar`. For an enum whose labels are not its case names, pass the two functions: `Codec.enumeration[E]("mood")(e => label(e), text => fromLabel(text))`."""
+    ),
+    section("Array Columns")(
+      md"""`Chunk[A]` is a PostgreSQL array column (`int4[]` for `Chunk[Int]`) and needs no hand-written given. `Chunk[Byte]` stays `bytea`. `Chunk[Option[A]]` allows null members. The other databases have no array parameters: binding one fails with `SaferisError.Unsupported`. For membership, the query builder's `.inList` binds `IN (...)` there instead, and `in(...)` works in raw SQL everywhere (see [Subqueries](subqueries.html))."""
     ),
   )
 end TypeSupport

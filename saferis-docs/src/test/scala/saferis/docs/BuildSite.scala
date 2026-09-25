@@ -11,7 +11,11 @@ import java.nio.file.Path
 object BuildSite extends DocsSite:
 
   @navLabel("Getting Started")
-  final case class GettingStartedNav(started: GettingStarted.type, concepts: CoreConcepts.type)
+  final case class GettingStartedNav(
+      started: GettingStarted.type,
+      concepts: CoreConcepts.type,
+      databases: Databases.type,
+  )
 
   @navLabel("Safety")
   final case class Safety(

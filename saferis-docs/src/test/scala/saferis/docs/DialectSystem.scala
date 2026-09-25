@@ -36,20 +36,36 @@ val pg = summon[Dialect]
 | UPSERT | Yes | No | No | No |
 | IF NOT EXISTS (indexes) | Yes | No | Yes | Yes |
 | Window functions | Yes | Yes | Yes | Yes |
-| CTEs | Yes | Yes | Yes | Yes |"""
+| CTEs | Yes | Yes | Yes | Yes |
+| `Schema.verify` | Yes | Yes | Yes | No |
+| Adapter module | `saferis-postgres-jdbc`, `saferis-postgres-node` | `saferis-mysql-jdbc` | `saferis-sqlite-jdbc` | None: SQL only |
+
+`H2Dialect` ships in `saferis-h2-jdbc` rather than in core. It claims none of the optional capabilities. See [Databases](databases.html) for what each adapter does."""
     ),
     section("Type Mappings")(
-      md"""| SqlType | PostgreSQL | MySQL | SQLite |
-|--------|------------|-------|--------|
-| VarChar | varchar(255) | varchar(255) | text |
-| Integer | integer | int | integer |
-| BigInt | bigint | bigint | integer |
-| Double | double precision | double | real |
-| Bool | boolean | boolean | integer |
-| Timestamp | timestamp | timestamp | text |
-| Text | text | longtext | text |
-| Binary | bytea | blob | blob |
-| Uuid | uuid | char(36) | text |"""
+      md"""The DDL each dialect renders for a column. SQLite stores by affinity but keeps the declared name, and its adapter reads that name back, so SQLite declares a name for every type.
+
+| SqlType | PostgreSQL | MySQL | SQLite | H2 |
+|---------|------------|-------|--------|----|
+| Bool | boolean | boolean | boolean | boolean |
+| Int2 | smallint | smallint | integer | smallint |
+| Int4 | integer | int | integer | integer |
+| Int8 | bigint | bigint | integer | bigint |
+| Float4 | real | float | real | real |
+| Float8 | double precision | double | double | double precision |
+| Numeric | numeric | decimal(65, 30) | numeric | numeric(1000, 100) |
+| VarChar | varchar(255) | varchar(255) | varchar(255) | varchar(255) |
+| Text | text | longtext | text | character large object |
+| Bytea | bytea | blob | blob | varbinary |
+| Date | date | date | date | date |
+| Time | time | time(6) | time | time(6) |
+| Timestamp | timestamp | datetime(6) | timestamp | timestamp(6) |
+| Timestamptz | timestamptz | timestamp(6) | timestamptz | timestamp(6) with time zone |
+| Jsonb | jsonb | json | json | json |
+| Uuid | uuid | char(36) | uuid | uuid |
+| Array(element) | element[] | json | text | element array |
+
+MySQL's bare `decimal` is `decimal(10,0)` and drops the fraction, so `Numeric` asks for the widest scale. MySQL's `datetime` is a local timestamp and `timestamp` an instant, so the two Scala types get different columns. Every SQLite integer is `integer`, so an integer primary key stays SQLite's rowid and autoincrements."""
     ),
     section("Auto-Increment Syntax")(
       md"""| Database | Syntax |
@@ -59,7 +75,7 @@ val pg = summon[Dialect]
 | SQLite | `AUTOINCREMENT` |
 
 For a deeper look at how capabilities are enforced at compile time, see
-[Type-Safe Capabilities](capabilities.html)."""
+[Type-Safe Capabilities](type-safe-capabilities.html)."""
     ),
   )
 end DialectSystem
