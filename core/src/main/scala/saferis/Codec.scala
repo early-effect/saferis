@@ -66,10 +66,15 @@ object Codec:
   given defaultUuidCodec: Codec[UUID] =
     make(Encoder.defaultUuidEncoder, Decoder.defaultUuidDecoder)
 
-  /** Postgres enum as [[SqlValue.Other]] text. The server type name is not matched: drivers disagree on name versus
-    * OID.
+  /** A database enumeration: its labels travel as text. On Postgres the value binds as [[SqlValue.Other]], uncast, so
+    * the server infers the enum type; MySQL and SQLite store the label in an `enum` or text column. It decodes from
+    * `Other`, `text`, or `varchar`. The server type name is not matched, because drivers report a name or an OID.
+    *
+    * @param typeName
+    *   The database type's name (a Postgres `create type`), used where a driver has to name it, such as the element
+    *   type of an array.
     */
-  def pgEnum[E](typeName: String)(encodeName: E => String, decodeName: String => Option[E]): Codec[E] =
+  def enumeration[E](typeName: String)(encodeName: E => String, decodeName: String => Option[E]): Codec[E] =
     val server = ServerType.Named(typeName)
     new Codec[E]:
       val encoder: Encoder[E] = new Encoder[E]:
@@ -84,13 +89,13 @@ object Codec:
             case _                    => None
           text.flatMap(decodeName).toRight(DecodeError(s"not a $typeName"))
     end new
-  end pgEnum
+  end enumeration
 
-  /** Parameterless Scala 3 enum. Case names are the Postgres labels. */
-  inline def pgEnum[E](typeName: String)(using m: Mirror.SumOf[E]): Codec[E] =
+  /** A parameterless Scala 3 enum. Case names are the database labels. */
+  inline def enumeration[E](typeName: String)(using m: Mirror.SumOf[E]): Codec[E] =
     val labels = constValueTuple[m.MirroredElemLabels].productIterator.map(_.asInstanceOf[String]).toVector
     val values = enumValues[m.MirroredElemTypes].asInstanceOf[Vector[E]]
-    pgEnum(typeName)(
+    enumeration(typeName)(
       (e: E) => labels(m.ordinal(e)),
       (text: String) =>
         val index = labels.indexOf(text)

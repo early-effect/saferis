@@ -19,6 +19,11 @@ import java.util.UUID
 object MySqlValueSpecs:
   final case class Meta(tags: List[String], version: Int) derives JsonCodec
 
+  enum Mood:
+    case sad, ok
+
+  given Codec[Mood] = Codec.enumeration[Mood]("mood")
+
   @tableName("mysql_values")
   final case class Row(@key id: Int, meta: Json[Meta], ref: UUID, local: LocalDateTime, clock: LocalTime) derives Table
 
@@ -43,13 +48,13 @@ object MySqlValueSpecs:
           read <- sql"select * from mysql_values where id = ${1}".queryOne[Row]
         yield assertTrue(read.contains(row))
       ,
-      test("an enum column reads as text and binds from text"):
+      test("an enum column round-trips through Codec.enumeration"):
         for
           _    <- sql"drop table if exists mysql_mood".dml
           _    <- sql"create table mysql_mood (id int primary key, mood enum('sad', 'ok'))".dml
-          _    <- sql"insert into mysql_mood (id, mood) values (1, ${"ok"})".dml
-          read <- sql"select mood from mysql_mood where id = 1".queryValue[String]
-        yield assertTrue(read.contains("ok"))
+          _    <- sql"insert into mysql_mood (id, mood) values (1, ${Mood.ok})".dml
+          read <- sql"select mood from mysql_mood where id = 1".queryValue[Mood]
+        yield assertTrue(read.contains(Mood.ok))
       ,
       test("an unsigned int past Int.MaxValue reads as a Long"):
         for

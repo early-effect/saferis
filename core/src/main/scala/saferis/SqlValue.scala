@@ -14,7 +14,7 @@ import java.util.UUID
 /** A server type Saferis does not model. A driver may know a name, an OID, or both.
   *
   * The label is informational. JDBC reports `Named("mood")` and Node reports `Oid(16390)` for the same enum, and a user
-  * enum's OID differs per database. Match text with [[Codec.pgEnum]], not this label. A later driver can report
+  * enum's OID differs per database. Match text with [[Codec.enumeration]], not this label. A later driver can report
   * [[ServerType.Both]] once it has resolved the OID.
   */
 enum ServerType:
