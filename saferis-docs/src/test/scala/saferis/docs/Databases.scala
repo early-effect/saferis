@@ -22,7 +22,8 @@ This page says what each adapter does that the others do not.""",
       md"""- **Streams** read through a server-side cursor. Over JDBC a pool stream opens a read transaction with a fetch size of 256, because pgjdbc only honors a fetch size with autocommit off, so a long stream holds that transaction open. On Node the stream pulls 256 rows per `pg-cursor` read.
 - **Arrays, enums, `jsonb`, `RETURNING`, and upsert** are available. The query builder's `.inList` binds one array parameter, `= ANY($$1)`.
 - **`Schema.verify`** reads `information_schema` and `pg_catalog`.
-- **Node** always sets `DateStyle=ISO`, which its decoding depends on; a `DateStyle` in `PgConnectionConfig.parameters` is replaced. The pool turns on TCP keepalive, so a peer that vanished fails a `COMMIT` instead of hanging it. npm `pg@8.16.3` and `pg-cursor@2.22.0` are required at run time."""
+- **Node** always sets `DateStyle=ISO`, which its decoding depends on; a `DateStyle` in `PgConnectionConfig.parameters` is replaced. The pool turns on TCP keepalive, so a peer that vanished fails a `COMMIT` instead of hanging it. npm `pg@8.16.3` and `pg-cursor@2.22.0` are required at run time.
+- **Node transport failures** (`ECONNRESET`, `EPIPE`) are `SaferisError.ConnectionLost` with SQLSTATE `08006`, as an `IOException` is over JDBC, and the message keeps the code. They were a `QueryError` carrying the code as if it were a SQLSTATE."""
     ),
     section("MySQL")(
       md"""- **The session time zone is UTC.** Every checkout runs `SET time_zone = '+00:00'` before your `configure`, so a `timestamp` column stores and returns UTC and an `Instant` round-trips whatever zone the JVM or server is in. That also means `NOW()` and `CURRENT_TIMESTAMP` in your own SQL return UTC. A `configure` that sets another time zone runs after it and wins, at the cost of that round trip.
@@ -38,6 +39,7 @@ This page says what each adapter does that the others do not.""",
 - **Checkouts are not serialized.** A single-permit session would deadlock a stream that writes each row through another connection. SQLite's own locking and the busy timeout serialize writers instead.
 - **Types**: columns read by the type they were declared with (see [Dialect System](dialect-system.html)). Dates, times, and timestamps are ISO-8601 text, every integer is 64 bits, and a decimal uses SQLite's `numeric` affinity, which stores it as a number with SQLite's precision. A `json` column has numeric affinity too, so a document that is a bare number, such as `1e5`, is stored as a number and reads back as SQLite prints it.
 - **Tables created by Saferis 0.19** declared booleans as `integer`, every float and decimal as `real`, and dates and timestamps as `text`. On those columns a boolean or date/time field fails to decode; recreate those tables from the current DDL. Floats and doubles still read correctly, because a `real` column reads as the 8-byte double SQLite stores.
+- **`ddl.addColumn`** names the column. It used to emit `alter table t add column <type>` with no name, which SQLite rejects.
 - **Errors**: SQLite result codes map to the shared SQLSTATEs: unique and primary key, foreign key, not null, check, busy and locked (retryable), interrupt, and syntax, missing table, and missing column.
 - **`Schema.verify`** reads the pragma table functions. SQLite does not keep the names of unique or foreign-key constraints, so those match by columns and `strictNameMatching` cannot match their names.
 - **No array parameters**: binding one fails with `SaferisError.Unsupported`."""

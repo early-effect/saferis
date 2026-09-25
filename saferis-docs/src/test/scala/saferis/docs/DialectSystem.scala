@@ -26,6 +26,7 @@ val pg = summon[Dialect]
       exampleValue {
         summon[Dialect].getClass.getSimpleName
       }.assert(name => assertTrue(name.nonEmpty)),
+      md"""A `Dialect` takes typed names and returns `SqlText` (`ColumnType` for type spellings), so a dialect you write outside Saferis says what each string is. See [Core Concepts](core-concepts.html). Spark's `dropTableSql` and `truncateTableSql` quote the table name with backticks, as every other dialect does; they used to splice it unquoted.""",
     ),
     section("Feature Comparison")(
       md"""| Feature | PostgreSQL | MySQL | SQLite | Spark |
