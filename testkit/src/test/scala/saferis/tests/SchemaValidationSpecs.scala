@@ -5,7 +5,6 @@ import saferis.Schema.*
 import saferis.ddl.*
 import saferis.postgres.PostgresDialect
 import saferis.spark.SparkDialect
-import saferis.sqlite.SQLiteDialect
 import zio.{test as _, *}
 import zio.test.*
 
@@ -362,7 +361,7 @@ object SchemaValidationSpecs:
       }
     ),
     suite("Dialects without catalogs")(
-      test("SQLite and Spark verify fail with Unsupported") {
+      test("Spark verify fails with Unsupported") {
         def unsupported(dialect: Dialect) =
           Schema[User]
             .verify(using dialect)
@@ -375,10 +374,7 @@ object SchemaValidationSpecs:
                       case Some(SaferisError.Unsupported(message)) => message.contains(dialect.name)
                       case _                                       => false
                   case Exit.Success(_) => false
-        for
-          sqlite <- unsupported(SQLiteDialect)
-          spark  <- unsupported(SparkDialect)
-        yield sqlite && spark
+        unsupported(SparkDialect)
       }
     ),
   ) @@ TestAspect.sequential

@@ -82,7 +82,7 @@ Saferis provides compile-time guarantees that operations are only available when
 | JSON operations | Yes | Yes | No |
 | Array types | Yes | No | No |
 | UPSERT | Yes | No | No |
-| `Schema.verify` | Yes | Yes | No |
+| `Schema.verify` | Yes | Yes | Yes |
 
 The query builder's `.in` / `.inList` binds one array parameter on PostgreSQL and one parameter per value elsewhere. In a raw `sql` string, `in(...)` works on every database.
 

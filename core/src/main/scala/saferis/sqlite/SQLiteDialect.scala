@@ -10,9 +10,17 @@ import saferis.*
   *   - Uses double quotes for identifier escaping
   *   - Has a unique type affinity system (simplified here)
   */
-object SQLiteDialect extends Dialect with ReturningSupport with CommonTableExpressionSupport with WindowFunctionSupport:
+object SQLiteDialect
+    extends Dialect
+    with ReturningSupport
+    with CommonTableExpressionSupport
+    with WindowFunctionSupport
+    with SchemaIntrospectionSupport:
 
   val name: String = "SQLite"
+
+  def introspectTable(tableName: String)(using zio.Trace): zio.ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
+    SQLiteCatalog.introspect(tableName)
 
   /** SQLite stores by affinity, not by declared type, but it keeps the declared name, and a driver reads that name
     * back. So each `SqlType` declares a name that says what the column holds (`boolean`, `date`, `timestamptz`, `uuid`)

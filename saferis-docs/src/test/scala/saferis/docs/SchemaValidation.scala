@@ -38,7 +38,7 @@ object SchemaValidation extends SaferisDocSpecSuite:
   def doc = page("Schema Validation")(
     md"""Saferis provides runtime schema validation to verify that your table definitions match the actual database schema. This is useful for detecting schema drift, validating migrations, and ensuring consistency between code and database.
 
-Verification reads the database catalog through the session, so it works on any driver for a dialect that reads a catalog: PostgreSQL (`information_schema` and `pg_catalog`) and MySQL (`information_schema`). On a dialect without a catalog reader, `verify` fails with `SaferisError.Unsupported`. A dialect you bring gets verification by implementing `SchemaIntrospectionSupport`.
+Verification reads the database catalog through the session, so it works on any driver for a dialect that reads a catalog: PostgreSQL (`information_schema` and `pg_catalog`), MySQL (`information_schema`), and SQLite (the pragma table functions). SQLite does not keep the names of unique or foreign-key constraints, so on SQLite those match by columns and `strictNameMatching` cannot match their names. On a dialect without a catalog reader, `verify` fails with `SaferisError.Unsupported`. A dialect you bring gets verification by implementing `SchemaIntrospectionSupport`.
 
 ```mermaid
 flowchart TB
