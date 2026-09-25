@@ -78,6 +78,16 @@ object SqliteValueSpecs:
             case Some(SaferisError.ConstraintViolation("23502", _, _, _)) => true
             case _                                                        => false
       ,
+      test("a real column keeps a Double's precision and a Float's value"):
+        for
+          _ <- sql"drop table if exists lite_reals".dml
+          // `real` for both, as tables created by Saferis 0.19 declared them.
+          _      <- sql"create table lite_reals (id integer primary key, d real, f real)".dml
+          _      <- sql"insert into lite_reals (id, d, f) values (1, ${0.1}, ${1.1f})".dml
+          double <- sql"select d from lite_reals where id = 1".queryValue[Double]
+          float  <- sql"select f from lite_reals where id = 1".queryValue[Float]
+        yield assertTrue(double.contains(0.1), float.contains(1.1f))
+      ,
       test("a 64-bit integer reads as Long, and as Int when it fits"):
         for
           big   <- sql"select 9223372036854775807".queryValue[Long]

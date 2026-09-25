@@ -76,10 +76,15 @@ object Decoder:
       case SqlValue.Bool(v) => Right(v)
       case other            => reject("bool", other)
 
+  /** A `float8` decodes when it is exactly a `Float`, as every value written from a `Float` is. SQLite stores every
+    * `real` as 8 bytes, so this is how a `Float` column reads there. Anything else fails instead of rounding.
+    */
   given float: Decoder[Float] with
     def decode(value: SqlValue): Either[DecodeError, Float] = value match
-      case SqlValue.Float4(v) => Right(v)
-      case other              => reject("float4", other)
+      case SqlValue.Float4(v)                                       => Right(v)
+      case SqlValue.Float8(v) if v.isNaN || v.toFloat.toDouble == v => Right(v.toFloat)
+      case SqlValue.Float8(v)                                       => Left(DecodeError(s"$v is not exactly a float4"))
+      case other                                                    => reject("float4", other)
 
   given double: Decoder[Double] with
     def decode(value: SqlValue): Either[DecodeError, Double] = value match

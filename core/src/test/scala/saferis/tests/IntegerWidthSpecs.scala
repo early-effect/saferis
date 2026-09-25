@@ -30,6 +30,14 @@ object IntegerWidthSpecs extends ZIOSpecDefault:
         assertTrue(decode[Double](SqlValue.Float4(f)).map(_.toFloat) == Right(f))
       )
     ,
+    test("a float8 written from a Float decodes back to that Float, NaN and infinities included"):
+      check(Gen.float): f =>
+        val back = decode[Float](SqlValue.Float8(f.toDouble))
+        assertTrue(back.exists(b => b == f || (b.isNaN && f.isNaN)))
+    ,
+    test("a float8 that is not exactly a Float fails instead of rounding"):
+      assertTrue(decode[Float](SqlValue.Float8(0.1)).isLeft)
+    ,
     test("text is still not an integer"):
       assertTrue(decode[Int](SqlValue.Text("1")).isLeft),
   )

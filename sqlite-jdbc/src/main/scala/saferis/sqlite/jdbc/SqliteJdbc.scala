@@ -80,8 +80,9 @@ private object SqliteAdapter extends StandardJdbcAdapter:
       case "boolean" | "bool" => cell(SqlType.Bool, rs.getBoolean(i))(SqlValue.Bool(_))(rs)
       case "integer" | "int" | "smallint" | "bigint" | "tinyint" | "mediumint" =>
         cell(SqlType.Int8, rs.getLong(i))(SqlValue.Int8(_))(rs)
-      case "real"                                  => cell(SqlType.Float4, rs.getFloat(i))(SqlValue.Float4(_))(rs)
-      case "double" | "double precision" | "float" => cell(SqlType.Float8, rs.getDouble(i))(SqlValue.Float8(_))(rs)
+      // SQLite stores every `real` as 8 bytes, so reading 4 would drop a Double's precision.
+      case "real" | "double" | "double precision" | "float" =>
+        cell(SqlType.Float8, rs.getDouble(i))(SqlValue.Float8(_))(rs)
       case "numeric" | "decimal" => parsed(rs, column, SqlType.Numeric)(t => SqlValue.Numeric(BigDecimal(t)))
       case "varchar" | "char" | "character" | "nvarchar" =>
         ref(SqlType.VarChar, rs.getString(i))(SqlValue.VarChar(_))(rs)
