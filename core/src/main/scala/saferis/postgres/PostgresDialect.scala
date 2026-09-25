@@ -20,34 +20,35 @@ object PostgresDialect
     with CommonTableExpressionSupport
     with SchemaIntrospectionSupport:
 
-  val name: String = "PostgreSQL"
+  val name: DialectName = DialectName("PostgreSQL")
 
-  def introspectTable(tableName: String)(using Trace): ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
+  def introspectTable(tableName: TableName)(using Trace): ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
     PostgresCatalog.introspect(tableName)
 
-  def columnType(tpe: SqlType): String = tpe match
-    case SqlType.Bool           => "boolean"
-    case SqlType.Int2           => "smallint"
-    case SqlType.Int4           => "integer"
-    case SqlType.Int8           => "bigint"
-    case SqlType.Float4         => "real"
-    case SqlType.Float8         => "double precision"
-    case SqlType.Numeric        => "numeric"
-    case SqlType.VarChar        => s"varchar($DefaultVarcharLength)"
-    case SqlType.Text           => "text"
-    case SqlType.Bytea          => "bytea"
-    case SqlType.Date           => "date"
-    case SqlType.Time           => "time"
-    case SqlType.Timestamp      => "timestamp"
-    case SqlType.Timestamptz    => "timestamptz"
-    case SqlType.Jsonb          => "jsonb"
-    case SqlType.Uuid           => "uuid"
-    case SqlType.Array(element) => s"${columnType(element)}[]"
-    case SqlType.Other(_)       => "text"
+  def columnType(tpe: SqlType): ColumnType = ColumnType:
+    tpe match
+      case SqlType.Bool           => "boolean"
+      case SqlType.Int2           => "smallint"
+      case SqlType.Int4           => "integer"
+      case SqlType.Int8           => "bigint"
+      case SqlType.Float4         => "real"
+      case SqlType.Float8         => "double precision"
+      case SqlType.Numeric        => "numeric"
+      case SqlType.VarChar        => s"varchar($DefaultVarcharLength)"
+      case SqlType.Text           => "text"
+      case SqlType.Bytea          => "bytea"
+      case SqlType.Date           => "date"
+      case SqlType.Time           => "time"
+      case SqlType.Timestamp      => "timestamp"
+      case SqlType.Timestamptz    => "timestamptz"
+      case SqlType.Jsonb          => "jsonb"
+      case SqlType.Uuid           => "uuid"
+      case SqlType.Array(element) => s"${columnType(element)}[]"
+      case SqlType.Other(_)       => "text"
 
   // === PostgreSQL-specific Auto-increment and Primary Key Support ===
 
-  def autoIncrementClause(isGenerated: Boolean, isPrimaryKey: Boolean, hasCompoundKey: Boolean): String =
+  def autoIncrementClause(isGenerated: Boolean, isPrimaryKey: Boolean, hasCompoundKey: Boolean): SqlText = SqlText:
     if isGenerated && isPrimaryKey && !hasCompoundKey then " generated always as identity primary key"
     else if isGenerated then " generated always as identity"
     else if isPrimaryKey && !hasCompoundKey then " primary key"
@@ -58,40 +59,47 @@ object PostgresDialect
   override def identifierQuote: String = "\""
 
   // === UpsertSupport implementation ===
-  def upsertSql(tableName: String, insertColumns: String, conflictColumns: Seq[String], updateColumns: String): String =
-    s"insert into $tableName $insertColumns on conflict (${conflictColumns.mkString(", ")}) do update set $updateColumns"
+  def upsertSql(
+      tableName: SqlText,
+      insertColumns: SqlText,
+      conflictColumns: Seq[SqlText],
+      updateColumns: SqlText,
+  ): SqlText =
+    SqlText(
+      s"insert into $tableName $insertColumns on conflict (${conflictColumns.mkString(", ")}) do update set $updateColumns"
+    )
 
-  def upsertDoNothingSql(tableName: String, insertColumns: String, conflictColumns: Seq[String]): String =
-    s"insert into $tableName $insertColumns on conflict (${conflictColumns.mkString(", ")}) do nothing"
+  def upsertDoNothingSql(tableName: SqlText, insertColumns: SqlText, conflictColumns: Seq[SqlText]): SqlText =
+    SqlText(s"insert into $tableName $insertColumns on conflict (${conflictColumns.mkString(", ")}) do nothing")
 
   // === JsonSupport implementation ===
-  def jsonType: String = "jsonb"
+  def jsonType: ColumnType = ColumnType("jsonb")
 
-  def jsonExtractSql(columnName: String, fieldPath: String): String =
+  def jsonExtractSql(column: SqlText, fieldPath: String): SqlText =
     val escaped = fieldPath.replace("'", "''")
-    s"$columnName->>'$escaped'"
+    SqlText(s"$column->>'$escaped'")
 
-  def jsonContainsSql(columnName: String, jsonValue: String): String =
+  def jsonContainsSql(column: SqlText, jsonValue: JsonText): SqlText =
     val escaped = jsonValue.replace("'", "''")
-    s"$columnName @> '$escaped'"
+    SqlText(s"$column @> '$escaped'")
 
   // Function equivalents of ? / ?| / ?&. The operators stay out of generated SQL.
-  def jsonHasKeySql(columnName: String, key: String): String =
+  def jsonHasKeySql(column: SqlText, key: String): SqlText =
     val escaped = key.replace("'", "''")
-    s"jsonb_exists($columnName, '$escaped')"
+    SqlText(s"jsonb_exists($column, '$escaped')")
 
-  def jsonHasAnyKeySql(columnName: String, keys: Seq[String]): String =
+  def jsonHasAnyKeySql(column: SqlText, keys: Seq[String]): SqlText =
     val keysArray = keys.map(k => s"'${k.replace("'", "''")}'").mkString(", ")
-    s"jsonb_exists_any($columnName, array[$keysArray])"
+    SqlText(s"jsonb_exists_any($column, array[$keysArray])")
 
-  def jsonHasAllKeysSql(columnName: String, keys: Seq[String]): String =
+  def jsonHasAllKeysSql(column: SqlText, keys: Seq[String]): SqlText =
     val keysArray = keys.map(k => s"'${k.replace("'", "''")}'").mkString(", ")
-    s"jsonb_exists_all($columnName, array[$keysArray])"
+    SqlText(s"jsonb_exists_all($column, array[$keysArray])")
 
   // === ArraySupport implementation ===
-  def arrayType(elementType: String): String = s"$elementType[]"
+  def arrayType(elementType: ColumnType): ColumnType = ColumnType(s"$elementType[]")
 
-  def arrayContainsSql(columnName: String, value: String): String =
-    s"$value = ANY($columnName)"
+  def arrayContainsSql(column: SqlText, value: SqlText): SqlText =
+    SqlText(s"$value = ANY($column)")
 
 end PostgresDialect

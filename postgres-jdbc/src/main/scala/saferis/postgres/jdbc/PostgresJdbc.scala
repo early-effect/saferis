@@ -51,7 +51,7 @@ private object PostgresAdapter extends StandardJdbcAdapter:
     else
       Some(
         ServerError(
-          Some("25P02"),
+          Some(SqlState.InFailedTransaction),
           "current transaction is aborted, commands ignored until end of transaction block",
         )
       )
@@ -102,8 +102,8 @@ private object PostgresAdapter extends StandardJdbcAdapter:
       case "json" | "jsonb" =>
         ref(SqlType.Jsonb, rs.getObject(i))(value =>
           value match
-            case pg: PGobject => SqlValue.Jsonb(Option(pg.getValue).getOrElse(""))
-            case other        => SqlValue.Jsonb(other.toString)
+            case pg: PGobject => SqlValue.Jsonb(JsonText(Option(pg.getValue).getOrElse("")))
+            case other        => SqlValue.Jsonb(JsonText(other.toString))
         )(rs)
       case "uuid" => ref(SqlType.Uuid, rs.getObject(i, classOf[UUID]))(SqlValue.Uuid(_))(rs)
       case array if array.startsWith("_") || array.endsWith("[]") => readArray(rs, column)
@@ -114,7 +114,7 @@ private object PostgresAdapter extends StandardJdbcAdapter:
   /** Array text through `PgText`, keyed by the element's OID. An element type `PgText` does not know is `Other`. */
   private def readArray(rs: ResultSet, column: JdbcColumn): Either[SaferisError, SqlValue] =
     val name        = column.typeName
-    val elementName = if name.endsWith("[]") then name.stripSuffix("[]") else name.drop(1)
+    val elementName = TypeName(if name.endsWith("[]") then name.stripSuffix("[]") else name.drop(1))
     val arrayOid    = PgText.oidOf(elementName).flatMap(PgText.arrayOid)
     arrayOid match
       case None      => other(rs, column)
@@ -127,7 +127,7 @@ private object PostgresAdapter extends StandardJdbcAdapter:
   end readArray
 
   /** `createArrayOf` needs a name the server resolves. An array of a type known only by OID has none. */
-  private def arrayTypeName(tpe: SqlType): Either[SaferisError, String] =
+  private def arrayTypeName(tpe: SqlType): Either[SaferisError, TypeName] =
     PgText.cast(tpe) match
       case Some(name) => Right(name)
       case None       =>
@@ -140,8 +140,8 @@ private object PostgresAdapter extends StandardJdbcAdapter:
   private def arrayMember(value: SqlValue): Object =
     PgText.encode(value).orNull
 
-  private def constraintOf(e: SQLException): Option[String] = e match
+  private def constraintOf(e: SQLException): Option[ConstraintName] = e match
     case pg: PSQLException =>
-      Option(pg.getServerErrorMessage).flatMap(message => Option(message.getConstraint))
+      Option(pg.getServerErrorMessage).flatMap(message => Option(message.getConstraint)).map(ConstraintName(_))
     case _ => None
 end PostgresAdapter

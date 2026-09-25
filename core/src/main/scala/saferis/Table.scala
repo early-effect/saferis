@@ -5,9 +5,9 @@ import scala.annotation.StaticAnnotation
 final case class tableName(name: String) extends StaticAnnotation
 
 sealed trait Table[A]:
-  private[saferis] def name: String
+  private[saferis] def name: TableName
   def columns: Seq[Column[?]]
-  private[saferis] def columnMap                               = columns.map(c => c.name -> c).toMap
+  private[saferis] def columnMap: Map[String, Column[?]]       = columns.map(c => (c.name: String) -> c).toMap
   transparent inline def instance                              = Macros.instanceOf[A](alias = None)
   transparent inline def aliasedInstance(inline alias: String) =
     val _ = Alias(alias) // Compile-time validation that alias is a string literal
@@ -69,7 +69,7 @@ object Table:
   transparent inline def apply[A](inline alias: String)(using table: Table[A]) =
     table.aliasedInstance(alias)
 
-  final case class Derived[A](name: String, columns: Seq[Column[?]]) extends Table[A]
+  final case class Derived[A](name: TableName, columns: Seq[Column[?]]) extends Table[A]
 
   inline def derived[A]: Table[A] =
     Derived[A](Macros.nameOf[A], Macros.columnsOf[A])

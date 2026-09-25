@@ -27,7 +27,7 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
         aborted = exit match
           case Exit.Failure(cause) =>
             cause.failureOption match
-              case Some(SaferisError.QueryError(Some("25P02"), _, sql)) =>
+              case Some(SaferisError.QueryError(Some(SqlState.InFailedTransaction), _, sql)) =>
                 sql.exists(_.contains("later"))
               case _ => false
           case _ => false
@@ -53,8 +53,8 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
         failed = exit match
           case Exit.Failure(cause) =>
             cause.failureOption match
-              case Some(SaferisError.QueryError(Some("40001"), _, _)) => true
-              case _                                                  => false
+              case Some(SaferisError.QueryError(Some(SqlState.SerializationFailure), _, _)) => true
+              case _                                                                        => false
           case _ => false
       yield assertTrue(failed, calls.contains("commit"))
     ,
@@ -75,7 +75,10 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
         exit <- transact(
           ZIO.serviceWithZIO[SqlSession]: session =>
             val read: SqlRow => Either[SaferisError, Int] = _ => Right(1)
-            session.stream(SqlCommand(Chunk(SqlPiece.Text("stream-boom")), None))(read).runDrain.catchAll(_ => ZIO.unit)
+            session
+              .stream(SqlCommand(Chunk(SqlPiece.Text(SqlText("stream-boom"))), None))(read)
+              .runDrain
+              .catchAll(_ => ZIO.unit)
         ).provide(ZLayer.succeed(SqlSession.pooled(ZIO.succeed(script)))).exit
         calls <- log.get
       yield assertTrue(
@@ -97,7 +100,7 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
       note(s"exec:${command.inspection}") *>
         ZIO
           .when(command.inspection.contains("boom"))(
-            ZIO.fail(SaferisError.SyntaxError("42601", "boom", Some(command.inspection)))
+            ZIO.fail(SaferisError.SyntaxError(SqlState.SyntaxError, "boom", Some(command.inspection)))
           )
           .unit
           .as(1L)
@@ -112,9 +115,9 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
       zio.stream.ZStream.unwrap:
         note(s"cursor:${command.inspection}").as:
           if failCursor then
-            zio.stream.ZStream.succeed(SqlRow(Chunk("n"), Chunk(SqlValue.Int4(1)))) ++
+            zio.stream.ZStream.succeed(SqlRow(Chunk(ColumnName("n")), Chunk(SqlValue.Int4(1)))) ++
               zio.stream.ZStream.fail(
-                SaferisError.QueryError(Some("42601"), "cursor failed", Some(command.inspection))
+                SaferisError.QueryError(Some(SqlState.SyntaxError), "cursor failed", Some(command.inspection))
               )
           else zio.stream.ZStream.empty
 
@@ -123,7 +126,11 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
 
     def commit: IO[SaferisError, Unit] =
       note("commit") *>
-        ZIO.when(failCommit)(ZIO.fail(SaferisError.QueryError(Some("40001"), "commit failed", None))).unit
+        ZIO
+          .when(failCommit)(
+            ZIO.fail(SaferisError.QueryError(Some(SqlState.SerializationFailure), "commit failed", None))
+          )
+          .unit
 
     def rollback: UIO[Unit] =
       note("rollback")

@@ -75,8 +75,8 @@ object SpecializedDML:
 
   /** Create index with IF NOT EXISTS - only available for dialects that support it */
   inline def createIndexIfNotExists[A](
-      indexName: String,
-      columnNames: Seq[String],
+      indexName: IndexName,
+      columnNames: Seq[ColumnName],
       unique: Boolean = false,
   )(using
       table: Table[A],
@@ -90,7 +90,7 @@ object SpecializedDML:
     val safeIndexName   = dialect.escapeIdentifier(indexName)
     val safeColumnNames = columnNames.map(dialect.escapeIdentifier)
     val sql             =
-      SqlFragment.text(dialect.createIndexIfNotExistsSql(safeIndexName, tableName, safeColumnNames, unique))
+      SqlFragment.text(dialect.createIndexIfNotExistsSql(safeIndexName, tableName.sql, safeColumnNames, unique))
     sql.dml
   end createIndexIfNotExists
 
@@ -100,20 +100,20 @@ object SpecializedDML:
     * strings. The safe public path is the schema DSL (`Query`/`Schema` `.where(_.col).json*`), which resolves column
     * labels from the schema. Kept `private[saferis]` for internal use and tests.
     */
-  private[saferis] def jsonExtract(columnName: String, fieldPath: String)(using
+  private[saferis] def jsonExtract(column: SqlText, fieldPath: String)(using
       dialect: Dialect & JsonSupport
   ): SqlFragment =
-    SqlFragment.text(dialect.jsonExtractSql(columnName, fieldPath))
+    SqlFragment.text(dialect.jsonExtractSql(column, fieldPath))
 
   /** Array containment check - only available for dialects that support arrays.
     *
     * Internal: `columnName` and `value` are interpolated raw, so this is not a safe public API for caller-supplied
     * strings. Use the schema DSL for safe queries. Kept `private[saferis]` for internal use.
     */
-  private[saferis] def arrayContains(columnName: String, value: String)(using
+  private[saferis] def arrayContains(column: SqlText, value: SqlText)(using
       dialect: Dialect & ArraySupport
   ): SqlFragment =
-    SqlFragment.text(dialect.arrayContainsSql(columnName, value))
+    SqlFragment.text(dialect.arrayContainsSql(column, value))
 
   /** Get SQL for UPSERT operation - only available for dialects that support it.
     *
@@ -121,11 +121,10 @@ object SpecializedDML:
     * `private[saferis]`.
     */
   private[saferis] def upsertSql[A](
-      insertColumns: String,
-      conflictColumns: Seq[String],
-      updateColumns: String,
-  )(using table: Table[A], dialect: Dialect & UpsertSupport): String =
-    val tableName = summon[Table[A]].name
-    dialect.upsertSql(tableName, insertColumns, conflictColumns, updateColumns)
+      insertColumns: SqlText,
+      conflictColumns: Seq[SqlText],
+      updateColumns: SqlText,
+  )(using table: Table[A], dialect: Dialect & UpsertSupport): SqlText =
+    dialect.upsertSql(table.name.sql, insertColumns, conflictColumns, updateColumns)
 
 end SpecializedDML

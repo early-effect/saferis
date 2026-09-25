@@ -48,13 +48,16 @@ object DialectSpecs extends ZIOSpecDefault:
     },
     test("Dialects generate correct index SQL with escaped identifiers") {
       val pgDialect = summon[Dialect]
-      val indexSql  = pgDialect.createIndexSql("idx_test", "test_table", Seq("name"), true)
+      val indexSql  =
+        pgDialect.createIndexSql(IndexName("idx_test"), TableName("test_table"), Seq(ColumnName("name")), true)
       assertTrue(indexSql == "create index if not exists \"idx_test\" on \"test_table\" (\"name\")")
 
-      val mysqlIndexSql = MySQLDialect.createIndexSql("idx_test", "test_table", Seq("name"), true)
+      val mysqlIndexSql =
+        MySQLDialect.createIndexSql(IndexName("idx_test"), TableName("test_table"), Seq(ColumnName("name")), true)
       assertTrue(mysqlIndexSql == "create index `idx_test` on `test_table` (`name`)")
 
-      val sqliteIndexSql = SQLiteDialect.createIndexSql("idx_test", "test_table", Seq("name"), true)
+      val sqliteIndexSql =
+        SQLiteDialect.createIndexSql(IndexName("idx_test"), TableName("test_table"), Seq(ColumnName("name")), true)
       assertTrue(sqliteIndexSql == "create index if not exists \"idx_test\" on \"test_table\" (\"name\")")
     },
     test("PostgreSQL escapeIdentifier handles SQL injection attempts") {

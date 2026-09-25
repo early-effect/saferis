@@ -39,7 +39,7 @@ final case class LiteralCondition(
   def toFragment: SqlFragment =
     SqlFragment(
       Chunk(
-        SqlPiece.Text(s"${alias.toSql}.${column.label} ${operator.sql} "),
+        SqlPiece.Text(SqlText(s"${alias.toSql}.${column.label} ${operator.sql} ")),
         SqlPiece.Param(value),
       )
     )

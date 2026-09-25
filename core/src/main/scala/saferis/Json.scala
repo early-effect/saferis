@@ -27,7 +27,7 @@ object Json:
   given encoder[A: JsonCodec]: Encoder[Json[A]] with
     def sqlType: SqlType             = SqlType.Jsonb
     def encode(a: Json[A]): SqlValue =
-      SqlValue.Jsonb(summon[JsonCodec[A]].encoder.encodeJson(a, None).toString)
+      SqlValue.Jsonb(JsonText(summon[JsonCodec[A]].encoder.encodeJson(a, None).toString))
 
   given decoder[A: JsonCodec]: Decoder[Json[A]] with
     def decode(value: SqlValue): Either[DecodeError, Json[A]] = value match

@@ -22,7 +22,7 @@ object MySqlValueSpecs:
   enum Mood:
     case sad, ok
 
-  given Codec[Mood] = Codec.enumeration[Mood]("mood")
+  given Codec[Mood] = Codec.enumeration[Mood](TypeName("mood"))
 
   @tableName("mysql_values")
   final case class Row(@key id: Int, meta: Json[Meta], ref: UUID, local: LocalDateTime, clock: LocalTime) derives Table
@@ -89,8 +89,9 @@ object MySqlValueSpecs:
           exit <- sql"insert into mysql_child (id, parent_id) values (1, 99)".dml.exit
         yield assertTrue:
           failure(exit) match
-            case Some(SaferisError.ConstraintViolation("23503", Some("fk_child_parent"), _, _)) => true
-            case _                                                                              => false
+            case Some(SaferisError.ConstraintViolation(SqlState.ForeignKeyViolation, Some("fk_child_parent"), _, _)) =>
+              true
+            case _ => false
       ,
       test("an array parameter is Unsupported on MySQL"):
         for exit <- sql"select ${Chunk(1, 2)}".dml.exit

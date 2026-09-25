@@ -17,9 +17,9 @@ object SQLiteDialect
     with WindowFunctionSupport
     with SchemaIntrospectionSupport:
 
-  val name: String = "SQLite"
+  val name: DialectName = DialectName("SQLite")
 
-  def introspectTable(tableName: String)(using zio.Trace): zio.ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
+  def introspectTable(tableName: TableName)(using zio.Trace): zio.ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
     SQLiteCatalog.introspect(tableName)
 
   /** SQLite stores by affinity, not by declared type, but it keeps the declared name, and a driver reads that name
@@ -27,25 +27,26 @@ object SQLiteDialect
     * and still lands on the right affinity. Every integer width is `integer`, so an integer primary key stays SQLite's
     * rowid and autoincrements.
     */
-  def columnType(tpe: SqlType): String = tpe match
-    case SqlType.Bool                               => "boolean"
-    case SqlType.Int2 | SqlType.Int4 | SqlType.Int8 => "integer"
-    case SqlType.Float4                             => "real"
-    case SqlType.Float8                             => "double"
-    case SqlType.Numeric                            => "numeric"
-    case SqlType.VarChar                            => s"varchar($DefaultVarcharLength)"
-    case SqlType.Text                               => "text"
-    case SqlType.Bytea                              => "blob"
-    case SqlType.Date                               => "date"
-    case SqlType.Time                               => "time"
-    case SqlType.Timestamp                          => "timestamp"
-    case SqlType.Timestamptz                        => "timestamptz"
-    case SqlType.Jsonb                              => "json"
-    case SqlType.Uuid                               => "uuid"
-    case SqlType.Array(_) | SqlType.Other(_)        => "text"
+  def columnType(tpe: SqlType): ColumnType = ColumnType:
+    tpe match
+      case SqlType.Bool                               => "boolean"
+      case SqlType.Int2 | SqlType.Int4 | SqlType.Int8 => "integer"
+      case SqlType.Float4                             => "real"
+      case SqlType.Float8                             => "double"
+      case SqlType.Numeric                            => "numeric"
+      case SqlType.VarChar                            => s"varchar($DefaultVarcharLength)"
+      case SqlType.Text                               => "text"
+      case SqlType.Bytea                              => "blob"
+      case SqlType.Date                               => "date"
+      case SqlType.Time                               => "time"
+      case SqlType.Timestamp                          => "timestamp"
+      case SqlType.Timestamptz                        => "timestamptz"
+      case SqlType.Jsonb                              => "json"
+      case SqlType.Uuid                               => "uuid"
+      case SqlType.Array(_) | SqlType.Other(_)        => "text"
 
   // === Auto-increment Syntax ===
-  override def autoIncrementClause(isGenerated: Boolean, isKey: Boolean, hasDefault: Boolean): String =
+  override def autoIncrementClause(isGenerated: Boolean, isKey: Boolean, hasDefault: Boolean): SqlText = SqlText:
     (isGenerated, isKey, hasDefault) match
       case (true, true, false)  => " primary key autoincrement"
       case (true, true, true)   => " autoincrement"
@@ -53,42 +54,36 @@ object SQLiteDialect
       case (true, false, false) => " autoincrement"
       case _                    => ""
 
-  // === Table Operations ===
-  override def addColumnSql(tableName: String, columnName: String, columnDefinition: String): String =
-    s"alter table ${escapeIdentifier(tableName)} add column $columnDefinition"
-
-  /** SQLite 3.35 and later drop a column in place. */
-  override def dropColumnSql(tableName: String, columnName: String): String =
-    s"alter table ${escapeIdentifier(tableName)} drop column ${escapeIdentifier(columnName)}"
-
   // === Index Operations ===
   // SQLite supports partial indexes (WHERE clause)
   override def createIndexSql(
-      indexName: String,
-      tableName: String,
-      columnNames: Seq[String],
+      indexName: IndexName,
+      tableName: TableName,
+      columnNames: Seq[ColumnName],
       ifNotExists: Boolean = true,
-      where: Option[String] = None,
-  ): String =
+      where: Option[SqlText] = None,
+  ): SqlText =
     val ifNotExistsClause = if ifNotExists then " if not exists" else ""
     val columns           = columnNames.map(escapeIdentifier).mkString(", ")
     val whereClause       = where.map(w => s" where $w").getOrElse("")
     // nosemgrep: scala-security.scala.lang.security.audit.tainted-sql-string -- identifiers are escaped via escapeIdentifier (identifiers cannot be bind parameters)
-    s"create index$ifNotExistsClause ${escapeIdentifier(indexName)} on ${escapeIdentifier(tableName)} ($columns)$whereClause"
+    SqlText(
+      s"create index$ifNotExistsClause ${escapeIdentifier(indexName)} on ${escapeIdentifier(tableName)} ($columns)$whereClause"
+    )
   end createIndexSql
 
-  override def dropIndexSql(indexName: String, ifExists: Boolean = false): String =
+  override def dropIndexSql(indexName: IndexName, ifExists: Boolean = false): SqlText =
     val ifExistsClause = if ifExists then "if exists " else ""
     // nosemgrep: scala-security.scala.lang.security.audit.tainted-sql-string -- identifiers are escaped via escapeIdentifier (identifiers cannot be bind parameters)
-    s"drop index $ifExistsClause${escapeIdentifier(indexName)}"
+    SqlText(s"drop index $ifExistsClause${escapeIdentifier(indexName)}")
 
   // === SQLite-specific Query Features ===
   override def identifierQuote: String = "\""
 
   // === SQLite-specific Table Operations ===
-  override def truncateTableSql(tableName: String): String =
+  override def truncateTableSql(tableName: TableName): SqlText =
     // SQLite doesn't have TRUNCATE, use DELETE instead
-    s"delete from ${escapeIdentifier(tableName)}"
+    SqlText(s"delete from ${escapeIdentifier(tableName)}")
 
   // ReturningSupport uses default implementations since SQLite supports RETURNING
 

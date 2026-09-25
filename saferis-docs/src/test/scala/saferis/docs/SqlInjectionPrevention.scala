@@ -108,9 +108,9 @@ Never pass user input to `Placeholder.raw()`.
 ## JSON Operations: Automatic Escaping
 
 When using JSON operations in the Schema DSL or dialect methods, Saferis automatically escapes single quotes to prevent injection:""",
-    exampleValue(PostgresDialect.jsonHasKeySql("data", "user's_key"))
+    exampleValue(PostgresDialect.jsonHasKeySql(SqlText("data"), "user's_key"))
       .assert(sql => assertTrue(sql == "jsonb_exists(data, 'user''s_key')")),
-    exampleValue(PostgresDialect.jsonHasKeySql("data", "'); DROP TABLE sql_injection_profiles; --"))
+    exampleValue(PostgresDialect.jsonHasKeySql(SqlText("data"), "'); DROP TABLE sql_injection_profiles; --"))
       .assert(sql => assertTrue(sql == "jsonb_exists(data, '''); DROP TABLE sql_injection_profiles; --')")),
     md"""The single quote in the injection attempt is escaped to `''`, rendering it harmless.
 

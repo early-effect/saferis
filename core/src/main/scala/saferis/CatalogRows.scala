@@ -11,32 +11,32 @@ import zio.ZIO
   */
 private[saferis] object CatalogRows:
   final case class ColumnRow(
-      name: String,
-      dataType: String,
+      name: ColumnName,
+      dataType: ColumnType,
       nullable: Boolean,
-      defaultValue: Option[String],
+      defaultValue: Option[SqlText],
       ordinal: Int,
   )
 
-  final case class OrdinalName(name: String, ordinal: Int)
+  final case class OrdinalName(name: ColumnName, ordinal: Int)
 
-  final case class ConstraintColumn(constraint: String, name: String, ordinal: Int)
+  final case class ConstraintColumn(constraint: ConstraintName, name: ColumnName, ordinal: Int)
 
   final case class ForeignKeyRow(
-      constraint: String,
-      fromColumn: String,
-      toTable: String,
-      toColumn: String,
-      onUpdate: String,
-      onDelete: String,
+      constraint: ConstraintName,
+      fromColumn: ColumnName,
+      toTable: TableName,
+      toColumn: ColumnName,
+      onUpdate: ForeignKeyAction,
+      onDelete: ForeignKeyAction,
       ordinal: Int,
   )
 
   final case class IndexRow(
-      indexName: String,
-      column: String,
+      indexName: IndexName,
+      column: ColumnName,
       isUnique: Boolean,
-      whereClause: Option[String],
+      whereClause: Option[SqlText],
       ordinal: Int,
   )
 
@@ -48,62 +48,88 @@ private[saferis] object CatalogRows:
 
   private def cell[A: Decoder](row: SqlRow, label: String, expected: String): Either[SaferisError, A] =
     row
-      .get(label)
+      .get(ColumnName(label))
       .flatMap(summon[Decoder[A]].decode)
       .left
-      .map(err => SaferisError.DecodingError(label, expected, err.detail))
+      .map(err => SaferisError.DecodingError(ColumnName(label), TypeName(expected), err.detail))
 
   /** A boolean column, or an integer where the catalog has no boolean type (MySQL). Non-zero is true. */
   private def flag(row: SqlRow, label: String): Either[SaferisError, Boolean] =
     cell[Boolean](row, label, "bool").orElse(cell[Long](row, label, "integer").map(_ != 0L))
 
-  def readTable(row: SqlRow): Either[SaferisError, String] =
-    cell[String](row, "table_name", "text")
+  private def text(row: SqlRow, label: String): Either[SaferisError, String] =
+    cell[String](row, label, "text")
+
+  private def action(row: SqlRow, label: String): Either[SaferisError, ForeignKeyAction] =
+    text(row, label).flatMap: spelling =>
+      ForeignKeyAction
+        .parse(spelling)
+        .toRight(
+          SaferisError
+            .DecodingError(ColumnName(label), TypeName("foreign key action"), s"unknown action '$spelling'")
+        )
+
+  def readTable(row: SqlRow): Either[SaferisError, TableName] =
+    text(row, "table_name").map(TableName(_))
 
   def readColumn(row: SqlRow): Either[SaferisError, ColumnRow] =
     for
-      name     <- cell[String](row, "column_name", "text")
-      dataType <- cell[String](row, "data_type", "text")
-      nullable <- cell[String](row, "is_nullable", "text")
+      name     <- text(row, "column_name")
+      dataType <- text(row, "data_type")
+      nullable <- text(row, "is_nullable")
       default  <- cell[Option[String]](row, "column_default", "text")
       ordinal  <- cell[Int](row, "ordinal_position", "integer")
-    yield ColumnRow(name, dataType, nullable.equalsIgnoreCase("YES"), default, ordinal)
+    yield ColumnRow(
+      ColumnName(name),
+      ColumnType(dataType),
+      nullable.equalsIgnoreCase("YES"),
+      default.map(SqlText(_)),
+      ordinal,
+    )
 
   def readOrdinal(row: SqlRow): Either[SaferisError, OrdinalName] =
     for
-      name    <- cell[String](row, "column_name", "text")
+      name    <- text(row, "column_name")
       ordinal <- cell[Int](row, "ordinal_position", "integer")
-    yield OrdinalName(name, ordinal)
+    yield OrdinalName(ColumnName(name), ordinal)
 
   def readConstraint(row: SqlRow): Either[SaferisError, ConstraintColumn] =
     for
-      constraint <- cell[String](row, "constraint_name", "text")
-      name       <- cell[String](row, "column_name", "text")
+      constraint <- text(row, "constraint_name")
+      name       <- text(row, "column_name")
       ordinal    <- cell[Int](row, "ordinal_position", "integer")
-    yield ConstraintColumn(constraint, name, ordinal)
+    yield ConstraintColumn(ConstraintName(constraint), ColumnName(name), ordinal)
 
   def readForeignKey(row: SqlRow): Either[SaferisError, ForeignKeyRow] =
     for
-      constraint <- cell[String](row, "constraint_name", "text")
-      fromColumn <- cell[String](row, "from_column", "text")
-      toTable    <- cell[String](row, "to_table", "text")
-      toColumn   <- cell[String](row, "to_column", "text")
-      onUpdate   <- cell[String](row, "update_rule", "text")
-      onDelete   <- cell[String](row, "delete_rule", "text")
+      constraint <- text(row, "constraint_name")
+      fromColumn <- text(row, "from_column")
+      toTable    <- text(row, "to_table")
+      toColumn   <- text(row, "to_column")
+      onUpdate   <- action(row, "update_rule")
+      onDelete   <- action(row, "delete_rule")
       ordinal    <- cell[Int](row, "ordinal_position", "integer")
-    yield ForeignKeyRow(constraint, fromColumn, toTable, toColumn, onUpdate, onDelete, ordinal)
+    yield ForeignKeyRow(
+      ConstraintName(constraint),
+      ColumnName(fromColumn),
+      TableName(toTable),
+      ColumnName(toColumn),
+      onUpdate,
+      onDelete,
+      ordinal,
+    )
 
   def readIndex(row: SqlRow): Either[SaferisError, IndexRow] =
     for
-      indexName   <- cell[String](row, "index_name", "text")
-      column      <- cell[String](row, "column_name", "text")
+      indexName   <- text(row, "index_name")
+      column      <- text(row, "column_name")
       isUnique    <- flag(row, "is_unique")
       whereClause <- cell[Option[String]](row, "where_clause", "text")
       ordinal     <- cell[Int](row, "ordinal_position", "integer")
-    yield IndexRow(indexName, column, isUnique, whereClause, ordinal)
+    yield IndexRow(IndexName(indexName), ColumnName(column), isUnique, whereClause.map(SqlText(_)), ordinal)
 
   def table(
-      stored: String,
+      stored: TableName,
       columnRows: Chunk[ColumnRow],
       keyRows: Chunk[OrdinalName],
       uniqueRows: Chunk[ConstraintColumn],
@@ -121,7 +147,7 @@ private[saferis] object CatalogRows:
     )
   end table
 
-  private def columnModels(rows: Chunk[ColumnRow], keys: Seq[String]): Seq[DatabaseColumn] =
+  private def columnModels(rows: Chunk[ColumnRow], keys: Seq[ColumnName]): Seq[DatabaseColumn] =
     val keyNames = keys.toSet
     rows.toSeq
       .sortBy(_.ordinal)

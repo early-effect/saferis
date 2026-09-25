@@ -147,10 +147,10 @@ A JSON column decodes as `Json[A]`, not as `String`: `Decoder[String]` reads tex
 enum Mood:
   case sad, ok
 
-given Codec[Mood] = Codec.enumeration[Mood]("mood")
+given Codec[Mood] = Codec.enumeration[Mood](TypeName("mood"))
 ```
 
-On PostgreSQL the value binds uncast, so the server infers the enum type from the column (`create type mood as enum ('sad', 'ok')`). MySQL stores it in an `enum('sad', 'ok')` column, and SQLite and H2 in a text column. It decodes from the enum, `text`, or `varchar`. For an enum whose labels are not its case names, pass the two functions: `Codec.enumeration[E]("mood")(e => label(e), text => fromLabel(text))`."""
+On PostgreSQL the value binds uncast, so the server infers the enum type from the column (`create type mood as enum ('sad', 'ok')`). MySQL stores it in an `enum('sad', 'ok')` column, and SQLite and H2 in a text column. It decodes from the enum, `text`, or `varchar`. For an enum whose labels are not its case names, pass the two functions: `Codec.enumeration[E](TypeName("mood"))(e => label(e), text => fromLabel(text))`."""
     ),
     section("Array Columns")(
       md"""`Chunk[A]` is a PostgreSQL array column (`int4[]` for `Chunk[Int]`) and needs no hand-written given. `Chunk[Byte]` stays `bytea`. `Chunk[Option[A]]` allows null members. The other databases have no array parameters: binding one fails with `SaferisError.Unsupported`. For membership, the query builder's `.inList` binds `IN (...)` there instead, and `in(...)` works in raw SQL everywhere (see [Subqueries](subqueries.html))."""

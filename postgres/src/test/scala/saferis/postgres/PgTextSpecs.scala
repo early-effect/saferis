@@ -1,8 +1,10 @@
 package saferis.postgres
 
+import saferis.JsonText
 import saferis.ServerType
 import saferis.SqlType
 import saferis.SqlValue
+import saferis.TypeName
 
 import zio.Chunk
 import zio.test.*
@@ -33,7 +35,7 @@ object PgTextSpecs extends ZIOSpecDefault:
     SqlValue.Time(LocalTime.of(15, 4, 5, 123456000)),
     SqlValue.Timestamp(LocalDateTime.parse("2024-09-23T15:04:05.123456")),
     SqlValue.Timestamptz(Instant.parse("2024-09-23T15:04:05.123456Z")),
-    SqlValue.Jsonb("""{"a":null}"""),
+    SqlValue.Jsonb(JsonText("""{"a":null}""")),
     SqlValue.Uuid(UUID.fromString("123e4567-e89b-12d3-a456-426614174000")),
   )
 
@@ -83,7 +85,7 @@ object PgTextSpecs extends ZIOSpecDefault:
         PgText.cast(SqlType.Jsonb) == Some("jsonb"),
         PgText.cast(SqlType.Timestamptz) == Some("timestamptz"),
         PgText.cast(SqlType.Array(SqlType.Int4)) == Some("int4[]"),
-        PgText.cast(SqlType.Other(ServerType.Named("mood"))) == None,
+        PgText.cast(SqlType.Other(ServerType.Named(TypeName("mood")))) == None,
         PgText.encode(SqlValue.Null(SqlType.Text)) == None,
       )
     ,

@@ -15,8 +15,8 @@ trait ReturningSupport:
     * @return
     *   SQL fragment for INSERT ... RETURNING
     */
-  def insertReturningSql(tableName: String, insertColumns: String, returningColumns: String): String =
-    s"insert into $tableName $insertColumns returning $returningColumns"
+  def insertReturningSql(tableName: SqlText, insertColumns: SqlText, returningColumns: SqlText): SqlText =
+    SqlText(s"insert into $tableName $insertColumns returning $returningColumns")
 
   /** Returns the SQL for an UPDATE statement with RETURNING clause.
     *
@@ -31,8 +31,13 @@ trait ReturningSupport:
     * @return
     *   SQL fragment for UPDATE ... RETURNING
     */
-  def updateReturningSql(tableName: String, setClause: String, whereClause: String, returningColumns: String): String =
-    s"update $tableName set $setClause where $whereClause returning $returningColumns"
+  def updateReturningSql(
+      tableName: SqlText,
+      setClause: SqlText,
+      whereClause: SqlText,
+      returningColumns: SqlText,
+  ): SqlText =
+    SqlText(s"update $tableName set $setClause where $whereClause returning $returningColumns")
 
   /** Returns the SQL for a DELETE statement with RETURNING clause.
     *
@@ -45,8 +50,8 @@ trait ReturningSupport:
     * @return
     *   SQL fragment for DELETE ... RETURNING
     */
-  def deleteReturningSql(tableName: String, whereClause: String, returningColumns: String): String =
-    s"delete from $tableName where $whereClause returning $returningColumns"
+  def deleteReturningSql(tableName: SqlText, whereClause: SqlText, returningColumns: SqlText): SqlText =
+    SqlText(s"delete from $tableName where $whereClause returning $returningColumns")
 end ReturningSupport
 
 /** Trait for dialects that support IF NOT EXISTS in index creation */
@@ -69,16 +74,18 @@ trait IndexIfNotExistsSupport:
     *   SQL statement for creating the index with IF NOT EXISTS
     */
   def createIndexIfNotExistsSql(
-      indexName: String,
-      tableName: String,
-      columnNames: Seq[String],
+      indexName: SqlText,
+      tableName: SqlText,
+      columnNames: Seq[SqlText],
       unique: Boolean = false,
-      where: Option[String] = None,
-  ): String =
+      where: Option[SqlText] = None,
+  ): SqlText =
     val uniqueClause = if unique then "unique " else ""
     val whereClause  = where.map(w => s" where $w").getOrElse("")
     // nosemgrep: scala-security.scala.lang.security.audit.tainted-sql-string -- callers supply already-safe identifiers: the public SpecializedDML.createIndexIfNotExists escapes user input at the trust boundary, and internal callers pass compile-time schema-derived labels
-    s"create ${uniqueClause}index if not exists $indexName on $tableName (${columnNames.mkString(", ")})$whereClause"
+    SqlText(
+      s"create ${uniqueClause}index if not exists $indexName on $tableName (${columnNames.mkString(", ")})$whereClause"
+    )
   end createIndexIfNotExistsSql
 end IndexIfNotExistsSupport
 
@@ -97,8 +104,8 @@ trait AdvancedAlterTableSupport:
     * @return
     *   SQL statement for renaming the column
     */
-  def renameColumnSql(tableName: String, oldColumnName: String, newColumnName: String): String =
-    s"alter table $tableName rename column $oldColumnName to $newColumnName"
+  def renameColumnSql(tableName: SqlText, oldColumnName: SqlText, newColumnName: SqlText): SqlText =
+    SqlText(s"alter table $tableName rename column $oldColumnName to $newColumnName")
 
   /** Returns SQL for modifying a column type.
     *
@@ -111,8 +118,8 @@ trait AdvancedAlterTableSupport:
     * @return
     *   SQL statement for modifying the column type
     */
-  def modifyColumnTypeSql(tableName: String, columnName: String, newColumnType: String): String =
-    s"alter table $tableName alter column $columnName type $newColumnType"
+  def modifyColumnTypeSql(tableName: SqlText, columnName: SqlText, newColumnType: ColumnType): SqlText =
+    SqlText(s"alter table $tableName alter column $columnName type $newColumnType")
 end AdvancedAlterTableSupport
 
 /** Trait for dialects that support UPSERT operations */
@@ -132,7 +139,12 @@ trait UpsertSupport:
     * @return
     *   SQL statement for UPSERT
     */
-  def upsertSql(tableName: String, insertColumns: String, conflictColumns: Seq[String], updateColumns: String): String
+  def upsertSql(
+      tableName: SqlText,
+      insertColumns: SqlText,
+      conflictColumns: Seq[SqlText],
+      updateColumns: SqlText,
+  ): SqlText
 
   /** Returns SQL for an UPSERT operation with a WHERE clause on the conflict update.
     *
@@ -152,15 +164,15 @@ trait UpsertSupport:
     *   SQL statement for conditional UPSERT
     */
   def upsertWithWhereSql(
-      tableName: String,
-      insertColumns: String,
-      conflictColumns: Seq[String],
-      updateColumns: String,
-      conflictWhere: Option[String],
-  ): String =
+      tableName: SqlText,
+      insertColumns: SqlText,
+      conflictColumns: Seq[SqlText],
+      updateColumns: SqlText,
+      conflictWhere: Option[SqlText],
+  ): SqlText =
     val baseUpsert  = upsertSql(tableName, insertColumns, conflictColumns, updateColumns)
     val whereClause = conflictWhere.map(w => s" where $w").getOrElse("")
-    baseUpsert + whereClause
+    SqlText(baseUpsert + whereClause)
   end upsertWithWhereSql
 
   /** Returns SQL for an UPSERT with DO NOTHING (insert only if no conflict).
@@ -175,10 +187,10 @@ trait UpsertSupport:
     *   SQL statement for INSERT ... ON CONFLICT DO NOTHING
     */
   def upsertDoNothingSql(
-      tableName: String,
-      insertColumns: String,
-      conflictColumns: Seq[String],
-  ): String
+      tableName: SqlText,
+      insertColumns: SqlText,
+      conflictColumns: Seq[SqlText],
+  ): SqlText
 
 end UpsertSupport
 
@@ -187,66 +199,66 @@ trait JsonSupport:
   self: Dialect =>
 
   /** Returns the SQL type for JSON columns */
-  def jsonType: String
+  def jsonType: ColumnType
 
   /** Returns SQL for extracting a JSON field.
     *
-    * @param columnName
-    *   Name of the JSON column
+    * @param column
+    *   SQL reference to the JSON column
     * @param fieldPath
     *   Path to the field (e.g., "user.name")
     * @return
     *   SQL expression for field extraction
     */
-  def jsonExtractSql(columnName: String, fieldPath: String): String
+  def jsonExtractSql(column: SqlText, fieldPath: String): SqlText
 
   /** Returns SQL for checking if a JSON column contains a value. PostgreSQL: `column @> '{"key": "value"}'` MySQL:
     * `JSON_CONTAINS(column, '{"key": "value"}')`
     *
-    * @param columnName
-    *   Name of the JSON column
+    * @param column
+    *   SQL reference to the JSON column
     * @param jsonValue
     *   JSON value to check for (as a string literal)
     * @return
     *   SQL expression for JSON containment
     */
-  def jsonContainsSql(columnName: String, jsonValue: String): String
+  def jsonContainsSql(column: SqlText, jsonValue: JsonText): SqlText
 
   /** Returns SQL for checking if a JSON column has a key. PostgreSQL: `column ? 'key'` MySQL:
     * `JSON_CONTAINS_PATH(column, 'one', '$.key')`
     *
-    * @param columnName
-    *   Name of the JSON column
+    * @param column
+    *   SQL reference to the JSON column
     * @param key
     *   Key to check for
     * @return
     *   SQL expression for key existence check
     */
-  def jsonHasKeySql(columnName: String, key: String): String
+  def jsonHasKeySql(column: SqlText, key: String): SqlText
 
   /** Returns SQL for checking if a JSON column has any of the specified keys. PostgreSQL:
     * `column ?| array['key1', 'key2']` MySQL: `JSON_CONTAINS_PATH(column, 'one', '$.key1', '$.key2')`
     *
-    * @param columnName
-    *   Name of the JSON column
+    * @param column
+    *   SQL reference to the JSON column
     * @param keys
     *   Keys to check for (any match)
     * @return
     *   SQL expression for any key existence check
     */
-  def jsonHasAnyKeySql(columnName: String, keys: Seq[String]): String
+  def jsonHasAnyKeySql(column: SqlText, keys: Seq[String]): SqlText
 
   /** Returns SQL for checking if a JSON column has all of the specified keys. PostgreSQL:
     * `column ?& array['key1', 'key2']` MySQL: `JSON_CONTAINS_PATH(column, 'all', '$.key1', '$.key2')`
     *
-    * @param columnName
-    *   Name of the JSON column
+    * @param column
+    *   SQL reference to the JSON column
     * @param keys
     *   Keys to check for (all must exist)
     * @return
     *   SQL expression for all keys existence check
     */
-  def jsonHasAllKeysSql(columnName: String, keys: Seq[String]): String
+  def jsonHasAllKeysSql(column: SqlText, keys: Seq[String]): SqlText
 end JsonSupport
 
 /** Trait for dialects that support array operations */
@@ -260,18 +272,18 @@ trait ArraySupport:
     * @return
     *   SQL type for arrays
     */
-  def arrayType(elementType: String): String
+  def arrayType(elementType: ColumnType): ColumnType
 
   /** Returns SQL for checking if an array contains a value.
     *
-    * @param columnName
-    *   Name of the array column
+    * @param column
+    *   SQL reference to the array column
     * @param value
     *   Value to check for
     * @return
     *   SQL expression for array containment
     */
-  def arrayContainsSql(columnName: String, value: String): String
+  def arrayContainsSql(column: SqlText, value: SqlText): SqlText
 end ArraySupport
 
 /** Trait for dialects that support window functions */
@@ -287,10 +299,10 @@ trait WindowFunctionSupport:
     * @return
     *   SQL expression for ROW_NUMBER()
     */
-  def rowNumberSql(partitionBy: Seq[String], orderBy: Seq[String]): String =
+  def rowNumberSql(partitionBy: Seq[SqlText], orderBy: Seq[SqlText]): SqlText =
     val partitionClause = if partitionBy.nonEmpty then s" partition by ${partitionBy.mkString(", ")}" else ""
     val orderClause     = if orderBy.nonEmpty then s" order by ${orderBy.mkString(", ")}" else ""
-    s"row_number() over($partitionClause$orderClause)"
+    SqlText(s"row_number() over($partitionClause$orderClause)")
 end WindowFunctionSupport
 
 /** Trait for dialects that support common table expressions (CTEs) */
@@ -308,15 +320,14 @@ trait CommonTableExpressionSupport:
     * @return
     *   SQL fragment for WITH clause
     */
-  def withClauseSql(cteName: String, cteQuery: String, recursive: Boolean = false): String =
+  def withClauseSql(cteName: SqlText, cteQuery: SqlText, recursive: Boolean = false): SqlText =
     val recursiveClause = if recursive then "recursive " else ""
-    s"with $recursiveClause$cteName as ($cteQuery)"
+    SqlText(s"with $recursiveClause$cteName as ($cteQuery)")
 end CommonTableExpressionSupport
 
 /** A dialect that can read its own catalogs through `SqlSession`.
   *
-  * MySQL, SQLite, and Spark do not implement this. `Schema.verify` on those dialects fails with
-  * `SaferisError.Unsupported`.
+  * Spark does not implement this. `Schema.verify` on a dialect without it fails with `SaferisError.Unsupported`.
   */
 trait SchemaIntrospectionSupport:
   self: Dialect =>
@@ -324,7 +335,7 @@ trait SchemaIntrospectionSupport:
   import zio.*
 
   /** Introspect a table's schema from the database. */
-  def introspectTable(tableName: String)(using
+  def introspectTable(tableName: TableName)(using
       Trace
   ): ZIO[SqlSession, SaferisError, Option[DatabaseTable]]
 end SchemaIntrospectionSupport

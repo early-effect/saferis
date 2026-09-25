@@ -22,7 +22,7 @@ trait SqlListener:
   def executed(event: SqlExecuted): UIO[Unit]
 
 final case class SqlExecuted(
-    sql: String,
+    sql: SqlText,
     duration: Duration,
     timeout: Option[Duration],
     outcome: StatementOutcome,

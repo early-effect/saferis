@@ -92,7 +92,7 @@ private final class PooledSession(
       case Some(_) =>
         ZIO.fail(
           SaferisError.QueryError(
-            Some("25P02"),
+            Some(SqlState.InFailedTransaction),
             "current transaction is aborted, commands ignored until end of transaction block",
             Some(command.inspection),
           )

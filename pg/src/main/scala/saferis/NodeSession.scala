@@ -148,9 +148,9 @@ private final class NodeConnection(
           .when(result.command == "ROLLBACK"):
             ZIO.fail(
               SaferisError.QueryError(
-                Some("25P02"),
+                Some(SqlState.InFailedTransaction),
                 "commit reported ROLLBACK",
-                Some("COMMIT"),
+                Some(SqlText("COMMIT")),
               )
             )
           .unit
@@ -261,7 +261,7 @@ private final class NodeConnection(
     promise(None, lease.client.query(PgWire.queryConfig(statement, js.Array()))).flatMap: value =>
       ZIO.fromEither(PgWire.ensureSingle(value))
 
-  private def promise[A](sql: Option[String], thunk: => js.Promise[A]): IO[SaferisError, A] =
+  private def promise[A](sql: Option[SqlText], thunk: => js.Promise[A]): IO[SaferisError, A] =
     lease.busy.set(true).uninterruptible *>
       PgPromises
         .complete(Some(lease.busy), thunk, _ => ())
@@ -271,6 +271,6 @@ private final class NodeConnection(
   private def markBroken(err: SaferisError): UIO[Unit] =
     ZIO.when(PgErrors.broken(err))(lease.destroy.set(true)).unit
 
-  private def classify(t: Throwable, sql: Option[String]): SaferisError =
+  private def classify(t: Throwable, sql: Option[SqlText]): SaferisError =
     SqlState.classify(PgErrors.info(t), sql, config.retry)
 end NodeConnection

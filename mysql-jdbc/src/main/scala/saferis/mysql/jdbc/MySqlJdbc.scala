@@ -68,7 +68,7 @@ private object MySqlAdapter extends StandardJdbcAdapter:
   override def read(rs: ResultSet, column: JdbcColumn): Either[SaferisError, SqlValue] =
     val i = column.index
     column.typeName match
-      case "json"      => ref(SqlType.Jsonb, rs.getString(i))(SqlValue.Jsonb(_))(rs)
+      case "json"      => ref(SqlType.Jsonb, rs.getString(i))(json => SqlValue.Jsonb(JsonText(json)))(rs)
       case "timestamp" =>
         ref(SqlType.Timestamptz, rs.getObject(i, classOf[LocalDateTime]))(v =>
           SqlValue.Timestamptz(v.toInstant(ZoneOffset.UTC))
@@ -85,23 +85,23 @@ private object MySqlAdapter extends StandardJdbcAdapter:
 
   /** MySQL reports most integrity failures as SQLSTATE `23000`. The vendor code says which one. */
   override def serverError(e: SQLException): ServerError =
-    val base                                                 = super.serverError(e)
-    def as(state: String, constraint: Option[String] = None) =
+    val base                                                           = super.serverError(e)
+    def as(state: SqlState, constraint: Option[ConstraintName] = None) =
       base.copy(sqlState = Some(state), constraint = constraint)
     e.getErrorCode match
-      case 1062        => as("23505", first(duplicateKey, base.message).map(unqualified))
-      case 1451 | 1452 => as("23503", first(foreignKey, base.message))
-      case 1048        => as("23502")
-      case 3819        => as("23514", first(check, base.message))
-      case 1213        => as("40P01")
-      case 3024        => as("57014")
+      case 1062        => as(SqlState.UniqueViolation, first(duplicateKey, base.message).map(unqualified))
+      case 1451 | 1452 => as(SqlState.ForeignKeyViolation, first(foreignKey, base.message))
+      case 1048        => as(SqlState.NotNullViolation)
+      case 3819        => as(SqlState.CheckViolation, first(check, base.message))
+      case 1213        => as(SqlState.Deadlock)
+      case 3024        => as(SqlState.QueryCanceled)
       case _           => base
   end serverError
 
-  private def first(pattern: Regex, message: String): Option[String] =
-    pattern.findFirstMatchIn(message).map(_.group(1))
+  private def first(pattern: Regex, message: String): Option[ConstraintName] =
+    pattern.findFirstMatchIn(message).map(m => ConstraintName(m.group(1)))
 
   /** MySQL 8 names the key `table.key`. */
-  private def unqualified(key: String): String =
-    key.substring(key.lastIndexOf('.') + 1)
+  private def unqualified(key: ConstraintName): ConstraintName =
+    ConstraintName(key.substring(key.lastIndexOf('.') + 1))
 end MySqlAdapter

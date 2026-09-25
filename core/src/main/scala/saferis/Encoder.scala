@@ -16,15 +16,15 @@ trait Encoder[A]:
   self =>
   def sqlType: SqlType
   def encode(a: A): SqlValue
-  def columnType(using dialect: Dialect): String = dialect.columnType(sqlType)
-  def literal(a: A): String                      = SqlValue.literal(encode(a))
+  def columnType(using dialect: Dialect): ColumnType = dialect.columnType(sqlType)
+  def literal(a: A): SqlText                         = SqlValue.literal(encode(a))
 
   def transform[B](f: B => A): Encoder[B] =
     new Encoder[B]:
-      def sqlType: SqlType                           = self.sqlType
-      def encode(b: B): SqlValue                     = self.encode(f(b))
-      override def literal(b: B): String             = self.literal(f(b))
-      override def columnType(using Dialect): String = self.columnType
+      def sqlType: SqlType                               = self.sqlType
+      def encode(b: B): SqlValue                         = self.encode(f(b))
+      override def literal(b: B): SqlText                = self.literal(f(b))
+      override def columnType(using Dialect): ColumnType = self.columnType
 end Encoder
 
 object Encoder:
@@ -109,5 +109,5 @@ object Encoder:
 
   def fromJsonCodec[T](using codec: zio.json.JsonCodec[T]): Encoder[T] = new Encoder[T]:
     def sqlType: SqlType       = SqlType.Jsonb
-    def encode(a: T): SqlValue = SqlValue.Jsonb(codec.encoder.encodeJson(a, None).toString)
+    def encode(a: T): SqlValue = SqlValue.Jsonb(JsonText(codec.encoder.encodeJson(a, None).toString))
 end Encoder

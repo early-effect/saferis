@@ -75,8 +75,8 @@ object TransactionConformance:
           captured <- seen.get
           count    <- sql"select count(*) from conformance_abort".queryValue[Long]
           aborted = captured match
-            case Some(Left(SaferisError.QueryError(Some("25P02"), _, _))) => true
-            case _                                                        => false
+            case Some(Left(SaferisError.QueryError(Some(SqlState.InFailedTransaction), _, _))) => true
+            case _                                                                             => false
           recorded = exit match
             case Exit.Failure(cause) =>
               cause.failureOption match

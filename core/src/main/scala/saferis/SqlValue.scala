@@ -18,9 +18,9 @@ import java.util.UUID
   * [[ServerType.Both]] once it has resolved the OID.
   */
 enum ServerType:
-  case Named(name: String)
+  case Named(name: TypeName)
   case Oid(oid: Int)
-  case Both(name: String, oid: Int)
+  case Both(name: TypeName, oid: Int)
 
 /** Shared column type. Wire names avoid colliding with Scala and Java types. Each dialect renders its own spelling.
   * This is not a JDBC code.
@@ -63,7 +63,7 @@ enum SqlValue:
   case Time(value: LocalTime)
   case Timestamp(value: LocalDateTime)
   case Timestamptz(value: java.time.Instant)
-  case Jsonb(value: String)
+  case Jsonb(value: JsonText)
   case Uuid(value: UUID)
   case Array private[saferis] (element: SqlType, values: Chunk[SqlValue])
   case Other(tpe: ServerType, text: String)
@@ -118,29 +118,30 @@ object SqlValue:
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS'Z'").withZone(ZoneOffset.UTC)
 
   /** Inlined form for `show` and DDL defaults. Not a bound parameter. */
-  def literal(value: SqlValue): String = value match
-    case Null(_)          => "null"
-    case Bool(v)          => if v then "true" else "false"
-    case Int2(v)          => v.toString
-    case Int4(v)          => v.toString
-    case Int8(v)          => v.toString
-    case Float4(v)        => floatLiteral(v)
-    case Float8(v)        => doubleLiteral(v)
-    case Numeric(v)       => v.toString
-    case VarChar(v)       => quote(v)
-    case Text(v)          => quote(v)
-    case Bytea(bytes)     => s"'\\x${hex(bytes)}'"
-    case Date(v)          => s"DATE '${v}'"
-    case Time(v)          => s"TIME '${v.format(timeLiteral)}'"
-    case Timestamp(v)     => s"TIMESTAMP '${v.format(timestampLiteral)}'"
-    case Timestamptz(v)   => s"TIMESTAMPTZ '${timestamptzLiteral.format(v)}'"
-    case Jsonb(v)         => quote(v)
-    case Uuid(v)          => quote(v.toString)
-    case Array(_, values) => values.map(literal).mkString("ARRAY[", ", ", "]")
-    case Other(_, text)   => quote(text)
+  def literal(value: SqlValue): SqlText = SqlText:
+    value match
+      case Null(_)          => "null"
+      case Bool(v)          => if v then "true" else "false"
+      case Int2(v)          => v.toString
+      case Int4(v)          => v.toString
+      case Int8(v)          => v.toString
+      case Float4(v)        => floatLiteral(v)
+      case Float8(v)        => doubleLiteral(v)
+      case Numeric(v)       => v.toString
+      case VarChar(v)       => quote(v)
+      case Text(v)          => quote(v)
+      case Bytea(bytes)     => s"'\\x${hex(bytes)}'"
+      case Date(v)          => s"DATE '${v}'"
+      case Time(v)          => s"TIME '${v.format(timeLiteral)}'"
+      case Timestamp(v)     => s"TIMESTAMP '${v.format(timestampLiteral)}'"
+      case Timestamptz(v)   => s"TIMESTAMPTZ '${timestamptzLiteral.format(v)}'"
+      case Jsonb(v)         => quote(v)
+      case Uuid(v)          => quote(v.toString)
+      case Array(_, values) => values.map(literal).mkString("ARRAY[", ", ", "]")
+      case Other(_, text)   => quote(text)
 
-  def quote(text: String): String =
-    s"'${text.replace("'", "''")}'"
+  def quote(text: String): SqlText =
+    SqlText(s"'${text.replace("'", "''")}'")
 
   private def quotedNonFinite(nan: Boolean, infinity: Boolean, positive: Boolean): Option[String] =
     if nan then Some("'NaN'")

@@ -13,7 +13,7 @@ import zio.ZIO
 private[saferis] object SQLiteCatalog:
   import CatalogRows.*
 
-  def introspect(rawName: String)(using Trace): ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
+  def introspect(rawName: TableName)(using Trace): ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
     val parsed = parsedName(rawName)
     run(tableQuery(parsed))(readTable).flatMap: found =>
       found.headOption match

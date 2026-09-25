@@ -71,7 +71,7 @@ object SchemaConformance:
           yield assertTrue(issues.exists { case SchemaIssue.TypeMismatch(_, "name", _, _) => true; case _ => false })
       ,
       test("an index from the schema verifies, and a missing one is MissingIndex"):
-        val schema = Schema[User].withIndex(_.name).named("idx_verify_users_name").build
+        val schema = Schema[User].withIndex(_.name).named(IndexName("idx_verify_users_name")).build
         withDialect:
           for
             _       <- clean
@@ -86,7 +86,7 @@ object SchemaConformance:
           )
       ,
       test("a unique constraint from the schema verifies, and a missing one is MissingUniqueConstraint"):
-        val schema = Schema[User].withUniqueConstraint(_.email).named("uq_verify_users_email").build
+        val schema = Schema[User].withUniqueConstraint(_.email).named(ConstraintName("uq_verify_users_email")).build
         withDialect:
           for
             _       <- clean

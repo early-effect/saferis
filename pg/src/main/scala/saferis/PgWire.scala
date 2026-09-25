@@ -1,12 +1,15 @@
 package saferis.pg
 
+import saferis.ColumnName
 import saferis.SaferisError
 import saferis.SqlCommand
 import saferis.SqlPiece
 import saferis.SqlRow
+import saferis.SqlText
 import saferis.SqlType
 import saferis.SqlValue
 import saferis.ServerType
+import saferis.TypeName
 import saferis.postgres.PgText
 import saferis.postgres.SslMode
 
@@ -90,7 +93,7 @@ private[pg] object PgWire:
       "rowMode" -> "array",
     )
 
-  def render(command: SqlCommand): String =
+  def render(command: SqlCommand): SqlText =
     command.render: (index, tpe) =>
       PgText.cast(tpe) match
         case Some(name) => s"$$$index::$name"
@@ -155,7 +158,7 @@ private[pg] object PgWire:
   end readFields
 
   private def readGrid(
-      labels: Chunk[String],
+      labels: Chunk[ColumnName],
       oids: Array[Int],
       grid: js.Array[js.Array[js.Any]],
   ): Either[SaferisError, Chunk[SqlRow]] =
@@ -171,12 +174,18 @@ private[pg] object PgWire:
   end readGrid
 
   private def readRow(
-      labels: Chunk[String],
+      labels: Chunk[ColumnName],
       oids: Array[Int],
       row: js.Array[js.Any],
   ): Either[SaferisError, SqlRow] =
     if row.length != oids.length then
-      Left(SaferisError.DecodingError("", "row", s"width ${row.length} does not match ${oids.length} fields"))
+      Left(
+        SaferisError.DecodingError(
+          ColumnName(""),
+          TypeName("row"),
+          s"width ${row.length} does not match ${oids.length} fields",
+        )
+      )
     else
       val cells = (0 until oids.length).foldLeft[Either[SaferisError, Chunk[SqlValue]]](Right(Chunk.empty)):
         case (Left(err), _)  => Left(err)
@@ -184,15 +193,15 @@ private[pg] object PgWire:
           readCell(oids(i), labels(i), row(i)).map(acc :+ _)
       cells.map(values => SqlRow(labels, values))
 
-  private def fieldName(field: PgField): String =
+  private def fieldName(field: PgField): ColumnName =
     val name = field.name
-    if name == null then "" else name
+    ColumnName(if name == null then "" else name)
 
   /** SQL null is `Null` before any JSON parse. JSON null arrives as the text `null`. */
-  private def readCell(oid: Int, label: String, raw: js.Any): Either[SaferisError, SqlValue] =
+  private def readCell(oid: Int, label: ColumnName, raw: js.Any): Either[SaferisError, SqlValue] =
     if isJsNull(raw) then Right(SqlValue.Null(PgText.sqlType(oid).getOrElse(SqlType.Other(ServerType.Oid(oid)))))
     else if js.typeOf(raw) != "string" then
-      Left(SaferisError.DecodingError(label, oid.toString, s"expected raw text for oid $oid"))
+      Left(SaferisError.DecodingError(label, PgText.typeLabel(oid), s"expected raw text for oid $oid"))
     else
       PgText
         .decode(oid, raw.asInstanceOf[String])

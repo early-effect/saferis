@@ -5,9 +5,9 @@ import scala.quoted.*
 
 object Macros:
 
-  private[saferis] inline def nameOf[A]: String = ${ nameOfImpl[A] }
+  private[saferis] inline def nameOf[A]: TableName = ${ nameOfImpl[A] }
 
-  private def nameOfImpl[A: Type](using Quotes): Expr[String] =
+  private def nameOfImpl[A: Type](using Quotes): Expr[TableName] =
     import quotes.reflect.*
     val tpe                 = TypeRepr.of[A]
     val tableNameTypeSymbol = TypeRepr.of[tableName].typeSymbol
@@ -15,9 +15,10 @@ object Macros:
       .collectFirst {
         case Apply(Select(New(tpt), _), List(Literal(StringConstant(name))))
             if tpt.tpe.typeSymbol == tableNameTypeSymbol =>
-          Expr(name)
+          name
       }
-      .getOrElse(Expr(tpe.typeSymbol.name))
+      .map(name => '{ TableName(${ Expr(name) }) })
+      .getOrElse('{ TableName(${ Expr(tpe.typeSymbol.name) }) })
   end nameOfImpl
 
   private[saferis] inline def columnsOf[A]: Seq[Column[?]] = ${ columnsOfImpl[A] }
@@ -157,8 +158,8 @@ object Macros:
                 val isGenerated = ${ elemHasAnnotation[A, saferis.generated](fieldName) }
 
                 Column[a](
-                  ${ Expr(fieldName) },
-                  label,
+                  FieldName(${ Expr(fieldName) }),
+                  ColumnName(label),
                   isKey,
                   isGenerated,
                   $isNullable,

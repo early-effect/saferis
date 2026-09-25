@@ -2,7 +2,10 @@ package saferis.pg
 
 import saferis.SaferisError
 import saferis.SqlSession
+import saferis.postgres.DatabaseName
+import saferis.postgres.Host
 import saferis.postgres.PgConnectionConfig
+import saferis.postgres.UserName
 import saferis.tests.DatabaseTarget
 import saferis.tests.PostgresTestContainer
 import saferis.tests.SqlSessionConformance
@@ -16,10 +19,10 @@ object PgConformanceSpecs extends ZIOSpecDefault:
       ZIO.serviceWith[PostgresTestContainer]: pg =>
         PgConfig(
           connection = PgConnectionConfig(
-            host = pg.host,
+            host = Host(pg.host),
             port = pg.port,
-            database = pg.database,
-            user = pg.user,
+            database = DatabaseName(pg.database),
+            user = UserName(pg.user),
             password = zio.Config.Secret(pg.password),
           )
         )

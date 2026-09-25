@@ -33,8 +33,8 @@ class key extends StaticAnnotation
   *   the column name/label in the result set
   */
 final case class Column[R](
-    name: String,
-    label: String,
+    name: FieldName,
+    label: ColumnName,
     isKey: Boolean,
     isGenerated: Boolean,
     isNullable: Boolean,
@@ -43,14 +43,14 @@ final case class Column[R](
 )(using readable: Decoder[R], writable: Encoder[R])
     extends Placeholder:
   type ColumnType = R
-  override val sql: String        = tableAlias.fold(label)(a => s"${a.value}.$label")
+  override val sql: SqlText       = SqlText(tableAlias.fold(label)(a => s"${a.value}.$label"))
   val pieces: Chunk[SqlPiece]     = Chunk(SqlPiece.Text(sql))
   val issues: List[FragmentIssue] = Nil
 
   def sqlType: SqlType = writable.sqlType
 
-  private[saferis] def read(row: SqlRow): Either[SaferisError, (String, R)] =
-    def fail(detail: String) = Left(SaferisError.DecodingError(label, sqlType.toString, detail))
+  private[saferis] def read(row: SqlRow): Either[SaferisError, (FieldName, R)] =
+    def fail(detail: String) = Left(SaferisError.DecodingError(label, TypeName(sqlType.toString), detail))
     row.get(label) match
       case Left(err)    => fail(err.detail)
       case Right(value) =>
@@ -60,9 +60,9 @@ final case class Column[R](
 
   private[saferis] def withTableAlias(alias: Option[Alias]): Column[R] = copy(tableAlias = alias)
 
-  private[saferis] def columnType(using Dialect): String = writable.columnType
+  private[saferis] def columnType(using Dialect): saferis.ColumnType = writable.columnType
 
   /** Returns the DEFAULT clause for DDL if a default value is defined */
-  private[saferis] def defaultClause: Option[String] =
-    defaultValue.map(v => s"default ${writable.literal(v)}")
+  private[saferis] def defaultClause: Option[SqlText] =
+    defaultValue.map(v => SqlText(s"default ${writable.literal(v)}"))
 end Column

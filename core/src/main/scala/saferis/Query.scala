@@ -9,16 +9,18 @@ import zio.stream.ZStream
 enum JoinType:
   case Inner, Left, Right, Full, Cross
 
-  def toSql: String = this match
-    case Inner => "inner join"
-    case Left  => "left join"
-    case Right => "right join"
-    case Full  => "full join"
-    case Cross => "cross join"
+  def toSql: SqlText = SqlText:
+    this match
+      case Inner => "inner join"
+      case Left  => "left join"
+      case Right => "right join"
+      case Full  => "full join"
+      case Cross => "cross join"
+end JoinType
 
 /** Internal representation of a join clause */
 final case class JoinClause(
-    tableName: String,
+    tableName: TableName,
     alias: Alias,
     joinType: JoinType,
     condition: SqlFragment,
@@ -40,7 +42,7 @@ private[saferis] class AliasGenerator:
     * keyed on the *sanitized* bare name so distinct schemas with the same bare name (e.g. "prd.foo" vs "staging.foo")
     * share a counter and therefore get distinct aliases (`foo_ref_1`, `foo_ref_2`).
     */
-  def next(tableName: String): Alias =
+  def next(tableName: TableName): Alias =
     val bare      = tableName.substring(tableName.lastIndexOf('.') + 1)
     val sanitized = bare.replaceAll("[^A-Za-z0-9_]", "_")
     val count     = counters.getOrElse(sanitized, 0) + 1

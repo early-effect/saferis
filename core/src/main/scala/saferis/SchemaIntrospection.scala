@@ -2,7 +2,6 @@ package saferis
 
 import zio.*
 
-import java.util.Locale
 import scala.collection.mutable.ListBuffer
 
 /** Schema introspection and validation.
@@ -13,7 +12,7 @@ import scala.collection.mutable.ListBuffer
 object SchemaIntrospection:
 
   /** Introspect a table's schema from the database. */
-  def introspect(tableName: String)(using
+  def introspect(tableName: TableName)(using
       dialect: Dialect
   )(using
       Trace
@@ -120,7 +119,7 @@ object SchemaIntrospection:
     if options.checkForeignKeys then
       instance.foreignKeys.foreach { fkSpec =>
         val fromLabels   = fkSpec.fromColumns.map(instance.fieldToLabel)
-        val toLabels     = fkSpec.toColumns.map(fn => fkSpec.toColumnMap.get(fn).map(_.label).getOrElse(fn))
+        val toLabels     = fkSpec.toColumns.map(fn => fkSpec.toColumnMap.get(fn).fold(ColumnName(fn))(_.label))
         val expectedName = fkSpec.constraintName
         findMatchingForeignKey(dbTable.foreignKeys, fromLabels, fkSpec.toTable, toLabels) match
           case None =>
@@ -143,16 +142,15 @@ object SchemaIntrospection:
     issues.toList
   end compare
 
-  /** Fold the Scala label. The catalog name is already the spelling Postgres stored. */
-  private def folded(name: String): String =
-    name.toLowerCase(Locale.ROOT)
+  /** Fold the Scala label. The catalog name is already the spelling the database stored. */
+  private def folded(name: ColumnName): ColumnName = name.folded
 
-  private def storedMatches(stored: Seq[String], expected: Seq[String]): Boolean =
+  private def storedMatches(stored: Seq[ColumnName], expected: Seq[ColumnName]): Boolean =
     stored == expected.map(folded)
 
   private def findMatchingIndex(
       indexes: Seq[DatabaseIndex],
-      expectedColumns: Seq[String],
+      expectedColumns: Seq[ColumnName],
       expectedUnique: Boolean,
   ): Option[DatabaseIndex] =
     indexes.find { idx =>
@@ -161,25 +159,25 @@ object SchemaIntrospection:
 
   private def findMatchingUniqueConstraint(
       constraints: Seq[DatabaseUniqueConstraint],
-      expectedColumns: Seq[String],
+      expectedColumns: Seq[ColumnName],
   ): Option[DatabaseUniqueConstraint] =
     constraints.find(uc => storedMatches(uc.columns, expectedColumns))
 
   private def findMatchingForeignKey(
       foreignKeys: Seq[DatabaseForeignKey],
-      fromColumns: Seq[String],
-      toTable: String,
-      toColumns: Seq[String],
+      fromColumns: Seq[ColumnName],
+      toTable: TableName,
+      toColumns: Seq[ColumnName],
   ): Option[DatabaseForeignKey] =
     foreignKeys.find { fk =>
       storedMatches(fk.fromColumns, fromColumns) &&
-      fk.toTable == folded(toTable) &&
+      fk.toTable == toTable.folded &&
       storedMatches(fk.toColumns, toColumns)
     }
 
   // === Type Compatibility ===
 
-  private def isTypeCompatible(expected: String, actual: String, strict: Boolean): Boolean =
+  private def isTypeCompatible(expected: ColumnType, actual: ColumnType, strict: Boolean): Boolean =
     if strict then expected.equalsIgnoreCase(actual)
     else
       val normalizedExpected = normalizeType(expected)

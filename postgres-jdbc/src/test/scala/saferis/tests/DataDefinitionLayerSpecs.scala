@@ -136,7 +136,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           Schema[AlterTableString].ddl().execute
         // Add a new column using string type
         addResult <-
-          addColumn[AlterTableString, String]("description")
+          addColumn[AlterTableString, String](ColumnName("description"))
         // Insert data including the new column (using raw SQL since our case class doesn't have it)
         _ <-
           sql"insert into test_ddl_alter_string (id, name, description) values (1, ${"Test"}, ${"Test description"})".insert
@@ -145,7 +145,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           sql"select id, name from test_ddl_alter_string where id = 1".queryOne[AlterTableString]
         // Drop the column
         dropColResult <-
-          dropColumn[AlterTableString]("description")
+          dropColumn[AlterTableString](ColumnName("description"))
       yield assertTrue(addResult >= 0) &&
         assertTrue(checkResult.contains(AlterTableString(1, "Test"))) &&
         assertTrue(dropColResult >= 0)
@@ -163,7 +163,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           Schema[AlterTableInt].ddl().execute
         // Add a new integer column using encoder
         addResult <-
-          addColumn[AlterTableInt, Int]("score")
+          addColumn[AlterTableInt, Int](ColumnName("score"))
         // Insert data including the new column
         _ <-
           sql"insert into test_ddl_alter_int (id, name, score) values (1, ${"Test User"}, ${85})".insert
@@ -175,7 +175,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           sql"select score from test_ddl_alter_int where id = 1".queryOne[ScoreResult]
         // Drop the column
         dropColResult <-
-          dropColumn[AlterTableInt]("score")
+          dropColumn[AlterTableInt](ColumnName("score"))
       yield assertTrue(addResult >= 0) &&
         assertTrue(checkResult.contains(AlterTableInt(1, "Test User"))) &&
         assertTrue(scoreResult.map(_.score).contains(85)) &&
@@ -194,7 +194,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           Schema[AlterTableBool].ddl().execute
         // Add a new boolean column using encoder
         addResult <-
-          addColumn[AlterTableBool, Boolean]("is_active")
+          addColumn[AlterTableBool, Boolean](ColumnName("is_active"))
         // Insert data including the new column
         _ <-
           sql"insert into test_ddl_alter_bool (id, name, is_active) values (1, ${"Active User"}, ${true})".insert
@@ -207,7 +207,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           sql"select is_active from test_ddl_alter_bool where id = 2".queryOne[ActiveResult]
         // Drop the column
         dropColResult <-
-          dropColumn[AlterTableBool]("is_active")
+          dropColumn[AlterTableBool](ColumnName("is_active"))
       yield assertTrue(addResult >= 0) &&
         assertTrue(activeResult.map(_.is_active).contains(true)) &&
         assertTrue(inactiveResult.map(_.is_active).contains(false)) &&
@@ -226,7 +226,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           Schema[AlterTableDouble].ddl().execute
         // Add a new double column using encoder
         addResult <-
-          addColumn[AlterTableDouble, Double]("price")
+          addColumn[AlterTableDouble, Double](ColumnName("price"))
         // Insert data including the new column
         _ <-
           sql"insert into test_ddl_alter_double (id, name, price) values (1, ${"Product A"}, ${99.99})".insert
@@ -235,7 +235,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           sql"select price from test_ddl_alter_double where id = 1".queryOne[PriceResult]
         // Drop the column
         dropColResult <-
-          dropColumn[AlterTableDouble]("price")
+          dropColumn[AlterTableDouble](ColumnName("price"))
       yield assertTrue(addResult >= 0) &&
         assertTrue(priceResult.map(_.price).contains(99.99)) &&
         assertTrue(dropColResult >= 0)
@@ -253,7 +253,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           Schema[AlterTableOptional].ddl().execute
         // Add a new optional integer column using encoder
         addResult <-
-          addColumn[AlterTableOptional, Option[Int]]("age")
+          addColumn[AlterTableOptional, Option[Int]](ColumnName("age"))
         // Insert data with and without the optional column
         _ <-
           sql"insert into test_ddl_alter_optional (id, name, age) values (1, ${"Person with age"}, ${25})".insert
@@ -266,7 +266,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           sql"select age from test_ddl_alter_optional where id = 2".queryOne[AgeResult]
         // Drop the column
         dropColResult <-
-          dropColumn[AlterTableOptional]("age")
+          dropColumn[AlterTableOptional](ColumnName("age"))
       yield assertTrue(addResult >= 0) &&
         assertTrue(ageResult.map(_.age).contains(Some(25))) &&
         assertTrue(noAgeResult.map(_.age).contains(None)) &&
@@ -284,10 +284,10 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           Schema[IndexTable].ddl().execute
         // Create a regular index
         createIndexResult <-
-          createIndex[IndexTable]("idx_test_name", Seq("name"))
+          createIndex[IndexTable](IndexName("idx_test_name"), Seq(ColumnName("name")))
         // Create a unique index
         createUniqueIndexResult <-
-          createIndex[IndexTable]("idx_test_email", Seq("email"), unique = true)
+          createIndex[IndexTable](IndexName("idx_test_email"), Seq(ColumnName("email")), unique = true)
         // Insert some test data
         _ <-
           insert(IndexTable(1, "John", "john@example.com"))
@@ -296,9 +296,9 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           insert(IndexTable(2, "Jane", "john@example.com")).either
         // Drop the indexes
         dropIndex1Result <-
-          dropIndex("idx_test_name")
+          dropIndex(IndexName("idx_test_name"))
         dropIndex2Result <-
-          dropIndex("idx_test_email")
+          dropIndex(IndexName("idx_test_email"))
       yield assertTrue(createIndexResult >= 0) &&
         assertTrue(createUniqueIndexResult >= 0) &&
         assertTrue(duplicateAttempt.isLeft) && // Should fail due to unique constraint
@@ -347,9 +347,9 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           createTable[IndexedTable](createIndexes = false)
         // Create indexes using createIndex DDL function
         _ <-
-          createIndex[IndexedTable]("idx_name", Seq("name"))
+          createIndex[IndexedTable](IndexName("idx_name"), Seq(ColumnName("name")))
         _ <-
-          createIndex[IndexedTable]("idx_email", Seq("email"), unique = true)
+          createIndex[IndexedTable](IndexName("idx_email"), Seq(ColumnName("email")), unique = true)
         // Insert test data
         _ <-
           insert(IndexedTable(1, "John", "john@example.com", "Test user"))
@@ -484,9 +484,9 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
             .execute
         // Create indexes using createIndex DDL function
         _ <-
-          createIndex[UniqueConstraintTable]("idx_unique_name", Seq("name"))
+          createIndex[UniqueConstraintTable](IndexName("idx_unique_name"), Seq(ColumnName("name")))
         _ <-
-          createIndex[UniqueConstraintTable]("idx_unique_email", Seq("email"), unique = true)
+          createIndex[UniqueConstraintTable](IndexName("idx_unique_email"), Seq(ColumnName("email")), unique = true)
         // Insert test data
         _ <-
           insert(UniqueConstraintTable(1, "John", "john@example.com", "john_unique", "Test user"))
@@ -514,15 +514,15 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           Schema[EncoderTestTable].ddl().execute
         // Add various columns using encoders to verify type inference
         _ <-
-          addColumn[EncoderTestTable, String]("text_col")
+          addColumn[EncoderTestTable, String](ColumnName("text_col"))
         _ <-
-          addColumn[EncoderTestTable, Int]("int_col")
+          addColumn[EncoderTestTable, Int](ColumnName("int_col"))
         _ <-
-          addColumn[EncoderTestTable, Boolean]("bool_col")
+          addColumn[EncoderTestTable, Boolean](ColumnName("bool_col"))
         _ <-
-          addColumn[EncoderTestTable, Double]("double_col")
+          addColumn[EncoderTestTable, Double](ColumnName("double_col"))
         _ <-
-          addColumn[EncoderTestTable, Float]("float_col")
+          addColumn[EncoderTestTable, Float](ColumnName("float_col"))
         // Verify that the operation succeeded and data can be inserted with correct types
         _ <-
           sql"""insert into test_ddl_encoder_types 
@@ -572,7 +572,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           Schema[CompoundUniqueTable]
             .withUniqueConstraint(_.tenantId)
             .and(_.eventId)
-            .named("tenant_event")
+            .named(ConstraintName("tenant_event"))
             .withUniqueConstraint(_.singleUnique)
             .ddl()
             .execute
@@ -669,9 +669,9 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         // Create a partial index on nextRetryAt only for pending records
         _ <-
           createIndex[PartialIndexTable](
-            "idx_pending_retry",
-            Seq("nextretryat"),
-            where = Some("status = 'pending'"),
+            IndexName("idx_pending_retry"),
+            Seq(ColumnName("nextretryat")),
+            where = Some(SqlText("status = 'pending'")),
           )
         // Insert some test data
         _ <-
@@ -683,7 +683,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           sql"select count(*) as count from test_ddl_partial_index".queryOne[CountResult]
         // Drop the index to clean up
         _ <-
-          dropIndex("idx_pending_retry")
+          dropIndex(IndexName("idx_pending_retry"))
       yield assertTrue(count.map(_.count).contains(2))
       end for
 
@@ -695,10 +695,10 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         .withIndex(_.singleCol)
         .withIndex(_.tenantId)
         .and(_.eventTime)
-        .named("idx_tenant_event")
+        .named(IndexName("idx_tenant_event"))
         .withUniqueIndex(_.userId)
         .and(_.email)
-        .named("uidx_user_email")
+        .named(IndexName("uidx_user_email"))
         .build
 
       for
@@ -773,7 +773,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         .withIndex(_.nextRetryAt)
         .where(_.status)
         .eql("pending")
-        .named("idx_pending_retry")
+        .named(IndexName("idx_pending_retry"))
         .build
 
       for
@@ -800,7 +800,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         .withUniqueIndex(_.email)
         .where(_.active)
         .eql(true)
-        .named("uidx_active_email")
+        .named(IndexName("uidx_active_email"))
         .build
 
       for

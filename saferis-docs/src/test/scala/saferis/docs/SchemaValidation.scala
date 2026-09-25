@@ -65,7 +65,7 @@ flowchart TB
       },
       md"""When verification fails, it returns a `SaferisError.SchemaValidation` containing a list of issues:""",
       exampleZIO {
-        val schema = Schema[VerifyUserIndexed].withIndex(_.email).named("idx_verify_email").build
+        val schema = Schema[VerifyUserIndexed].withIndex(_.email).named(IndexName("idx_verify_email")).build
         (for
           // Create table without the index
           _ <- ddl.createTable[VerifyUserIndexed](ifNotExists = true)
@@ -162,7 +162,7 @@ flowchart TB
         // Build a schema with index and foreign key
         val ordersSchema = Schema[VerifyOrder]
           .withIndex(_.status)
-          .named("idx_order_status")
+          .named(IndexName("idx_order_status"))
           .withForeignKey(_.userId)
           .references[VerifyCustomer](_.id)
           .onDelete(Cascade)

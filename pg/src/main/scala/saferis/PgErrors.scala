@@ -15,29 +15,30 @@ private[pg] object PgErrors:
     val text = info(t).message
     if text.nonEmpty then text else "connection failed"
 
-  /** A dead socket must not go back to the pool. Class `57` shutdown and non-SQLSTATE transport codes are dead. A
-    * message that merely mentions a connection is not.
+  /** A dead socket must not go back to the pool. Connection errors and class `57` shutdown are dead. A message that
+    * merely mentions a connection is not.
     */
   def broken(err: SaferisError): Boolean = err match
-    case _: SaferisError.ConnectionError                                                  => true
-    case _: SaferisError.ConnectionLost                                                   => true
-    case SaferisError.QueryError(Some(code), _, _) if shutdown(code) || !isSqlState(code) => true
-    case _                                                                                => false
+    case _: SaferisError.ConnectionError            => true
+    case _: SaferisError.ConnectionLost             => true
+    case SaferisError.QueryError(Some(state), _, _) => state.isShutdown
+    case SaferisError.Retryable(Some(state), _, _)  => state.isShutdown
+    case _                                          => false
 
-  private def shutdown(code: String): Boolean =
-    code == "57P01" || code == "57P02" || code == "57P03"
-
-  private def isSqlState(code: String): Boolean =
-    code.length == 5 && code.forall(c => c.isDigit || (c >= 'A' && c <= 'Z'))
-
+  /** A transport code (`ECONNRESET`, `EPIPE`) is not a SQLSTATE. The socket failed, so it is `08006`, and the message
+    * keeps the code.
+    */
   private def fromDynamic(value: Any): ServerError =
     if value == null then ServerError(None, "connection failed")
     else
-      val dyn = value.asInstanceOf[js.Dynamic]
+      val dyn     = value.asInstanceOf[js.Dynamic]
+      val message = text(dyn, "message").getOrElse(value.toString)
+      val code    = text(dyn, "code")
+      val state   = code.map(c => SqlState.parse(c).getOrElse(SqlState.ConnectionFailure))
       ServerError(
-        text(dyn, "code"),
-        text(dyn, "message").getOrElse(value.toString),
-        text(dyn, "constraint"),
+        state,
+        code.filter(c => SqlState.parse(c).isEmpty).fold(message)(c => s"$message ($c)"),
+        text(dyn, "constraint").map(ConstraintName(_)),
       )
 
   private def text(dyn: js.Dynamic, name: String): Option[String] =

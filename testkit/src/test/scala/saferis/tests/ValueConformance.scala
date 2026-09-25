@@ -14,7 +14,7 @@ object ValueConformance:
   enum Mood:
     case sad, ok
 
-  given Codec[Mood] = Codec.enumeration[Mood]("mood")
+  given Codec[Mood] = Codec.enumeration[Mood](TypeName("mood"))
 
   def conformance =
     suite("values")(

@@ -133,7 +133,7 @@ object ForeignKeys extends SaferisDocSpecSuite:
           .withForeignKey(_.userId)
           .references[NamedUser](_.id)
           .onDelete(Cascade)
-          .named("fk_order_user")
+          .named(ConstraintName("fk_order_user"))
           .ddl()
           .sql
       }.assert(sql => assertTrue(sql.contains("fk_order_user"))),

@@ -22,8 +22,8 @@ trait Codec[A] extends Encoder[A], Decoder[A]:
   def sqlType: SqlType                                = encoder.sqlType
   def encode(a: A): SqlValue                          = encoder.encode(a)
   def decode(value: SqlValue): Either[DecodeError, A] = decoder.decode(value)
-  override def literal(a: A): String                  = encoder.literal(a)
-  override def columnType(using Dialect): String      = encoder.columnType
+  override def literal(a: A): SqlText                 = encoder.literal(a)
+  override def columnType(using Dialect): ColumnType  = encoder.columnType
 
   def transform[B](map: A => Either[DecodeError, B])(contramap: B => A): Codec[B] =
     new Codec[B]:
@@ -74,7 +74,7 @@ object Codec:
     *   The database type's name (a Postgres `create type`), used where a driver has to name it, such as the element
     *   type of an array.
     */
-  def enumeration[E](typeName: String)(encodeName: E => String, decodeName: String => Option[E]): Codec[E] =
+  def enumeration[E](typeName: TypeName)(encodeName: E => String, decodeName: String => Option[E]): Codec[E] =
     val server = ServerType.Named(typeName)
     new Codec[E]:
       val encoder: Encoder[E] = new Encoder[E]:
@@ -92,7 +92,7 @@ object Codec:
   end enumeration
 
   /** A parameterless Scala 3 enum. Case names are the database labels. */
-  inline def enumeration[E](typeName: String)(using m: Mirror.SumOf[E]): Codec[E] =
+  inline def enumeration[E](typeName: TypeName)(using m: Mirror.SumOf[E]): Codec[E] =
     val labels = constValueTuple[m.MirroredElemLabels].productIterator.map(_.asInstanceOf[String]).toVector
     val values = enumValues[m.MirroredElemTypes].asInstanceOf[Vector[E]]
     enumeration(typeName)(

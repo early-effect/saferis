@@ -5,7 +5,14 @@ import zio.test.*
 
 object PgConnectionConfigSpecs extends ZIOSpecDefault:
   private def config(parameters: Map[String, String]): PgConnectionConfig =
-    PgConnectionConfig("localhost", 5432, "db", "user", Secret("pw"), parameters = parameters)
+    PgConnectionConfig(
+      Host("localhost"),
+      5432,
+      DatabaseName("db"),
+      UserName("user"),
+      Secret("pw"),
+      parameters = parameters,
+    )
 
   private val required = Map("DateStyle" -> "ISO")
 

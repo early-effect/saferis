@@ -27,7 +27,7 @@ import scala.quoted.*
   */
 final case class Alias private[saferis] (value: String):
   /** Convert the alias to its SQL representation */
-  def toSql: String = value
+  def toSql: SqlText = SqlText(value)
 
 object Alias:
   /** Create an alias from a string literal.

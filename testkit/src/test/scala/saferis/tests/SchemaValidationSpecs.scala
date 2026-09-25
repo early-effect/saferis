@@ -178,7 +178,7 @@ object SchemaValidationSpecs:
       test("verify fails with MissingIndex when expected index missing") {
         val schema = Schema[User]
           .withIndex(_.email)
-          .named("idx_users_email")
+          .named(IndexName("idx_users_email"))
           .build
         for
           _      <- (dropTable[User](ifExists = true))
@@ -189,7 +189,7 @@ object SchemaValidationSpecs:
       test("verify succeeds when index exists") {
         val schema = Schema[User]
           .withIndex(_.email)
-          .named("idx_users_email")
+          .named(IndexName("idx_users_email"))
           .build
         for
           _ <- (dropTable[User](ifExists = true))
@@ -200,7 +200,7 @@ object SchemaValidationSpecs:
       test("verify succeeds with checkIndexes = false even if index missing") {
         val schema = Schema[User]
           .withIndex(_.email)
-          .named("idx_users_email")
+          .named(IndexName("idx_users_email"))
           .build
         val options = VerifyOptions(checkIndexes = false)
         for
@@ -273,7 +273,7 @@ object SchemaValidationSpecs:
                 )""".execute
           )
           _     <- (Schema(schema).verify)
-          found <- (SchemaIntrospection.introspect("fk_email_children"))
+          found <- (SchemaIntrospection.introspect(TableName("fk_email_children")))
         yield assertTrue(
           found.exists(
             _.foreignKeys.exists(fk =>
@@ -290,7 +290,7 @@ object SchemaValidationSpecs:
       test("verify fails with MissingUniqueConstraint when constraint missing") {
         val schema = Schema[User]
           .withUniqueConstraint(_.email)
-          .named("uq_users_email")
+          .named(ConstraintName("uq_users_email"))
           .build
         for
           _      <- (dropTable[Order](ifExists = true))
@@ -302,14 +302,14 @@ object SchemaValidationSpecs:
       test("verify succeeds when unique constraint exists") {
         val schema = Schema[User]
           .withUniqueConstraint(_.email)
-          .named("uq_users_email")
+          .named(ConstraintName("uq_users_email"))
           .build
         for
           _     <- (dropTable[Order](ifExists = true))
           _     <- (dropTable[User](ifExists = true))
           _     <- (createTable(schema))
           _     <- (Schema(schema).verify)
-          found <- (SchemaIntrospection.introspect("validation_users"))
+          found <- (SchemaIntrospection.introspect(TableName("validation_users")))
         yield assertTrue(
           found.exists(_.uniqueConstraints.exists(_.columns == Seq("email")))
         )
@@ -317,7 +317,7 @@ object SchemaValidationSpecs:
       test("a unique index is not a unique constraint") {
         val schema = Schema[User]
           .withUniqueConstraint(_.email)
-          .named("uq_users_email")
+          .named(ConstraintName("uq_users_email"))
           .build
         for
           _      <- (dropTable[Order](ifExists = true))
@@ -330,7 +330,7 @@ object SchemaValidationSpecs:
       test("a partial unique index is not a unique constraint") {
         val schema = Schema[User]
           .withUniqueConstraint(_.email)
-          .named("uq_users_email")
+          .named(ConstraintName("uq_users_email"))
           .build
         for
           _ <- (dropTable[Order](ifExists = true))

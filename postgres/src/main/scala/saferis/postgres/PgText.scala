@@ -1,8 +1,10 @@
 package saferis.postgres
 
+import saferis.JsonText
 import saferis.ServerType
 import saferis.SqlType
 import saferis.SqlValue
+import saferis.TypeName
 
 import zio.Chunk
 
@@ -73,7 +75,7 @@ object PgText:
   /** Scalar OID for a Postgres type name, including the SQL-standard spellings. Drivers that report names, not OIDs,
     * use this.
     */
-  def oidOf(typeName: String): Option[Int] = typeName.toLowerCase(Locale.ROOT) match
+  def oidOf(typeName: TypeName): Option[Int] = typeName.toLowerCase(Locale.ROOT) match
     case "bool" | "boolean"                  => Some(16)
     case "bytea"                             => Some(17)
     case "char"                              => Some(18)
@@ -139,28 +141,28 @@ object PgText:
     case SqlType.Other(ServerType.Named(_))    => None
 
   /** Cast name for `$n::cast`. `None` for [[SqlType.Other]]: an enum must not be cast to `text`. Arrays recurse. */
-  def cast(tpe: SqlType): Option[String] = tpe match
-    case SqlType.Bool           => Some("boolean")
-    case SqlType.Int2           => Some("int2")
-    case SqlType.Int4           => Some("int4")
-    case SqlType.Int8           => Some("int8")
-    case SqlType.Float4         => Some("float4")
-    case SqlType.Float8         => Some("float8")
-    case SqlType.Numeric        => Some("numeric")
-    case SqlType.VarChar        => Some("varchar")
-    case SqlType.Text           => Some("text")
-    case SqlType.Bytea          => Some("bytea")
-    case SqlType.Date           => Some("date")
-    case SqlType.Time           => Some("time")
-    case SqlType.Timestamp      => Some("timestamp")
-    case SqlType.Timestamptz    => Some("timestamptz")
-    case SqlType.Jsonb          => Some("jsonb")
-    case SqlType.Uuid           => Some("uuid")
-    case SqlType.Array(element) => cast(element).map(name => s"$name[]")
+  def cast(tpe: SqlType): Option[TypeName] = tpe match
+    case SqlType.Bool           => Some(TypeName("boolean"))
+    case SqlType.Int2           => Some(TypeName("int2"))
+    case SqlType.Int4           => Some(TypeName("int4"))
+    case SqlType.Int8           => Some(TypeName("int8"))
+    case SqlType.Float4         => Some(TypeName("float4"))
+    case SqlType.Float8         => Some(TypeName("float8"))
+    case SqlType.Numeric        => Some(TypeName("numeric"))
+    case SqlType.VarChar        => Some(TypeName("varchar"))
+    case SqlType.Text           => Some(TypeName("text"))
+    case SqlType.Bytea          => Some(TypeName("bytea"))
+    case SqlType.Date           => Some(TypeName("date"))
+    case SqlType.Time           => Some(TypeName("time"))
+    case SqlType.Timestamp      => Some(TypeName("timestamp"))
+    case SqlType.Timestamptz    => Some(TypeName("timestamptz"))
+    case SqlType.Jsonb          => Some(TypeName("jsonb"))
+    case SqlType.Uuid           => Some(TypeName("uuid"))
+    case SqlType.Array(element) => cast(element).map(name => TypeName(s"$name[]"))
     case SqlType.Other(_)       => None
 
-  def typeLabel(oid: Int): String =
-    sqlType(oid).fold(oid.toString)(_.productPrefix)
+  def typeLabel(oid: Int): TypeName =
+    TypeName(sqlType(oid).fold(oid.toString)(_.productPrefix))
 
   /** Unknown OIDs are [[SqlValue.Other]], not a failed row. Array OIDs decode to [[SqlValue.Array]]. */
   def decode(oid: Int, text: String): Either[String, SqlValue] =
@@ -226,7 +228,7 @@ object PgText:
         parseTimestamptz(text) match
           case Right(v)     => Right(SqlValue.Timestamptz(v))
           case Left(detail) => bad(detail)
-      case 114 | 3802 => Right(SqlValue.Jsonb(text))
+      case 114 | 3802 => Right(SqlValue.Jsonb(JsonText(text)))
       case 2950       =>
         uuid(text) match
           case Some(v) => Right(SqlValue.Uuid(v))

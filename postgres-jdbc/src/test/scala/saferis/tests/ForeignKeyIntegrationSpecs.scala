@@ -78,7 +78,7 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
       val sql = Schema[Order]
         .withForeignKey(_.userId)
         .references[User](_.id)
-        .named("fk_order_user")
+        .named(ConstraintName("fk_order_user"))
         .ddl(ifNotExists = false)
         .sql
 

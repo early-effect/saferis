@@ -1,12 +1,16 @@
 package saferis.pg
 
 import saferis.*
+import saferis.postgres.DatabaseName
+import saferis.postgres.Host
 import saferis.postgres.PgConnectionConfig
+import saferis.postgres.UserName
 import saferis.tests.PostgresTestContainer
 import zio.*
 import zio.test.*
 
 import java.time.Instant
+import scala.scalajs.js
 
 object PgSessionSpecs extends ZIOSpecDefault:
   private val pastInt8    = 9223372036854775807L
@@ -20,10 +24,10 @@ object PgSessionSpecs extends ZIOSpecDefault:
     ): PgConfig =
       PgConfig(
         connection = PgConnectionConfig(
-          host = pg.host,
+          host = Host(pg.host),
           port = pg.port,
-          database = pg.database,
-          user = pg.user,
+          database = DatabaseName(pg.database),
+          user = UserName(pg.user),
           password = zio.Config.Secret(pg.password),
         ),
         poolSize = poolSize,
@@ -114,7 +118,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
           rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(row => Right(row)))
           row = rows.head
         yield assertTrue(
-          row.at(0) == Right(SqlValue.Jsonb("null")),
+          row.at(0) == Right(SqlValue.Jsonb(JsonText("null"))),
           row.at(1) == Right(SqlValue.Null(SqlType.Jsonb)),
         )
       ,
@@ -130,7 +134,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
         for
           command <- sql"select ${1} as a, ${2} as a".toCommand
           rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(row => Right(row)))
-        yield assertTrue(rows.head.get("a") == Right(SqlValue.Int4(1)))
+        yield assertTrue(rows.head.get(ColumnName("a")) == Right(SqlValue.Int4(1)))
       ,
       test("an unknown oid is Other and String reads its text"):
         for
@@ -149,7 +153,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
           summon[RowDecoder[Long]]
             .decode(row)
             .left
-            .map(err => SaferisError.DecodingError("value", "Long", err.detail))
+            .map(err => SaferisError.DecodingError(ColumnName("value"), TypeName("Long"), err.detail))
         for
           command <- sql"select ${pastInt8}".toCommand
           session <- ZIO.service[SqlSession]
@@ -161,7 +165,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
           summon[RowDecoder[Int]]
             .decode(row)
             .left
-            .map(err => SaferisError.DecodingError("n", "Int", err.detail))
+            .map(err => SaferisError.DecodingError(ColumnName("n"), TypeName("Int"), err.detail))
         for
           pg     <- ZIO.service[PostgresTestContainer]
           events <- Ref.make(Chunk.empty[String])
@@ -181,7 +185,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
           summon[RowDecoder[Int]]
             .decode(row)
             .left
-            .map(err => SaferisError.DecodingError("n", "Int", err.detail))
+            .map(err => SaferisError.DecodingError(ColumnName("n"), TypeName("Int"), err.detail))
         for
           _       <- NodeSession.cursorReads.set(0)
           command <- sql"select n::int4 from generate_series(1, 1000000) n".toCommand
@@ -296,7 +300,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
           ).provide(listening(pg.config(defaultTimeout = Some(30.seconds)), new Recording(heard)))
           (exit, captured, count) = result
           aborted                 = captured match
-            case Some(Left(SaferisError.QueryError(Some("25P02"), _, sql))) =>
+            case Some(Left(SaferisError.QueryError(Some(SqlState.InFailedTransaction), _, sql))) =>
               sql.exists(_.contains("later_count"))
             case _ => false
           recorded = exit match
@@ -333,13 +337,24 @@ object PgSessionSpecs extends ZIOSpecDefault:
   private val review =
     suite("review")(
       test("shutdown sqlstates break the client and a connection-shaped message does not"):
-        val shutdown = List("57P01", "57P02", "57P03").map: code =>
+        val shutdown = List(SqlState.AdminShutdown, SqlState.CrashShutdown, SqlState.CannotConnectNow).map: state =>
           PgErrors.broken(
-            SaferisError.QueryError(Some(code), "terminating connection due to administrator command", None)
+            SaferisError.QueryError(Some(state), "terminating connection due to administrator command", None)
           )
-        val unique    = PgErrors.broken(SaferisError.UniqueViolation(Some("pg_uniq_pkey"), "unique violation", None))
+        val unique =
+          PgErrors.broken(SaferisError.UniqueViolation(Some(ConstraintName("pg_uniq_pkey")), "unique violation", None))
         val mentioned = PgErrors.broken(SaferisError.QueryError(None, "the connection is still usable", None))
         assertTrue(shutdown.forall(identity), !unique, !mentioned)
+      ,
+      test("a transport code is 08006, keeps the code in the message, and breaks the client"):
+        val info  = PgErrors.info(js.JavaScriptException(js.Dynamic.literal(code = "ECONNRESET", message = "reset")))
+        val error = SqlState.classify(info, None, SqlState.defaultRetryable)
+        assertTrue(
+          info.sqlState.contains(SqlState.ConnectionFailure),
+          info.message == "reset (ECONNRESET)",
+          error.isInstanceOf[SaferisError.ConnectionLost],
+          PgErrors.broken(error),
+        )
       ,
       test("a script of two selects fails and one select still returns the row"):
         onSession(_.config()): db =>
@@ -471,10 +486,10 @@ object PgSessionSpecs extends ZIOSpecDefault:
         pg <- ZIO.service[PostgresTestContainer]
         config = PgConfig(
           connection = PgConnectionConfig(
-            host = pg.host,
+            host = Host(pg.host),
             port = pg.port,
-            database = pg.database,
-            user = pg.user,
+            database = DatabaseName(pg.database),
+            user = UserName(pg.user),
             password = zio.Config.Secret(pg.password),
             parameters = Map("statement_timeout" -> "1s"),
           ),

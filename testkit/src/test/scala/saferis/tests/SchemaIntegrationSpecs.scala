@@ -78,7 +78,7 @@ object SchemaIntegrationSpecs:
           .withIndex(_.status)
           .where(_.status)
           .eql("active")
-          .named("idx_active_users")
+          .named(IndexName("idx_active_users"))
           .build
 
         for
@@ -101,7 +101,7 @@ object SchemaIntegrationSpecs:
           .withUniqueIndex(_.email)
           .where(_.status)
           .eql("active")
-          .named("idx_unique_active_email")
+          .named(IndexName("idx_unique_active_email"))
           .build
 
         for
@@ -123,7 +123,7 @@ object SchemaIntegrationSpecs:
           .withUniqueIndex(_.email)
           .where(_.status)
           .eql("active")
-          .named("idx_unique_active_email_test")
+          .named(IndexName("idx_unique_active_email_test"))
           .build
 
         for
@@ -145,7 +145,7 @@ object SchemaIntegrationSpecs:
           .withUniqueIndex(_.email)
           .where(_.status)
           .eql("active")
-          .named("idx_unique_active_email_enforce")
+          .named(IndexName("idx_unique_active_email_enforce"))
           .build
 
         for
@@ -168,7 +168,7 @@ object SchemaIntegrationSpecs:
         val users = Schema[User]
           .withIndex(_.name)
           .and(_.email)
-          .named("idx_name_email")
+          .named(IndexName("idx_name_email"))
           .build
 
         for
@@ -362,7 +362,7 @@ object SchemaIntegrationSpecs:
           .withIndex(_.userId)
           .where(_.data)
           .jsonHasKey("verified")
-          .named("idx_verified_profiles")
+          .named(IndexName("idx_verified_profiles"))
           .build
 
         for
@@ -387,7 +387,7 @@ object SchemaIntegrationSpecs:
           .where(_.data)
           .jsonPath("role")
           .eql("admin")
-          .named("idx_admin_profiles")
+          .named(IndexName("idx_admin_profiles"))
           .build
 
         for
@@ -416,7 +416,7 @@ object SchemaIntegrationSpecs:
           .eql("active")
           .and(_.age)
           .gte(18)
-          .named("idx_adult_active")
+          .named(IndexName("idx_adult_active"))
           .build
 
         for
@@ -441,7 +441,7 @@ object SchemaIntegrationSpecs:
           .eql("active")
           .or(_.status)
           .eql("pending")
-          .named("idx_active_or_pending")
+          .named(IndexName("idx_active_or_pending"))
           .build
 
         for
@@ -463,7 +463,7 @@ object SchemaIntegrationSpecs:
           .where(_.status)
           .eql("active")
           .andGroup(g => g.where(_.age).gte(18).or(_.age).lte(5))
-          .named("idx_active_age_group")
+          .named(IndexName("idx_active_age_group"))
           .build
 
         for
@@ -485,7 +485,7 @@ object SchemaIntegrationSpecs:
           .withIndex(_.email)
           .where(_.status)
           .in(Seq("active", "pending", "review"))
-          .named("idx_multi_status")
+          .named(IndexName("idx_multi_status"))
           .build
 
         for
@@ -527,7 +527,7 @@ object SchemaIntegrationSpecs:
       test("create table with FK and index on same column") {
         val profiles = Schema[Profile]
           .withIndex(_.userId)
-          .named("idx_profile_user")
+          .named(IndexName("idx_profile_user"))
           .withForeignKey(_.userId)
           .references[User](_.id)
           .onDelete(Cascade)
@@ -567,7 +567,7 @@ object SchemaIntegrationSpecs:
           _     <- (sql"""drop table if exists "User"""".execute)
           _     <- (sql"""drop table if exists "user"""".execute)
           _     <- (sql"""create table "user" (id integer primary key, name varchar(255) not null)""".execute)
-          found <- (SchemaIntrospection.introspect("User"))
+          found <- (SchemaIntrospection.introspect(TableName("User")))
           _     <- (Schema[FoldedUser.User].verify)
           _     <- (sql"""drop table if exists "user"""".execute)
         yield assertTrue(found.exists(_.tableName == "user"))
@@ -577,7 +577,7 @@ object SchemaIntegrationSpecs:
           _      <- (sql"""drop table if exists "user"""".execute)
           _      <- (sql"""drop table if exists "User"""".execute)
           _      <- (sql"""create table "User" (id integer primary key, name varchar(255) not null)""".execute)
-          found  <- (SchemaIntrospection.introspect("User"))
+          found  <- (SchemaIntrospection.introspect(TableName("User")))
           result <- (Schema[FoldedUser.User].verify.either)
           _      <- (sql"""drop table if exists "User"""".execute)
           missing = result match
@@ -596,7 +596,7 @@ object SchemaIntegrationSpecs:
           // Wrong shape in public. A lookup that ignores the schema prefix must not accept this table.
           _     <- (sql"create table foo (id integer primary key, name integer not null)".execute)
           _     <- (sql"create table prd.foo (id integer primary key, name varchar(255) not null)".execute)
-          found <- (SchemaIntrospection.introspect("Prd.Foo"))
+          found <- (SchemaIntrospection.introspect(TableName("Prd.Foo")))
           _     <- (Schema[PrdFoo].verify)
           _     <- (sql"drop table if exists prd.foo".execute)
           _     <- (sql"drop table if exists foo".execute)
@@ -607,7 +607,7 @@ object SchemaIntegrationSpecs:
           .withIndex(_.status)
           .where(_.status)
           .eql("active")
-          .named("idx_status_partial")
+          .named(IndexName("idx_status_partial"))
           .build
         for
           _ <- (dropTable[Profile](ifExists = true))

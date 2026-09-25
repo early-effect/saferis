@@ -8,7 +8,7 @@ trait Placeholder:
   def pieces: Chunk[SqlPiece]
   def issues: List[FragmentIssue]
   def timeout: Option[Duration] = None
-  def sql: String               = SqlPieces.postgres(pieces)
+  def sql: SqlText              = SqlPieces.postgres(pieces)
 
   final def ++(other: Placeholder): Placeholder =
     Placeholder.Derived(
@@ -24,8 +24,9 @@ object Placeholder:
 
   def apply(p: Placeholder): Placeholder = p
 
+  /** Caller-trusted SQL text: identifiers and keywords, never user data. This is where a `String` becomes SQL. */
   def raw(sql: String): Placeholder =
-    if sql.isEmpty then Empty else Derived(Chunk(SqlPiece.Text(sql)), Nil, None)
+    if sql.isEmpty then Empty else Derived(Chunk(SqlPiece.Text(SqlText(sql))), Nil, None)
 
   def param(value: SqlValue): Placeholder =
     Derived(Chunk(SqlPiece.Param(value)), Nil, None)
@@ -102,7 +103,7 @@ object Placeholder:
     def apply(as: Seq[Placeholder]): Placeholder = concat(as*)
 
   final private[saferis] class RawSql(sqlText: String) extends Placeholder:
-    val pieces: Chunk[SqlPiece]     = if sqlText.isEmpty then Chunk.empty else Chunk(SqlPiece.Text(sqlText))
+    val pieces: Chunk[SqlPiece]     = if sqlText.isEmpty then Chunk.empty else Chunk(SqlPiece.Text(SqlText(sqlText)))
     val issues: List[FragmentIssue] = Nil
     override def toString: String   = s"RawSql($sqlText)"
 

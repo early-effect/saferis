@@ -66,21 +66,21 @@ object SqlInjectionDdlSpecs extends ZIOSpecDefault:
         _ <- freshVictim
         // Attempt injection through the index name. escapeIdentifier should neutralize it; even if the DB
         // rejects the resulting statement, the victim table must survive.
-        _     <- (createIndex[VictimTable](dropPayload, Seq("name"))).either
+        _     <- (createIndex[VictimTable](IndexName(dropPayload), Seq(ColumnName("name")))).either
         count <- victimCount
       yield assertTrue(count == 1L) // victim_table still exists regardless of whether the create succeeded/failed
     ,
     test("malicious column name via createIndex (escaped path) cannot drop the victim table"):
       for
         _     <- freshVictim
-        _     <- (createIndex[VictimTable]("idx_safe", Seq(dropPayload))).either
+        _     <- (createIndex[VictimTable](IndexName("idx_safe"), Seq(ColumnName(dropPayload)))).either
         count <- victimCount
       yield assertTrue(count == 1L)
     ,
     test("malicious index name via dropIndex (escaped path) cannot drop the victim table"):
       for
         _     <- freshVictim
-        _     <- (dropIndex(dropPayload, ifExists = true)).either
+        _     <- (dropIndex(IndexName(dropPayload), ifExists = true)).either
         count <- victimCount
       yield assertTrue(count == 1L)
     ,
@@ -89,14 +89,14 @@ object SqlInjectionDdlSpecs extends ZIOSpecDefault:
       // payload becomes an inert quoted identifier and the victim survives.
       for
         _     <- freshVictim
-        _     <- (createIndexIfNotExists[VictimTable](dropPayload, Seq("name"))).either
+        _     <- (createIndexIfNotExists[VictimTable](IndexName(dropPayload), Seq(ColumnName("name")))).either
         count <- victimCount
       yield assertTrue(count == 1L)
     ,
     test("malicious column name via createIndexIfNotExists cannot drop the victim table"):
       for
         _     <- freshVictim
-        _     <- (createIndexIfNotExists[VictimTable]("idx_safe", Seq(dropPayload))).either
+        _     <- (createIndexIfNotExists[VictimTable](IndexName("idx_safe"), Seq(ColumnName(dropPayload)))).either
         count <- victimCount
       yield assertTrue(count == 1L)
     ,
@@ -106,14 +106,14 @@ object SqlInjectionDdlSpecs extends ZIOSpecDefault:
       // victim_table`. Escaping the user-supplied index name at the public boundary makes it inert.
       for
         _     <- freshVictim
-        _     <- (createIndexIfNotExists[VictimTable](quoteFreeDropPayload, Seq("name"))).either
+        _     <- (createIndexIfNotExists[VictimTable](IndexName(quoteFreeDropPayload), Seq(ColumnName("name")))).either
         count <- victimCount
       yield assertTrue(count == 1L)
     ,
     test("QUOTE-FREE stacked-query index name via createIndex (escaped path) cannot drop the victim"):
       for
         _     <- freshVictim
-        _     <- (createIndex[VictimTable](quoteFreeDropPayload, Seq("name"))).either
+        _     <- (createIndex[VictimTable](IndexName(quoteFreeDropPayload), Seq(ColumnName("name")))).either
         count <- victimCount
       yield assertTrue(count == 1L),
   ).provideShared(xaLayer) @@ TestAspect.sequential

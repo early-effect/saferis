@@ -16,7 +16,7 @@ object DataDefinitionLayer:
     val hasCompoundKey = keyColumns.length > 1
 
     val columnDefs = table.columns.map { col =>
-      val baseType      = sqlTypeFromColumn(col)
+      val baseType      = col.columnType
       val notNullClause = if !col.isNullable then " not null" else ""
       val defaultClause = col.defaultClause.map(d => s" $d").getOrElse("")
       val autoIncrement = dialect.autoIncrementClause(col.isGenerated, col.isKey, hasCompoundKey)
@@ -68,7 +68,7 @@ object DataDefinitionLayer:
     val hasCompoundKey = keyColumns.length > 1
 
     val columnDefs = cols.map { col =>
-      val baseType      = sqlTypeFromColumn(col)
+      val baseType      = col.columnType
       val notNullClause = if !col.isNullable then " not null" else ""
       val defaultClause = col.defaultClause.map(d => s" $d").getOrElse("")
       val autoIncrement = dialect.autoIncrementClause(col.isGenerated, col.isKey, hasCompoundKey)
@@ -112,31 +112,36 @@ object DataDefinitionLayer:
       val createSql    = spec.toCreateSql(tableName, instance.fieldToLabel)
       val sql          = dialect match
         case d: IndexIfNotExistsSupport =>
-          val indexName = spec.name.getOrElse(s"idx_${tableName}_${columnLabels.mkString("_")}")
+          val indexName = spec.name.getOrElse(IndexName.default(tableName, columnLabels))
           SqlFragment.text(
-            if spec.unique then
-              d.createIndexIfNotExistsSql(indexName, tableName, columnLabels, unique = true, where = spec.where)
-            else d.createIndexIfNotExistsSql(indexName, tableName, columnLabels, unique = false, where = spec.where)
+            d.createIndexIfNotExistsSql(
+              indexName.sql,
+              tableName.sql,
+              columnLabels.map(_.sql),
+              unique = spec.unique,
+              where = spec.where,
+            )
           )
         case _ => SqlFragment.text(createSql)
       sql.dml
     }
 
-    // For compound keys, create a compound index on all key columns
-    val compoundKeyIndex = Option.when(hasCompoundKey) {
-      val keyColumnNames    = keyColumns.map(_.label)
-      val compoundIndexName = s"idx_${tableName}_compound_key"
-      val sql               = dialect match
-        case d: IndexIfNotExistsSupport =>
-          SqlFragment.text(d.createIndexIfNotExistsSql(compoundIndexName, tableName, keyColumnNames))
-        case _ => SqlFragment.text(dialect.createIndexSql(compoundIndexName, tableName, keyColumnNames, false))
-      sql.dml
-    }
+    val compoundKeyIndex = Option.when(hasCompoundKey)(compoundKeyIndexSql(tableName, keyColumns).dml)
 
     ZIO.collectAll(aspectIndexes ++ compoundKeyIndex.toSeq)
   end createIndexesFromInstance
 
-  private def sqlTypeFromColumn[R](col: Column[R])(using dialect: Dialect): String = col.columnType
+  private def compoundKeyIndexSql(tableName: TableName, keyColumns: Seq[Column[?]])(using
+      dialect: Dialect
+  ): SqlFragment =
+    val keyColumnNames = keyColumns.map(_.label)
+    val indexName      = IndexName.compoundKey(tableName)
+    SqlFragment.text:
+      dialect match
+        case d: IndexIfNotExistsSupport =>
+          d.createIndexIfNotExistsSql(indexName.sql, tableName.sql, keyColumnNames.map(_.sql))
+        case _ => dialect.createIndexSql(indexName, tableName, keyColumnNames, false)
+  end compoundKeyIndexSql
 
   inline def dropTable[A](ifExists: Boolean = false)(using
       table: Table[A],
@@ -154,7 +159,7 @@ object DataDefinitionLayer:
     val sql       = SqlFragment.text(dialect.truncateTableSql(tableName))
     sql.dml
 
-  inline def addColumn[A, T](columnName: String)(using
+  inline def addColumn[A, T](columnName: ColumnName)(using
       table: Table[A],
       encoder: Encoder[T],
       dialect: Dialect,
@@ -165,7 +170,7 @@ object DataDefinitionLayer:
     sql.dml
   end addColumn
 
-  inline def dropColumn[A](columnName: String)(using
+  inline def dropColumn[A](columnName: ColumnName)(using
       table: Table[A],
       dialect: Dialect,
   )(using trace: Trace): ZIO[SqlSession, SaferisError, Long] =
@@ -174,10 +179,10 @@ object DataDefinitionLayer:
     sql.dml
 
   inline def createIndex[A](
-      indexName: String,
-      columnNames: Seq[String],
+      indexName: IndexName,
+      columnNames: Seq[ColumnName],
       unique: Boolean = false,
-      where: Option[String] = None,
+      where: Option[SqlText] = None,
   )(using table: Table[A], dialect: Dialect)(using trace: Trace): ZIO[SqlSession, SaferisError, Long] =
     val tableName = table.name
     val sql       =
@@ -189,22 +194,9 @@ object DataDefinitionLayer:
   /** Returns CREATE INDEX SQL for compound key indexes only. Use Instance-based createTable with @@ index aspects for
     * custom indexes.
     */
-  inline def createIndexesSql[A]()(using table: Table[A], dialect: Dialect): String =
-    val tableName      = table.name
-    val keyColumns     = table.columns.filter(_.isKey)
-    val hasCompoundKey = keyColumns.length > 1
-
-    // For compound keys, create a compound index on all key columns
-    val compoundKeyIndex = Option.when(hasCompoundKey) {
-      val keyColumnNames    = keyColumns.map(_.label)
-      val compoundIndexName = s"idx_${tableName}_compound_key"
-      dialect match
-        case d: IndexIfNotExistsSupport => d.createIndexIfNotExistsSql(compoundIndexName, tableName, keyColumnNames)
-        case _                          => dialect.createIndexSql(compoundIndexName, tableName, keyColumnNames, false)
-    }
-
-    compoundKeyIndex.toSeq.mkString("\n")
-  end createIndexesSql
+  inline def createIndexesSql[A]()(using table: Table[A], dialect: Dialect): SqlText =
+    val keyColumns = table.columns.filter(_.isKey)
+    if keyColumns.length > 1 then compoundKeyIndexSql(table.name, keyColumns).sql else SqlText.empty
 
   /** Creates compound key indexes only. Use Instance-based createTable with @@ index aspects for custom indexes.
     */
@@ -212,25 +204,12 @@ object DataDefinitionLayer:
       table: Table[A],
       dialect: Dialect,
   )(using trace: Trace): ZIO[SqlSession, SaferisError, Seq[Long]] =
-    val tableName      = table.name
-    val keyColumns     = table.columns.filter(_.isKey)
-    val hasCompoundKey = keyColumns.length > 1
-
-    // For compound keys, create a compound index on all key columns
-    val compoundKeyIndex = Option.when(hasCompoundKey) {
-      val keyColumnNames    = keyColumns.map(_.label)
-      val compoundIndexName = s"idx_${tableName}_compound_key"
-      val sql               = dialect match
-        case d: IndexIfNotExistsSupport =>
-          SqlFragment.text(d.createIndexIfNotExistsSql(compoundIndexName, tableName, keyColumnNames))
-        case _ => SqlFragment.text(dialect.createIndexSql(compoundIndexName, tableName, keyColumnNames, false))
-      sql.dml
-    }
-
+    val keyColumns       = table.columns.filter(_.isKey)
+    val compoundKeyIndex = Option.when(keyColumns.length > 1)(compoundKeyIndexSql(table.name, keyColumns).dml)
     ZIO.collectAll(compoundKeyIndex.toSeq)
   end createIndexes
 
-  inline def dropIndex(indexName: String, ifExists: Boolean = false)(using
+  inline def dropIndex(indexName: IndexName, ifExists: Boolean = false)(using
       dialect: Dialect
   )(using trace: Trace): ZIO[SqlSession, SaferisError, Long] =
     val sql = SqlFragment.text(dialect.dropIndexSql(indexName, ifExists))

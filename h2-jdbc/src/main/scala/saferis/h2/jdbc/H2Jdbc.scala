@@ -48,7 +48,7 @@ private object H2Adapter extends StandardJdbcAdapter:
     val i = column.index
     column.typeName match
       case "json" =>
-        ref(SqlType.Jsonb, rs.getBytes(i))(bytes => SqlValue.Jsonb(String(bytes, StandardCharsets.UTF_8)))(rs)
+        ref(SqlType.Jsonb, rs.getBytes(i))(bytes => SqlValue.Jsonb(JsonText(String(bytes, StandardCharsets.UTF_8))))(rs)
       case "uuid" => ref(SqlType.Uuid, rs.getObject(i, classOf[UUID]))(SqlValue.Uuid(_))(rs)
       case _      => super.read(rs, column)
 end H2Adapter

@@ -11,6 +11,24 @@ object Pem:
   def apply(text: String): Pem          = text
   extension (pem: Pem) def text: String = pem
 
+/** A server host name or address. */
+opaque type Host <: String = String
+
+object Host:
+  def apply(name: String): Host = name
+
+/** A database on the server, as `connect` names it. */
+opaque type DatabaseName <: String = String
+
+object DatabaseName:
+  def apply(name: String): DatabaseName = name
+
+/** A role the connection authenticates as. */
+opaque type UserName <: String = String
+
+object UserName:
+  def apply(name: String): UserName = name
+
 /** How a Postgres driver asks the server to speak TLS. */
 enum SslMode:
   case Disable
@@ -24,10 +42,10 @@ enum SslMode:
 
 /** Host, credentials, TLS, and how long `connect` may wait. Drivers add their own pool settings around this. */
 final case class PgConnectionConfig(
-    host: String,
+    host: Host,
     port: Int,
-    database: String,
-    user: String,
+    database: DatabaseName,
+    user: UserName,
     password: Secret,
     ssl: SslMode = SslMode.Disable,
     connectTimeout: Duration = 10.seconds,

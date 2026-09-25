@@ -15,9 +15,9 @@ final class SqlFragment private (
 ) extends Placeholder:
 
   /** Postgres inspection form (`$1`, `$2`). Not the text a driver sends. */
-  override def sql: String = SqlPieces.postgres(pieces)
+  override def sql: SqlText = SqlPieces.postgres(pieces)
 
-  def show: String = SqlPieces.show(pieces)
+  def show: SqlText = SqlPieces.show(pieces)
 
   def withTimeout(d: Duration): SqlFragment =
     new SqlFragment(pieces, issues, Some(d))
@@ -73,7 +73,7 @@ final class SqlFragment private (
         .left
         .map: err =>
           val column = if row.width == 1 then row.labels.headOption.getOrElse("0") else "0"
-          SaferisError.DecodingError(column, "value", err.detail)
+          SaferisError.DecodingError(ColumnName(column), TypeName("value"), err.detail)
     for
       command <- toCommand
       row     <- ZIO.serviceWithZIO[SqlSession](_.queryAtMostOne(command)(read))
@@ -112,8 +112,9 @@ object SqlFragment:
 
   val empty: SqlFragment = new SqlFragment(Chunk.empty, Nil, None)
 
+  /** Caller-trusted SQL text, never user data. This is where a `String` becomes SQL. */
   def text(sql: String): SqlFragment =
-    if sql.isEmpty then empty else new SqlFragment(Chunk(SqlPiece.Text(sql)), Nil, None)
+    if sql.isEmpty then empty else new SqlFragment(Chunk(SqlPiece.Text(SqlText(sql))), Nil, None)
 
   def param(value: SqlValue): SqlFragment =
     new SqlFragment(Chunk(SqlPiece.Param(value)), Nil, None)
@@ -126,12 +127,12 @@ object SqlFragment:
     var timeout: Option[Duration] = None
     var i                         = 0
     while i < holders.length do
-      if i < decoded.length then b += SqlPiece.Text(decoded(i))
+      if i < decoded.length then b += SqlPiece.Text(SqlText(decoded(i)))
       b ++= holders(i).pieces
       issues ++= holders(i).issues
       timeout = timeout.orElse(holders(i).timeout)
       i += 1
-    if i < decoded.length then b += SqlPiece.Text(decoded(i))
+    if i < decoded.length then b += SqlPiece.Text(SqlText(decoded(i)))
     new SqlFragment(SqlPieces.merge(b.result()), issues.result(), timeout)
   end interpolate
 
@@ -143,7 +144,7 @@ object SqlFragment:
         .make[E](pairs.reverse)
         .left
         .map: err =>
-          SaferisError.DecodingError(table.name, "row", err.detail)
+          SaferisError.DecodingError(ColumnName(table.name), TypeName("row"), err.detail)
 
   /** `String.stripMargin`, walking text only. A parameter is content, so it ends the margin scan for that line. */
   private def stripPieces(pieces: Chunk[SqlPiece], marginChar: Char): Chunk[SqlPiece] =
@@ -157,7 +158,7 @@ object SqlFragment:
 
     def flush(): Unit =
       if pending.nonEmpty then
-        out += SqlPiece.Text(pending.toString)
+        out += SqlPiece.Text(SqlText(pending.toString))
         pending.clear()
 
     def commitLeading(): Unit =

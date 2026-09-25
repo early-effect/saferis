@@ -7,7 +7,7 @@ import zio.ZIO
 private[saferis] object PostgresCatalog:
   import CatalogRows.*
 
-  def introspect(rawName: String)(using Trace): ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
+  def introspect(rawName: TableName)(using Trace): ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
     // One transaction session is one connection. Do not overlap these reads.
     run(tableQuery(rawName))(readTable).flatMap: found =>
       found.headOption match

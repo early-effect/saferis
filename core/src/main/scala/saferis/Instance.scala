@@ -31,7 +31,7 @@ import scala.annotation.unused
   *   The case class type representing the table
   */
 final case class Instance[A](
-    private[saferis] val tableName: String,
+    private[saferis] val tableName: TableName,
     private[saferis] val columns: Seq[Column[?]],
     private[saferis] val alias: Option[Alias],
     private[saferis] val foreignKeys: Vector[ForeignKeySpec[A, ?]] = Vector.empty,
@@ -39,17 +39,17 @@ final case class Instance[A](
     private[saferis] val uniqueConstraints: Vector[UniqueConstraintSpec[?]] = Vector.empty,
 )(using val tableEvidence: Table[A])
     extends Selectable:
-  private[saferis] val fieldNamesToColumns: Map[String, Column[?]] = columns.map(c => c.name -> c).toMap
+  private[saferis] val fieldNamesToColumns: Map[String, Column[?]] = columns.map(c => (c.name: String) -> c).toMap
 
-  private[saferis] val fieldToLabel: Map[String, String] =
-    columns.map(c => c.name -> c.label).toMap
+  private[saferis] val fieldToLabel: Map[String, ColumnName] =
+    columns.map(c => (c.name: String) -> c.label).toMap
 
   /** Get foreign key constraint SQL - use via `foreignKeyConstraints(instance)` */
-  private[saferis] def foreignKeyConstraints: Seq[String] =
+  private[saferis] def foreignKeyConstraints: Seq[SqlText] =
     foreignKeys.map(_.toConstraintSql(fieldToLabel)).toSeq
 
   /** Get unique constraint SQL - use via `uniqueConstraints(instance)` */
-  private[saferis] def uniqueConstraintsSql: Seq[String] =
+  private[saferis] def uniqueConstraintsSql: Seq[SqlText] =
     uniqueConstraints.map(_.toConstraintSql(fieldToLabel)).toSeq
 
   /** Column access via field name - the ONLY public method besides applyDynamic */

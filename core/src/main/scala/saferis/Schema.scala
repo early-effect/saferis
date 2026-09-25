@@ -96,10 +96,10 @@ final case class Schema[A](instance: Instance[A]):
     // Compound key index (if more than one key column)
     val compoundKeyIndex = Option.when(keyColumns.length > 1) {
       val keyColumnNames    = keyColumns.map(_.label)
-      val compoundIndexName = s"idx_${tableName}_compound_key"
+      val compoundIndexName = IndexName.compoundKey(tableName)
       dialect match
         case d: IndexIfNotExistsSupport =>
-          d.createIndexIfNotExistsSql(compoundIndexName, tableName, keyColumnNames)
+          d.createIndexIfNotExistsSql(compoundIndexName.sql, tableName.sql, keyColumnNames.map(_.sql))
         case _ =>
           dialect.createIndexSql(compoundIndexName, tableName, keyColumnNames, ifNotExists)
     }
@@ -354,7 +354,7 @@ object Schema:
     '{
       InstanceIndexBuilder[A](
         $instance,
-        Seq(${ Expr(columnName) }),
+        Seq(FieldName(${ Expr(columnName) })),
         $unique,
         None,
         Seq.empty,
@@ -369,7 +369,7 @@ object Schema:
     val columnName = extractFieldName(selector)
     '{
       val b = $builder
-      b.copy(columns = b.columns :+ ${ Expr(columnName) })
+      b.copy(columns = b.columns :+ FieldName(${ Expr(columnName) }))
     }
   end instanceIndexAndImpl
 
@@ -378,7 +378,7 @@ object Schema:
       selector: Expr[A => T],
   )(using Quotes): Expr[InstanceWhereColumnBuilder[A, T]] =
     val columnName = extractFieldName(selector)
-    '{ InstanceWhereColumnBuilder[A, T]($builder, ${ Expr(columnName) }) }
+    '{ InstanceWhereColumnBuilder[A, T]($builder, FieldName(${ Expr(columnName) })) }
   end instanceIndexWhereImpl
 
   private def instanceWhereAndImpl[A: Type, T: Type](
@@ -389,7 +389,7 @@ object Schema:
     '{
       val b      = $builder
       val parent = InstanceIndexBuilder[A](b.instance, b.columns, b.unique, b.indexName, b.conditions)
-      InstanceWhereColumnBuilder[A, T](parent, ${ Expr(columnName) })
+      InstanceWhereColumnBuilder[A, T](parent, FieldName(${ Expr(columnName) }))
     }
   end instanceWhereAndImpl
 
@@ -401,7 +401,7 @@ object Schema:
     '{
       val b      = $builder
       val parent = InstanceIndexBuilder[A](b.instance, b.columns, b.unique, b.indexName, b.conditions)
-      InstanceWhereColumnBuilder[A, T](parent, ${ Expr(columnName) }, "or")
+      InstanceWhereColumnBuilder[A, T](parent, FieldName(${ Expr(columnName) }), "or")
     }
   end instanceWhereOrImpl
 
@@ -410,7 +410,7 @@ object Schema:
       selector: Expr[A => T],
   )(using Quotes): Expr[InstanceFKBuilder[A, T]] =
     val columnName = extractFieldName(selector)
-    '{ InstanceFKBuilder[A, T]($instance, Seq(${ Expr(columnName) })) }
+    '{ InstanceFKBuilder[A, T]($instance, Seq(FieldName(${ Expr(columnName) }))) }
   end withForeignKeyImpl
 
   // Chain macros that handle builder-to-instance conversion internally
@@ -425,7 +425,7 @@ object Schema:
       val builtInst = b.toInstance
       InstanceIndexBuilder[A](
         builtInst,
-        Seq(${ Expr(columnName) }),
+        Seq(FieldName(${ Expr(columnName) })),
         $unique,
         None,
         Seq.empty,
@@ -441,7 +441,7 @@ object Schema:
     '{
       val b         = $builder
       val builtInst = b.toInstance
-      InstanceFKBuilder[A, T](builtInst, Seq(${ Expr(columnName) }))
+      InstanceFKBuilder[A, T](builtInst, Seq(FieldName(${ Expr(columnName) })))
     }
   end chainFKFromBuilderImpl
 
@@ -456,7 +456,7 @@ object Schema:
       val builtInst = b.toInstance
       InstanceIndexBuilder[A](
         builtInst,
-        Seq(${ Expr(columnName) }),
+        Seq(FieldName(${ Expr(columnName) })),
         $unique,
         None,
         Seq.empty,
@@ -472,7 +472,7 @@ object Schema:
     '{
       val b         = $builder
       val builtInst = b.toInstance
-      InstanceFKBuilder[A, T](builtInst, Seq(${ Expr(columnName) }))
+      InstanceFKBuilder[A, T](builtInst, Seq(FieldName(${ Expr(columnName) })))
     }
   end chainFKFromConditionImpl
 
@@ -488,7 +488,7 @@ object Schema:
       val builtInst = b.build
       InstanceIndexBuilder[A](
         builtInst,
-        Seq(${ Expr(columnName) }),
+        Seq(FieldName(${ Expr(columnName) })),
         $unique,
         None,
         Seq.empty,
@@ -504,7 +504,7 @@ object Schema:
     '{
       val b         = $builder
       val builtInst = b.build
-      InstanceFKBuilder[A, T](builtInst, Seq(${ Expr(columnName) }))
+      InstanceFKBuilder[A, T](builtInst, Seq(FieldName(${ Expr(columnName) })))
     }
   end chainFKFromFKConfigImpl
 
@@ -517,7 +517,7 @@ object Schema:
     '{
       InstanceUniqueBuilder[A](
         $instance,
-        Seq(${ Expr(columnName) }),
+        Seq(FieldName(${ Expr(columnName) })),
         None,
       )
     }
@@ -530,7 +530,7 @@ object Schema:
     val columnName = extractFieldName(selector)
     '{
       val b = $builder
-      b.copy(columns = b.columns :+ ${ Expr(columnName) })
+      b.copy(columns = b.columns :+ FieldName(${ Expr(columnName) }))
     }
   end instanceUniqueAndImpl
 
@@ -545,7 +545,7 @@ object Schema:
       val builtInst = b.toInstance
       InstanceIndexBuilder[A](
         builtInst,
-        Seq(${ Expr(columnName) }),
+        Seq(FieldName(${ Expr(columnName) })),
         $unique,
         None,
         Seq.empty,
@@ -561,7 +561,7 @@ object Schema:
     '{
       val b         = $builder
       val builtInst = b.toInstance
-      InstanceFKBuilder[A, T](builtInst, Seq(${ Expr(columnName) }))
+      InstanceFKBuilder[A, T](builtInst, Seq(FieldName(${ Expr(columnName) })))
     }
   end chainFKFromUniqueImpl
 
@@ -573,7 +573,7 @@ object Schema:
     '{
       val b         = $builder
       val builtInst = b.toInstance
-      InstanceUniqueBuilder[A](builtInst, Seq(${ Expr(columnName) }), None)
+      InstanceUniqueBuilder[A](builtInst, Seq(FieldName(${ Expr(columnName) })), None)
     }
   end chainUniqueFromUniqueImpl
 
@@ -584,7 +584,7 @@ object Schema:
     val columnName = extractFieldName(selector)
     '{
       val b = $builder
-      InstanceFKBuilder[A, T2](b.instance, b.fromColumns :+ ${ Expr(columnName) })
+      InstanceFKBuilder[A, T2](b.instance, b.fromColumns :+ FieldName(${ Expr(columnName) }))
     }
   end instanceFKAndImpl
 
@@ -594,7 +594,7 @@ object Schema:
       selector: Expr[A => T],
   )(using Quotes): Expr[InstanceWhereGroupColumnBuilder[A, T]] =
     val columnName = extractFieldName(selector)
-    '{ InstanceWhereGroupColumnBuilder[A, T]($builder.instance, ${ Expr(columnName) }, Seq.empty, "and") }
+    '{ InstanceWhereGroupColumnBuilder[A, T]($builder.instance, FieldName(${ Expr(columnName) }), Seq.empty, "and") }
 
   private def groupResultAndImpl[A: Type, T: Type](
       builder: Expr[InstanceWhereGroupResult[A]],
@@ -603,7 +603,7 @@ object Schema:
     val columnName = extractFieldName(selector)
     '{
       val b = $builder
-      InstanceWhereGroupColumnBuilder[A, T](b.instance, ${ Expr(columnName) }, b.conditions, "and")
+      InstanceWhereGroupColumnBuilder[A, T](b.instance, FieldName(${ Expr(columnName) }), b.conditions, "and")
     }
 
   private def groupResultOrImpl[A: Type, T: Type](
@@ -613,7 +613,7 @@ object Schema:
     val columnName = extractFieldName(selector)
     '{
       val b = $builder
-      InstanceWhereGroupColumnBuilder[A, T](b.instance, ${ Expr(columnName) }, b.conditions, "or")
+      InstanceWhereGroupColumnBuilder[A, T](b.instance, FieldName(${ Expr(columnName) }), b.conditions, "or")
     }
 
   private def instanceFKReferencesImpl[A: Type, To: Type, T2: Type](
@@ -633,7 +633,7 @@ object Schema:
         b.instance,
         b.fromColumns,
         toTableInstance.name,
-        Seq(${ Expr(toColumnName) }),
+        Seq(FieldName(${ Expr(toColumnName) })),
         toTableInstance.columnMap,
       )
     }
@@ -650,7 +650,7 @@ object Schema:
         b.instance,
         b.fromColumns,
         b.toTable,
-        b.toColumns :+ ${ Expr(columnName) },
+        b.toColumns :+ FieldName(${ Expr(columnName) }),
         b.toColumnMap,
       )
     }
@@ -669,10 +669,10 @@ val TableAspects = Schema
   */
 final case class InstanceIndexBuilder[A](
     instance: Instance[A],
-    columns: Seq[String],
+    columns: Seq[FieldName],
     unique: Boolean,
-    indexName: Option[String],
-    conditions: Seq[String],
+    indexName: Option[IndexName],
+    conditions: Seq[SqlText],
 ):
   /** Add another column to create a compound index. */
   transparent inline def and[T](inline selector: A => T): InstanceIndexBuilder[A] =
@@ -683,7 +683,7 @@ final case class InstanceIndexBuilder[A](
     Schema.indexWhere(this, selector)
 
   /** Set a custom name for the index. */
-  def named(name: String): InstanceIndexBuilder[A] =
+  def named(name: IndexName): InstanceIndexBuilder[A] =
     copy(indexName = Some(name))
 
   /** Add another index (terminates current index and starts new one). */
@@ -706,7 +706,7 @@ final case class InstanceIndexBuilder[A](
     Schema(toInstance).ddl(ifNotExists)
 
   def toInstance: Instance[A] =
-    val whereClause = if conditions.nonEmpty then Some(conditions.mkString(" and ")) else None
+    val whereClause = Option.when(conditions.nonEmpty)(SqlText(conditions.mkString(" and ")))
     val spec        = IndexSpec[A](columns, indexName, unique, whereClause)
     // Access the table from the instance's implicit context
     given Table[A] = instance.tableEvidence
@@ -727,13 +727,13 @@ end InstanceIndexBuilder
   */
 final case class InstanceWhereColumnBuilder[A, T](
     parent: InstanceIndexBuilder[A],
-    columnName: String,
+    columnName: FieldName,
     operator: String = "and",
 ) extends SchemaWhereOps[InstanceWhereConditionBuilder[A], T]:
   // Look up the column label from the Instance (respects @label annotations)
-  protected def schemaColumnName: String = parent.instance.fieldToLabel(columnName)
+  protected def schemaColumnName: ColumnName = parent.instance.fieldToLabel(columnName)
 
-  protected def completeCondition(condition: String): InstanceWhereConditionBuilder[A] =
+  protected def completeCondition(condition: SqlText): InstanceWhereConditionBuilder[A] =
     InstanceWhereConditionBuilder(parent, parent.conditions :+ condition, operator)
 end InstanceWhereColumnBuilder
 
@@ -741,10 +741,10 @@ end InstanceWhereColumnBuilder
   */
 final case class InstanceWhereConditionBuilder[A](
     instance: Instance[A],
-    columns: Seq[String],
+    columns: Seq[FieldName],
     unique: Boolean,
-    indexName: Option[String],
-    conditions: Seq[String],
+    indexName: Option[IndexName],
+    conditions: Seq[SqlText],
     operator: String,
 ):
   /** Chain another AND condition. */
@@ -761,7 +761,7 @@ final case class InstanceWhereConditionBuilder[A](
   def andGroup(group: InstanceWhereGroupBuilder[A] => InstanceWhereGroupResult[A]): InstanceWhereConditionBuilder[A] =
     val groupBuilder = InstanceWhereGroupBuilder[A](instance)
     val result       = group(groupBuilder)
-    val grouped      = s"(${result.conditions.mkString(s" ${result.operator} ")})"
+    val grouped      = SqlText(s"(${result.conditions.mkString(s" ${result.operator} ")})")
     copy(conditions = conditions :+ grouped, operator = "and")
 
   /** Chain a grouped OR condition with explicit parentheses. Usage:
@@ -770,11 +770,11 @@ final case class InstanceWhereConditionBuilder[A](
   def orGroup(group: InstanceWhereGroupBuilder[A] => InstanceWhereGroupResult[A]): InstanceWhereConditionBuilder[A] =
     val groupBuilder = InstanceWhereGroupBuilder[A](instance)
     val result       = group(groupBuilder)
-    val grouped      = s"(${result.conditions.mkString(s" ${result.operator} ")})"
+    val grouped      = SqlText(s"(${result.conditions.mkString(s" ${result.operator} ")})")
     copy(conditions = conditions :+ grouped, operator = "or")
 
   /** Set a custom name for the index. */
-  def named(name: String): InstanceWhereConditionBuilder[A] =
+  def named(name: IndexName): InstanceWhereConditionBuilder[A] =
     copy(indexName = Some(name))
 
   /** Add another index (terminates current index and starts new one). */
@@ -797,7 +797,7 @@ final case class InstanceWhereConditionBuilder[A](
     Schema(toInstance).ddl(ifNotExists)
 
   def toInstance: Instance[A] =
-    val whereClause = if conditions.nonEmpty then Some(conditions.mkString(s" $operator ")) else None
+    val whereClause = Option.when(conditions.nonEmpty)(SqlText(conditions.mkString(s" $operator ")))
     val spec        = IndexSpec[A](columns, indexName, unique, whereClause)
     given Table[A]  = instance.tableEvidence
     Instance[A](
@@ -814,7 +814,7 @@ end InstanceWhereConditionBuilder
 object InstanceWhereConditionBuilder:
   def apply[A](
       parent: InstanceIndexBuilder[A],
-      conditions: Seq[String],
+      conditions: Seq[SqlText],
       operator: String,
   ): InstanceWhereConditionBuilder[A] =
     InstanceWhereConditionBuilder(
@@ -831,7 +831,7 @@ end InstanceWhereConditionBuilder
   */
 final case class InstanceFKBuilder[A, T](
     instance: Instance[A],
-    fromColumns: Seq[String],
+    fromColumns: Seq[FieldName],
 ):
   /** Add another column to create a compound foreign key. */
   transparent inline def and[T2](inline selector: A => T2): InstanceFKBuilder[A, T2] =
@@ -848,13 +848,13 @@ end InstanceFKBuilder
   */
 final case class InstanceFKConfigBuilder[A, To](
     instance: Instance[A],
-    fromColumns: Seq[String],
-    toTable: String,
-    toColumns: Seq[String],
+    fromColumns: Seq[FieldName],
+    toTable: TableName,
+    toColumns: Seq[FieldName],
     toColumnMap: Map[String, Column[?]] = Map.empty,
     onDeleteAction: ForeignKeyAction = ForeignKeyAction.NoAction,
     onUpdateAction: ForeignKeyAction = ForeignKeyAction.NoAction,
-    constraintName: Option[String] = None,
+    constraintName: Option[ConstraintName] = None,
 ):
   def onDelete(action: ForeignKeyAction): InstanceFKConfigBuilder[A, To] =
     copy(onDeleteAction = action)
@@ -862,7 +862,7 @@ final case class InstanceFKConfigBuilder[A, To](
   def onUpdate(action: ForeignKeyAction): InstanceFKConfigBuilder[A, To] =
     copy(onUpdateAction = action)
 
-  def named(name: String): InstanceFKConfigBuilder[A, To] =
+  def named(name: ConstraintName): InstanceFKConfigBuilder[A, To] =
     copy(constraintName = Some(name))
 
   /** Add another index (terminates current FK and starts new index). */
@@ -907,9 +907,9 @@ end InstanceFKConfigBuilder
   */
 final case class InstanceFKRefBuilder[A, To, T](
     instance: Instance[A],
-    fromColumns: Seq[String],
-    toTable: String,
-    toColumns: Seq[String],
+    fromColumns: Seq[FieldName],
+    toTable: TableName,
+    toColumns: Seq[FieldName],
     toColumnMap: Map[String, Column[?]] = Map.empty,
 ):
   /** Add another referenced column (for compound foreign keys). */
@@ -922,7 +922,7 @@ final case class InstanceFKRefBuilder[A, To, T](
   def onUpdate(action: ForeignKeyAction): InstanceFKConfigBuilder[A, To] =
     toConfig.onUpdate(action)
 
-  def named(name: String): InstanceFKConfigBuilder[A, To] =
+  def named(name: ConstraintName): InstanceFKConfigBuilder[A, To] =
     toConfig.named(name)
 
   /** Add another index (terminates current FK and starts new index). */
@@ -950,15 +950,15 @@ end InstanceFKRefBuilder
   */
 final case class InstanceUniqueBuilder[A](
     instance: Instance[A],
-    columns: Seq[String],
-    constraintName: Option[String],
+    columns: Seq[FieldName],
+    constraintName: Option[ConstraintName],
 ):
   /** Add another column to create a compound unique constraint. */
   transparent inline def and[T](inline selector: A => T): InstanceUniqueBuilder[A] =
     Schema.uniqueAnd(this, selector)
 
   /** Set a custom name for the constraint. */
-  def named(name: String): InstanceUniqueBuilder[A] =
+  def named(name: ConstraintName): InstanceUniqueBuilder[A] =
     copy(constraintName = Some(name))
 
   /** Add another index (terminates current unique constraint and starts new index). */
@@ -1016,14 +1016,14 @@ final case class InstanceWhereGroupBuilder[A](
   */
 final case class InstanceWhereGroupColumnBuilder[A, T](
     instance: Instance[A],
-    columnName: String,
-    previousConditions: Seq[String],
+    columnName: FieldName,
+    previousConditions: Seq[SqlText],
     operator: String,
 ) extends SchemaWhereOps[InstanceWhereGroupResult[A], T]:
   // Look up the column label from the Instance (respects @label annotations)
-  protected def schemaColumnName: String = instance.fieldToLabel(columnName)
+  protected def schemaColumnName: ColumnName = instance.fieldToLabel(columnName)
 
-  protected def completeCondition(condition: String): InstanceWhereGroupResult[A] =
+  protected def completeCondition(condition: SqlText): InstanceWhereGroupResult[A] =
     InstanceWhereGroupResult(instance, previousConditions :+ condition, operator)
 end InstanceWhereGroupColumnBuilder
 
@@ -1031,7 +1031,7 @@ end InstanceWhereGroupColumnBuilder
   */
 final case class InstanceWhereGroupResult[A](
     instance: Instance[A],
-    conditions: Seq[String],
+    conditions: Seq[SqlText],
     operator: String,
 ):
   /** Chain another AND condition in the group. */
@@ -1058,29 +1058,29 @@ extension [A, T](builder: InstanceWhereColumnBuilder[A, Json[T]])
   def jsonContains(
       value: T
   )(using codec: zio.json.JsonCodec[T], dialect: Dialect & JsonSupport): InstanceWhereConditionBuilder[A] =
-    val jsonValue = codec.encoder.encodeJson(value, None).toString
-    val condition = dialect.jsonContainsSql(builder.parent.instance.fieldToLabel(builder.columnName), jsonValue)
+    val jsonValue = JsonText(codec.encoder.encodeJson(value, None).toString)
+    val condition = dialect.jsonContainsSql(builder.parent.instance.fieldToLabel(builder.columnName).sql, jsonValue)
     InstanceWhereConditionBuilder(builder.parent, builder.parent.conditions :+ condition, builder.operator)
 
   /** Check if JSON column has the specified key. PostgreSQL: `column ? 'key'` MySQL:
     * `JSON_CONTAINS_PATH(column, 'one', '$.key')`
     */
   def jsonHasKey(key: String)(using dialect: Dialect & JsonSupport): InstanceWhereConditionBuilder[A] =
-    val condition = dialect.jsonHasKeySql(builder.parent.instance.fieldToLabel(builder.columnName), key)
+    val condition = dialect.jsonHasKeySql(builder.parent.instance.fieldToLabel(builder.columnName).sql, key)
     InstanceWhereConditionBuilder(builder.parent, builder.parent.conditions :+ condition, builder.operator)
 
   /** Check if JSON column has any of the specified keys. PostgreSQL: `column ?| array['key1', 'key2']` MySQL:
     * `JSON_CONTAINS_PATH(column, 'one', '$.key1', '$.key2')`
     */
   def jsonHasAnyKey(keys: Seq[String])(using dialect: Dialect & JsonSupport): InstanceWhereConditionBuilder[A] =
-    val condition = dialect.jsonHasAnyKeySql(builder.parent.instance.fieldToLabel(builder.columnName), keys)
+    val condition = dialect.jsonHasAnyKeySql(builder.parent.instance.fieldToLabel(builder.columnName).sql, keys)
     InstanceWhereConditionBuilder(builder.parent, builder.parent.conditions :+ condition, builder.operator)
 
   /** Check if JSON column has all of the specified keys. PostgreSQL: `column ?& array['key1', 'key2']` MySQL:
     * `JSON_CONTAINS_PATH(column, 'all', '$.key1', '$.key2')`
     */
   def jsonHasAllKeys(keys: Seq[String])(using dialect: Dialect & JsonSupport): InstanceWhereConditionBuilder[A] =
-    val condition = dialect.jsonHasAllKeysSql(builder.parent.instance.fieldToLabel(builder.columnName), keys)
+    val condition = dialect.jsonHasAllKeysSql(builder.parent.instance.fieldToLabel(builder.columnName).sql, keys)
     InstanceWhereConditionBuilder(builder.parent, builder.parent.conditions :+ condition, builder.operator)
 
   /** Start building a JSON path comparison. Usage: `.where(_.data).jsonPath("user.email").eql("test@example.com")`
@@ -1093,36 +1093,30 @@ end extension
   */
 final case class JsonPathBuilder[A](
     parent: InstanceIndexBuilder[A],
-    columnName: String,
+    columnName: ColumnName,
     path: String,
     operator: String,
 )(using dialect: Dialect & JsonSupport):
 
   /** Equals comparison on extracted JSON path value. */
   def eql(value: String): InstanceWhereConditionBuilder[A] =
-    val escaped   = value.replace("'", "''")
-    val condition = s"${dialect.jsonExtractSql(columnName, path)} = '$escaped'"
-    InstanceWhereConditionBuilder(parent, parent.conditions :+ condition, operator)
+    where(s"= ${SqlValue.quote(value)}")
 
   /** Not equals comparison on extracted JSON path value. */
   def neql(value: String): InstanceWhereConditionBuilder[A] =
-    val escaped   = value.replace("'", "''")
-    val condition = s"${dialect.jsonExtractSql(columnName, path)} <> '$escaped'"
-    InstanceWhereConditionBuilder(parent, parent.conditions :+ condition, operator)
+    where(s"<> ${SqlValue.quote(value)}")
 
   /** LIKE pattern matching on extracted JSON path value. */
   def like(pattern: String): InstanceWhereConditionBuilder[A] =
-    val escaped   = pattern.replace("'", "''")
-    val condition = s"${dialect.jsonExtractSql(columnName, path)} like '$escaped'"
-    InstanceWhereConditionBuilder(parent, parent.conditions :+ condition, operator)
+    where(s"like ${SqlValue.quote(pattern)}")
 
   /** IS NULL check on extracted JSON path value. */
-  def isNull: InstanceWhereConditionBuilder[A] =
-    val condition = s"${dialect.jsonExtractSql(columnName, path)} is null"
-    InstanceWhereConditionBuilder(parent, parent.conditions :+ condition, operator)
+  def isNull: InstanceWhereConditionBuilder[A] = where("is null")
 
   /** IS NOT NULL check on extracted JSON path value. */
-  def isNotNull: InstanceWhereConditionBuilder[A] =
-    val condition = s"${dialect.jsonExtractSql(columnName, path)} is not null"
+  def isNotNull: InstanceWhereConditionBuilder[A] = where("is not null")
+
+  private def where(predicate: String): InstanceWhereConditionBuilder[A] =
+    val condition = SqlText(s"${dialect.jsonExtractSql(columnName.sql, path)} $predicate")
     InstanceWhereConditionBuilder(parent, parent.conditions :+ condition, operator)
 end JsonPathBuilder

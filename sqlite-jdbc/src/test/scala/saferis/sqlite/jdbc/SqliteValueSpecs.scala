@@ -31,6 +31,9 @@ object SqliteValueSpecs:
       ratio: Double,
   ) derives Table
 
+  @tableName("lite_add")
+  final case class Added(@key id: Int) derives Table
+
   private def failure(exit: Exit[SaferisError, Any]): Option[SaferisError] = exit match
     case Exit.Failure(cause) => cause.failureOption
     case _                   => None
@@ -65,8 +68,8 @@ object SqliteValueSpecs:
           exit <- sql"insert into lite_child (id, parent_id) values (1, 99)".dml.exit
         yield assertTrue:
           failure(exit) match
-            case Some(SaferisError.ConstraintViolation("23503", _, _, _)) => true
-            case _                                                        => false
+            case Some(SaferisError.ConstraintViolation(SqlState.ForeignKeyViolation, _, _, _)) => true
+            case _                                                                             => false
       ,
       test("a not-null violation is 23502"):
         for
@@ -75,8 +78,8 @@ object SqliteValueSpecs:
           exit <- sql"insert into lite_not_null (id, name) values (1, null)".dml.exit
         yield assertTrue:
           failure(exit) match
-            case Some(SaferisError.ConstraintViolation("23502", _, _, _)) => true
-            case _                                                        => false
+            case Some(SaferisError.ConstraintViolation(SqlState.NotNullViolation, _, _, _)) => true
+            case _                                                                          => false
       ,
       test("a real column keeps a Double's precision and a Float's value"):
         for
@@ -105,9 +108,18 @@ object SqliteValueSpecs:
         for
           _    <- sql"drop table if exists lite_drop".dml
           _    <- sql"create table lite_drop (id integer primary key, gone text, kept text)".dml
-          _    <- SqlFragment.text(summon[Dialect].dropColumnSql("lite_drop", "gone")).dml
+          _    <- SqlFragment.text(summon[Dialect].dropColumnSql(TableName("lite_drop"), ColumnName("gone"))).dml
           _    <- sql"insert into lite_drop (id, kept) values (1, ${"k"})".dml
           read <- sql"select kept from lite_drop where id = 1".queryValue[String]
-        yield assertTrue(read.contains("k")),
+        yield assertTrue(read.contains("k"))
+      ,
+      test("an added column has the name it was given"):
+        for
+          _    <- dropTable[Added](ifExists = true)
+          _    <- createTable[Added]()
+          _    <- addColumn[Added, String](ColumnName("note"))
+          _    <- sql"insert into lite_add (id, note) values (1, ${"n"})".dml
+          read <- sql"select note from lite_add where id = 1".queryValue[String]
+        yield assertTrue(read.contains("n")),
     ) @@ TestAspect.sequential
 end SqliteValueSpecs

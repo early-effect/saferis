@@ -119,8 +119,8 @@ shown below the snippet:""",
       md"""Drivers call `SqlState.classify`. Application code matches the case. There is no `fromThrowable`.""",
       exampleValue {
         val unique = SqlState.classify(
-          ServerError(Some("23505"), "duplicate key", Some("users_email_key")),
-          Some("insert into users values ($1)"),
+          ServerError(Some(SqlState.UniqueViolation), "duplicate key", Some(ConstraintName("users_email_key"))),
+          Some(SqlText("insert into users values ($1)")),
           _ => false,
         )
         val other = SqlState.classify(ServerError(None, "something went wrong"), None, _ => false)
@@ -149,8 +149,8 @@ shown below the snippet:""",
             e.message
 
         val sample = SqlState.classify(
-          ServerError(Some("23505"), "duplicate key", Some("users_email_key")),
-          Some("insert into users values ($1)"),
+          ServerError(Some(SqlState.UniqueViolation), "duplicate key", Some(ConstraintName("users_email_key"))),
+          Some(SqlText("insert into users values ($1)")),
           _ => false,
         )
         logError(sample)

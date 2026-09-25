@@ -93,7 +93,7 @@ private object SqliteAdapter extends StandardJdbcAdapter:
       case "timestamp" | "datetime" =>
         parsed(rs, column, SqlType.Timestamp)(t => SqlValue.Timestamp(LocalDateTime.parse(t)))
       case "timestamptz"    => parsed(rs, column, SqlType.Timestamptz)(t => SqlValue.Timestamptz(Instant.parse(t)))
-      case "json" | "jsonb" => ref(SqlType.Jsonb, rs.getString(i))(SqlValue.Jsonb(_))(rs)
+      case "json" | "jsonb" => ref(SqlType.Jsonb, rs.getString(i))(json => SqlValue.Jsonb(JsonText(json)))(rs)
       case "uuid"           => parsed(rs, column, SqlType.Uuid)(t => SqlValue.Uuid(UUID.fromString(t)))
       case _                => byStorageClass(rs, column)
     end match
@@ -127,21 +127,22 @@ private object SqliteAdapter extends StandardJdbcAdapter:
 
   /** SQLite has result codes, not SQLSTATEs. Map the ones `SqlState.classify` names. */
   override def serverError(e: SQLException): ServerError =
-    val base              = super.serverError(e)
-    def as(state: String) = base.copy(sqlState = Some(state))
+    val base                = super.serverError(e)
+    def as(state: SqlState) = base.copy(sqlState = Some(state))
     e match
       case sqlite: SQLiteException =>
         sqlite.getResultCode match
-          case SQLiteErrorCode.SQLITE_CONSTRAINT_UNIQUE | SQLiteErrorCode.SQLITE_CONSTRAINT_PRIMARYKEY => as("23505")
-          case SQLiteErrorCode.SQLITE_CONSTRAINT_FOREIGNKEY                                            => as("23503")
-          case SQLiteErrorCode.SQLITE_CONSTRAINT_NOTNULL                                               => as("23502")
-          case SQLiteErrorCode.SQLITE_CONSTRAINT_CHECK                                                 => as("23514")
-          case SQLiteErrorCode.SQLITE_BUSY | SQLiteErrorCode.SQLITE_LOCKED                             => as("40001")
-          case SQLiteErrorCode.SQLITE_INTERRUPT                                                        => as("57014")
-          case SQLiteErrorCode.SQLITE_ERROR if base.message.contains("syntax error")                   => as("42601")
-          case SQLiteErrorCode.SQLITE_ERROR if base.message.contains("no such table")                  => as("42P01")
-          case SQLiteErrorCode.SQLITE_ERROR if base.message.contains("no such column")                 => as("42703")
-          case _                                                                                       => base
+          case SQLiteErrorCode.SQLITE_CONSTRAINT_UNIQUE | SQLiteErrorCode.SQLITE_CONSTRAINT_PRIMARYKEY =>
+            as(SqlState.UniqueViolation)
+          case SQLiteErrorCode.SQLITE_CONSTRAINT_FOREIGNKEY                => as(SqlState.ForeignKeyViolation)
+          case SQLiteErrorCode.SQLITE_CONSTRAINT_NOTNULL                   => as(SqlState.NotNullViolation)
+          case SQLiteErrorCode.SQLITE_CONSTRAINT_CHECK                     => as(SqlState.CheckViolation)
+          case SQLiteErrorCode.SQLITE_BUSY | SQLiteErrorCode.SQLITE_LOCKED => as(SqlState.SerializationFailure)
+          case SQLiteErrorCode.SQLITE_INTERRUPT                            => as(SqlState.QueryCanceled)
+          case SQLiteErrorCode.SQLITE_ERROR if base.message.contains("syntax error")   => as(SqlState.SyntaxError)
+          case SQLiteErrorCode.SQLITE_ERROR if base.message.contains("no such table")  => as(SqlState.UndefinedTable)
+          case SQLiteErrorCode.SQLITE_ERROR if base.message.contains("no such column") => as(SqlState.UndefinedColumn)
+          case _                                                                       => base
       case _ => base
     end match
   end serverError

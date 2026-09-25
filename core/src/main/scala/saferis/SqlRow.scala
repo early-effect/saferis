@@ -3,7 +3,7 @@ package saferis
 import zio.Chunk
 
 /** One materialized row. Cells are already `SqlValue`. The callback may retain the row. */
-final case class SqlRow(labels: Chunk[String], cells: Chunk[SqlValue]):
+final case class SqlRow(labels: Chunk[ColumnName], cells: Chunk[SqlValue]):
   def width: Int = cells.length
 
   def at(index: Int): Either[DecodeError, SqlValue] =
@@ -11,7 +11,7 @@ final case class SqlRow(labels: Chunk[String], cells: Chunk[SqlValue]):
     else Right(cells(index))
 
   /** Case-insensitive first match, which is what `ResultSet.getString(label)` does. */
-  def get(label: String): Either[DecodeError, SqlValue] =
+  def get(label: ColumnName): Either[DecodeError, SqlValue] =
     val index = labels.indexWhere(_.equalsIgnoreCase(label))
     if index < 0 then Left(DecodeError(s"missing column $label"))
     else at(index)

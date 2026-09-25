@@ -121,13 +121,13 @@ private final class JdbcConnection(
         ZIO.when(touched)(ZIO.attemptBlocking(conn.setAutoCommit(true)).ignore) *>
           ZIO.attemptBlocking(conn.close()).ignore
 
-  private def runExec(command: SqlCommand, sql: String, timeout: Option[Duration])(using
+  private def runExec(command: SqlCommand, sql: SqlText, timeout: Option[Duration])(using
       Trace
   ): IO[SaferisError, Long] =
     withStatement(conn, command, sql, timeout, None): ps =>
       blocking(Some(sql), ps)(ps.executeLargeUpdate())
 
-  private def runRows(command: SqlCommand, sql: String, timeout: Option[Duration])(using
+  private def runRows(command: SqlCommand, sql: SqlText, timeout: Option[Duration])(using
       Trace
   ): IO[SaferisError, Chunk[SqlRow]] =
     withStatement(conn, command, sql, timeout, None): ps =>
@@ -138,7 +138,7 @@ private final class JdbcConnection(
           case Left(err)   => ZIO.fail(err)
           case Right(rows) => ZIO.succeed(rows)
 
-  private def runAtMostOne(command: SqlCommand, sql: String, timeout: Option[Duration])(using
+  private def runAtMostOne(command: SqlCommand, sql: SqlText, timeout: Option[Duration])(using
       Trace
   ): IO[SaferisError, Option[SqlRow]] =
     withStatement(conn, command, sql, timeout, None): ps =>
@@ -154,7 +154,7 @@ private final class JdbcConnection(
 
   private def runCursor(
       command: SqlCommand,
-      sql: String,
+      sql: SqlText,
       timeout: Option[Duration],
   ): ZStream[Any, SaferisError, SqlRow] =
     ZStream.unwrapScoped:
@@ -190,7 +190,7 @@ private final class JdbcConnection(
   private def openStatement(
       conn: Connection,
       command: SqlCommand,
-      sql: String,
+      sql: SqlText,
       timeout: Option[Duration],
       fetchSize: Option[Int],
   )(using Trace): IO[SaferisError, PreparedStatement] =
@@ -210,7 +210,7 @@ private final class JdbcConnection(
   private def withStatement[A](
       conn: Connection,
       command: SqlCommand,
-      sql: String,
+      sql: SqlText,
       timeout: Option[Duration],
       fetchSize: Option[Int],
   )(use: PreparedStatement => IO[SaferisError, A])(using Trace): IO[SaferisError, A] =
@@ -222,27 +222,27 @@ private final class JdbcConnection(
   /** Interrupting the wait calls `Statement.cancel`. JDBC drivers stop a running statement that way, not through
     * `Thread.interrupt`.
     */
-  private def blocking[A](sql: Option[String], ps: PreparedStatement)(thunk: => A)(using Trace): IO[SaferisError, A] =
+  private def blocking[A](sql: Option[SqlText], ps: PreparedStatement)(thunk: => A)(using Trace): IO[SaferisError, A] =
     ZIO
       .attemptBlockingCancelable(thunk)(ZIO.attemptBlocking(ps.cancel()).ignore)
       .mapError(t => classifyThrowable(t, sql))
 
-  private def driver[A](sql: Option[String], effect: IO[Throwable, A])(using Trace): IO[SaferisError, A] =
+  private def driver[A](sql: Option[SqlText], effect: IO[Throwable, A])(using Trace): IO[SaferisError, A] =
     effect.mapError(t => classifyThrowable(t, sql))
 
-  private def render(command: SqlCommand): String =
+  private def render(command: SqlCommand): SqlText =
     command.render((_, _) => "?")
 
-  private def classifyThrowable(t: Throwable, sql: Option[String]): SaferisError = t match
+  private def classifyThrowable(t: Throwable, sql: Option[SqlText]): SaferisError = t match
     case e: java.sql.SQLTimeoutException =>
       SqlState.classify(
-        ServerError(Some("57014"), messageOf(e), None, Some(e.getErrorCode)),
+        ServerError(Some(SqlState.QueryCanceled), messageOf(e), None, Some(e.getErrorCode)),
         sql,
         config.retry,
       )
     case e: SQLException =>
       SqlState.classify(adapter.serverError(e), sql, config.retry)
-    case e: java.io.IOException => SaferisError.ConnectionLost("08000", messageOf(e), sql)
+    case e: java.io.IOException => SaferisError.ConnectionLost(SqlState.ConnectionException, messageOf(e), sql)
     case e                      => SaferisError.Unexpected(messageOf(e))
 
   /** Parameters bind in order. The first value the adapter refuses stops the bind. */
@@ -263,8 +263,8 @@ private object JdbcReads:
       (1 to meta.getColumnCount).map: index =>
         JdbcColumn(
           index = index,
-          label = Option(meta.getColumnLabel(index)).getOrElse(""),
-          typeName = Option(meta.getColumnTypeName(index)).getOrElse("").toLowerCase(Locale.ROOT),
+          label = ColumnName(Option(meta.getColumnLabel(index)).getOrElse("")),
+          typeName = TypeName(Option(meta.getColumnTypeName(index)).getOrElse("").toLowerCase(Locale.ROOT)),
           jdbcType = meta.getColumnType(index),
         )
   end columns

@@ -15,65 +15,65 @@ package saferis
   */
 trait SchemaWhereOps[Result, T]:
   /** The column name for the condition */
-  protected def schemaColumnName: String
+  protected def schemaColumnName: ColumnName
 
   /** Create the result with the given condition string */
-  protected def completeCondition(condition: String): Result
+  protected def completeCondition(condition: SqlText): Result
 
   /** Equals comparison */
   def eql(value: T)(using encoder: Encoder[T]): Result =
-    completeCondition(s"$schemaColumnName = ${encoder.literal(value)}")
+    completeCondition(SqlText(s"$schemaColumnName = ${encoder.literal(value)}"))
 
   /** Not equals comparison */
   def neql(value: T)(using encoder: Encoder[T]): Result =
-    completeCondition(s"$schemaColumnName <> ${encoder.literal(value)}")
+    completeCondition(SqlText(s"$schemaColumnName <> ${encoder.literal(value)}"))
 
   /** Greater than comparison */
   def gt(value: T)(using encoder: Encoder[T]): Result =
-    completeCondition(s"$schemaColumnName > ${encoder.literal(value)}")
+    completeCondition(SqlText(s"$schemaColumnName > ${encoder.literal(value)}"))
 
   /** Greater than or equal comparison */
   def gte(value: T)(using encoder: Encoder[T]): Result =
-    completeCondition(s"$schemaColumnName >= ${encoder.literal(value)}")
+    completeCondition(SqlText(s"$schemaColumnName >= ${encoder.literal(value)}"))
 
   /** Less than comparison */
   def lt(value: T)(using encoder: Encoder[T]): Result =
-    completeCondition(s"$schemaColumnName < ${encoder.literal(value)}")
+    completeCondition(SqlText(s"$schemaColumnName < ${encoder.literal(value)}"))
 
   /** Less than or equal comparison */
   def lte(value: T)(using encoder: Encoder[T]): Result =
-    completeCondition(s"$schemaColumnName <= ${encoder.literal(value)}")
+    completeCondition(SqlText(s"$schemaColumnName <= ${encoder.literal(value)}"))
 
   /** IS NULL check */
   def isNull: Result =
-    completeCondition(s"$schemaColumnName is null")
+    completeCondition(SqlText(s"$schemaColumnName is null"))
 
   /** IS NOT NULL check */
   def isNotNull: Result =
-    completeCondition(s"$schemaColumnName is not null")
+    completeCondition(SqlText(s"$schemaColumnName is not null"))
 
   /** LIKE pattern matching (for String columns) */
   def like(pattern: String)(using ev: T =:= String): Result =
     val escaped = pattern.replace("'", "''")
-    completeCondition(s"$schemaColumnName like '$escaped'")
+    completeCondition(SqlText(s"$schemaColumnName like '$escaped'"))
 
   /** NOT LIKE pattern matching (for String columns) */
   def notLike(pattern: String)(using ev: T =:= String): Result =
     val escaped = pattern.replace("'", "''")
-    completeCondition(s"$schemaColumnName not like '$escaped'")
+    completeCondition(SqlText(s"$schemaColumnName not like '$escaped'"))
 
   /** IN clause */
   def in(values: Seq[T])(using encoder: Encoder[T]): Result =
     val literals = values.map(encoder.literal).mkString(", ")
-    completeCondition(s"$schemaColumnName in ($literals)")
+    completeCondition(SqlText(s"$schemaColumnName in ($literals)"))
 
   /** NOT IN clause */
   def notIn(values: Seq[T])(using encoder: Encoder[T]): Result =
     val literals = values.map(encoder.literal).mkString(", ")
-    completeCondition(s"$schemaColumnName not in ($literals)")
+    completeCondition(SqlText(s"$schemaColumnName not in ($literals)"))
 
   /** BETWEEN clause */
   def between(low: T, high: T)(using encoder: Encoder[T]): Result =
-    completeCondition(s"$schemaColumnName between ${encoder.literal(low)} and ${encoder.literal(high)}")
+    completeCondition(SqlText(s"$schemaColumnName between ${encoder.literal(low)} and ${encoder.literal(high)}"))
 
 end SchemaWhereOps

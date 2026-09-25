@@ -107,7 +107,7 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
           .withIndex(_.data)
           .where(_.data)
           .jsonHasKey("user's_field")
-          .named("idx_users_field")
+          .named(IndexName("idx_users_field"))
           .build
 
         for
@@ -130,7 +130,7 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
           .where(_.data)
           .jsonPath("user's_email")
           .eql("test@test.com")
-          .named("idx_users_email_path")
+          .named(IndexName("idx_users_email_path"))
           .build
 
         for
@@ -150,7 +150,7 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
       test("SQL injection attempt in JSON key is properly escaped"):
         // Attempt SQL injection via JSON key - this should be safely escaped
         val maliciousKey = "'); DROP TABLE json_test_profiles; --"
-        val sql          = PostgresDialect.jsonHasKeySql("data", maliciousKey)
+        val sql          = PostgresDialect.jsonHasKeySql(SqlText("data"), maliciousKey)
 
         // The escaped SQL should have the single quote doubled: ' -> ''
         // This means the injection attempt becomes a string literal, not SQL syntax
@@ -162,7 +162,7 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
       ,
       test("SQL injection attempt in JSON path is properly escaped"):
         val maliciousPath = "field'); DELETE FROM users; --"
-        val sql           = PostgresDialect.jsonExtractSql("data", maliciousPath)
+        val sql           = PostgresDialect.jsonExtractSql(SqlText("data"), maliciousPath)
 
         // The single quote after 'field' is escaped to ''
         assertTrue(

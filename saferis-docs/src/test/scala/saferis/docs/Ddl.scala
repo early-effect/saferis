@@ -62,13 +62,13 @@ ddl.dropTable[Customer](ifExists = true)
 ddl.truncateTable[Customer]()
 
 // Add column
-ddl.addColumn[Customer, String]("new_column")
+ddl.addColumn[Customer, String](ColumnName("new_column"))
 
 // Drop column
-ddl.dropColumn[Customer]("old_column")
+ddl.dropColumn[Customer](ColumnName("old_column"))
 
 // Drop index
-ddl.dropIndex("idx_name", ifExists = true)
+ddl.dropIndex(IndexName("idx_name"), ifExists = true)
 ```"""
     ),
     section("createTable Options")(
@@ -111,7 +111,7 @@ ddl.createTable[MyTable](createIndexes = false)
         Schema[SchemaUser]
           .withIndex(_.name)
           .and(_.status)
-          .named("idx_name_status")
+          .named(IndexName("idx_name_status"))
           .ddl()
           .sql
       }.assert(sql => assertTrue(sql.contains("idx_name_status"))),
@@ -175,9 +175,9 @@ ddl.createTable[MyTable](createIndexes = false)
           _ <- ddl.createTable[Job](createIndexes = false)
           // Create a partial index for pending jobs with retry times
           _ <- ddl.createIndex[Job](
-            "idx_pending_retry",
-            Seq("retryat"),
-            where = Some("status = 'pending'"),
+            IndexName("idx_pending_retry"),
+            Seq(ColumnName("retryat")),
+            where = Some(SqlText("status = 'pending'")),
           )
           _    <- dml.insert(Job(-1, "pending", Some(java.time.Instant.now())))
           _    <- dml.insert(Job(-1, "completed", None))

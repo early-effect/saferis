@@ -25,9 +25,9 @@ object DialectOverrideSpecs extends ZIOSpecDefault:
       final case class CustomId(value: String)
 
       given customIdEncoder: Encoder[CustomId] with
-        def sqlType: SqlType                                    = SqlType.VarChar
-        def encode(id: CustomId): SqlValue                      = SqlValue.VarChar(id.value)
-        override def columnType(using dialect: Dialect): String = "varchar(50)"
+        def sqlType: SqlType                                        = SqlType.VarChar
+        def encode(id: CustomId): SqlValue                          = SqlValue.VarChar(id.value)
+        override def columnType(using dialect: Dialect): ColumnType = ColumnType("varchar(50)")
 
       // The MySQL dialect should be in scope
       val dialect     = summon[Dialect]

@@ -84,7 +84,12 @@ trait StandardJdbcAdapter extends JdbcAdapter:
     ref(tpe, rs.getString(column.index))(text => SqlValue.Other(ServerType.Named(column.typeName), text))(rs)
 
   def serverError(e: SQLException): ServerError =
-    ServerError(Option(e.getSQLState), StandardJdbcAdapter.messageOf(e), None, Some(e.getErrorCode))
+    ServerError(
+      Option(e.getSQLState).flatMap(SqlState.parse),
+      StandardJdbcAdapter.messageOf(e),
+      None,
+      Some(e.getErrorCode),
+    )
 
   /** The `java.sql.Types` code for a typed null. */
   protected def jdbcType(tpe: SqlType): Int = tpe match

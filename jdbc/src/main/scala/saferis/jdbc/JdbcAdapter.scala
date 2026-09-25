@@ -1,8 +1,10 @@
 package saferis.jdbc
 
+import saferis.ColumnName
 import saferis.ServerError
 import saferis.SaferisError
 import saferis.SqlValue
+import saferis.TypeName
 
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -24,7 +26,7 @@ enum CursorStrategy:
 end CursorStrategy
 
 /** One result column as the driver describes it. `typeName` is lower case. `jdbcType` is a `java.sql.Types` code. */
-final case class JdbcColumn(index: Int, label: String, typeName: String, jdbcType: Int)
+final case class JdbcColumn(index: Int, label: ColumnName, typeName: TypeName, jdbcType: Int)
 
 /** What a database does through `java.sql` that the SQL dialect does not: bind, read, server errors, and cursors.
   *

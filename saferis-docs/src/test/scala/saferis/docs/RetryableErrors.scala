@@ -52,8 +52,8 @@ object RetryableErrors extends SaferisDocSpecSuite:
 
         val session = PostgresJdbc.layer(JdbcSessionConfig(retry = databricks))
         val vendor  = SqlState.classify(
-          ServerError(Some("8000"), "http blip", vendorCode = Some(8000)),
-          Some("select 1"),
+          ServerError(None, "http blip", vendorCode = Some(8000)),
+          Some(SqlText("select 1")),
           databricks,
         )
         (vendor, session)
