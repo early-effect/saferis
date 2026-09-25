@@ -1,6 +1,7 @@
 package saferis
 
 import zio.Trace
+import zio.ZIO
 
 /** Type-safe aggregate function DSL for SQL aggregate operations.
   *
@@ -38,27 +39,29 @@ enum AggregateFunction(val sql: String):
 
 /** Base trait for aggregate expressions */
 sealed trait AggregateExpr[T]:
-  def toSql: String
-  def writes: Seq[Write[?]]
+  def toFragment: SqlFragment
 
 /** Aggregate function applied to a column */
 final case class ColumnAggregate[T](function: AggregateFunction, column: Column[T]) extends AggregateExpr[T]:
-  def toSql: String         = s"${function.sql}(${column.label})"
-  def writes: Seq[Write[?]] = Seq.empty
+  def toFragment: SqlFragment = SqlFragment.text(s"${function.sql}(${column.label})")
 
   /** Wrap the aggregate in COALESCE with a default value */
   def coalesce(default: T)(using enc: Encoder[T]): CoalesceExpr[T] =
-    CoalesceExpr(this, default, enc)
+    CoalesceExpr(this, enc.encode(default))
 
 /** COALESCE wrapper for aggregate expressions */
-final case class CoalesceExpr[T](expr: AggregateExpr[T], default: T, encoder: Encoder[T]) extends AggregateExpr[T]:
-  def toSql: String         = s"coalesce(${expr.toSql}, ?)"
-  def writes: Seq[Write[?]] = expr.writes :+ encoder(default)
+final case class CoalesceExpr[T](expr: AggregateExpr[T], default: SqlValue) extends AggregateExpr[T]:
+  def toFragment: SqlFragment =
+    SqlFragment
+      .text("coalesce(")
+      .append(expr.toFragment)
+      .append(SqlFragment.text(", "))
+      .append(SqlFragment.param(default))
+      .append(SqlFragment.text(")"))
 
 /** COUNT(*) aggregate */
 case object CountAll extends AggregateExpr[Long]:
-  def toSql: String         = "count(*)"
-  def writes: Seq[Write[?]] = Seq.empty
+  def toFragment: SqlFragment = SqlFragment.text("count(*)")
 
 // ============================================================================
 // Column Extensions for Aggregates
@@ -102,17 +105,14 @@ final case class AggregateQuery[A, T](
   /** Build the SELECT aggregate SQL */
   def build: SqlFragment =
     val fromClause = tableAlias.fold(tableName)(a => s"$tableName as ${a.value}")
-    var sql        = s"select ${aggregate.toSql} from $fromClause"
-
-    if wherePredicates.nonEmpty then
+    val head = SqlFragment.text(s"select ").append(aggregate.toFragment).append(SqlFragment.text(s" from $fromClause"))
+    if wherePredicates.isEmpty then head
+    else
       val whereJoined = Placeholder.join(wherePredicates, " and ")
-      sql = sql + s" where ${whereJoined.sql}"
-
-    val allWrites = aggregate.writes ++ wherePredicates.flatMap(_.writes)
-    SqlFragment(sql, allWrites)
+      head.append(SqlFragment.text(" where ")).append(SqlFragment(whereJoined))
   end build
 
   /** Execute and return the aggregate value */
-  inline def queryValue[R](using dec: Decoder[R], trace: Trace): ScopedQuery[Option[R]] =
+  inline def queryValue[R](using RowDecoder[R], Trace): ZIO[SqlSession, SaferisError, Option[R]] =
     build.queryValue[R]
 end AggregateQuery

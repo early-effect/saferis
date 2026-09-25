@@ -1,24 +1,26 @@
 package saferis
 
 import zio.Chunk
-import zio.Scope
 import zio.Trace
+import zio.ZIO
 import zio.stream.ZStream
 
 /** Join types for SQL JOIN operations */
 enum JoinType:
   case Inner, Left, Right, Full, Cross
 
-  def toSql: String = this match
-    case Inner => "inner join"
-    case Left  => "left join"
-    case Right => "right join"
-    case Full  => "full join"
-    case Cross => "cross join"
+  def toSql: SqlText = SqlText:
+    this match
+      case Inner => "inner join"
+      case Left  => "left join"
+      case Right => "right join"
+      case Full  => "full join"
+      case Cross => "cross join"
+end JoinType
 
 /** Internal representation of a join clause */
 final case class JoinClause(
-    tableName: String,
+    tableName: TableName,
     alias: Alias,
     joinType: JoinType,
     condition: SqlFragment,
@@ -40,7 +42,7 @@ private[saferis] class AliasGenerator:
     * keyed on the *sanitized* bare name so distinct schemas with the same bare name (e.g. "prd.foo" vs "staging.foo")
     * share a counter and therefore get distinct aliases (`foo_ref_1`, `foo_ref_2`).
     */
-  def next(tableName: String): Alias =
+  def next(tableName: TableName): Alias =
     val bare      = tableName.substring(tableName.lastIndexOf('.') + 1)
     val sanitized = bare.replaceAll("[^A-Za-z0-9_]", "_")
     val count     = counters.getOrElse(sanitized, 0) + 1
@@ -185,16 +187,12 @@ final case class Query1Builder[A: Table](
 
   /** EXISTS subquery */
   def whereExists(subquery: QueryBase): Query1Ready[A] =
-    val subquerySql = subquery.build
-    val existsSql   = s"exists (${subquerySql.sql})"
-    val whereFrag   = SqlFragment(existsSql, subquerySql.writes)
+    val whereFrag = SqlFragment.text("exists (").append(subquery.build).append(SqlFragment.text(")"))
     Query1Ready(baseInstance, Vector(whereFrag), sorts, Vector.empty, None, None, selectColumns, derivedSource)
 
   /** NOT EXISTS subquery */
   def whereNotExists(subquery: QueryBase): Query1Ready[A] =
-    val subquerySql  = subquery.build
-    val notExistsSql = s"not exists (${subquerySql.sql})"
-    val whereFrag    = SqlFragment(notExistsSql, subquerySql.writes)
+    val whereFrag = SqlFragment.text("not exists (").append(subquery.build).append(SqlFragment.text(")"))
     Query1Ready(baseInstance, Vector(whereFrag), sorts, Vector.empty, None, None, selectColumns, derivedSource)
 
   // === LIMIT/SEEK Methods (transition to Ready) ===
@@ -274,16 +272,12 @@ final case class Query1Ready[A: Table](
 
   /** EXISTS subquery */
   def whereExists(subquery: QueryBase): Query1Ready[A] =
-    val subquerySql = subquery.build
-    val existsSql   = s"exists (${subquerySql.sql})"
-    val whereFrag   = SqlFragment(existsSql, subquerySql.writes)
+    val whereFrag = SqlFragment.text("exists (").append(subquery.build).append(SqlFragment.text(")"))
     copy(wherePredicates = wherePredicates :+ whereFrag)
 
   /** NOT EXISTS subquery */
   def whereNotExists(subquery: QueryBase): Query1Ready[A] =
-    val subquerySql  = subquery.build
-    val notExistsSql = s"not exists (${subquerySql.sql})"
-    val whereFrag    = SqlFragment(notExistsSql, subquerySql.writes)
+    val whereFrag = SqlFragment.text("not exists (").append(subquery.build).append(SqlFragment.text(")"))
     copy(wherePredicates = wherePredicates :+ whereFrag)
 
   /** Add a grouped WHERE condition using lambda syntax for complex OR/AND expressions.
@@ -395,23 +389,22 @@ final case class Query1Ready[A: Table](
     val selectClause = if selectColumns.isEmpty then "*" else selectColumns.map(_.label).mkString(", ")
 
     // For derived tables, use (subquery) as alias; otherwise use table as alias
-    val (fromSql, fromWrites) = derivedSource match
+    val from = derivedSource match
       case Some(derived) =>
-        val subSql = derived.subquery.build
-        (s"(${subSql.sql}) as ${derived.alias.value}", subSql.writes)
+        SqlFragment.text("(").append(derived.subquery.build).append(SqlFragment.text(s") as ${derived.alias.value}"))
       case None =>
         val fromSqlPart =
           baseInstance.alias.fold(baseInstance.tableName)(a => s"${baseInstance.tableName} as ${a.value}")
-        (fromSqlPart, Seq.empty)
+        SqlFragment.text(fromSqlPart)
 
-    var result = SqlFragment(s"select $selectClause from $fromSql", fromWrites)
+    var result = SqlFragment.text(s"select $selectClause from ").append(from)
 
     // WHERE clause (user predicates + seek predicates)
     val seekPredicates = seeks.map(_.toWherePredicate)
     val allPredicates  = (wherePredicates ++ seekPredicates).filter(_.sql.trim.nonEmpty)
     if allPredicates.nonEmpty then
       val joined = Placeholder.join(allPredicates, " and ")
-      result = result :+ SqlFragment(" where ", Seq.empty) :+ SqlFragment(joined.sql, joined.writes, joined.issues)
+      result = result :+ SqlFragment.text(" where ") :+ SqlFragment(joined)
 
     // ORDER BY clause (explicit sorts + seek sorts)
     val seekSorts = seeks.map(_.toSort)
@@ -419,23 +412,23 @@ final case class Query1Ready[A: Table](
     if allSorts.nonEmpty then
       val sortFragments = allSorts.map(_.toSqlFragment)
       val joined        = Placeholder.join(sortFragments, ", ")
-      result = result :+ SqlFragment(" order by ", Seq.empty) :+ SqlFragment(joined.sql, joined.writes, joined.issues)
+      result = result :+ SqlFragment.text(" order by ") :+ SqlFragment(joined)
 
     // LIMIT/OFFSET
-    limitValue.foreach(n => result = result :+ SqlFragment(s" limit $n", Seq.empty))
-    offsetValue.foreach(n => result = result :+ SqlFragment(s" offset $n", Seq.empty))
+    limitValue.foreach(n => result = result :+ SqlFragment.text(s" limit $n"))
+    offsetValue.foreach(n => result = result :+ SqlFragment.text(s" offset $n"))
 
     result
   end build
 
   /** Execute query */
-  inline def query[R: Table](using Trace): ScopedQuery[Chunk[R]] = build.query[R]
+  inline def query[R: Table](using Trace): ZIO[SqlSession, SaferisError, Chunk[R]] = build.query[R]
 
   /** Execute query returning first row */
-  inline def queryOne[R: Table](using Trace): ScopedQuery[Option[R]] = build.queryOne[R]
+  inline def queryOne[R: Table](using Trace): ZIO[SqlSession, SaferisError, Option[R]] = build.queryOne[R]
 
   /** Execute query as lazy stream */
-  inline def queryStream[R: Table](using Trace): ZStream[ConnectionProvider & Scope, SaferisError, R] =
+  inline def queryStream[R: Table](using Trace): ZStream[SqlSession, SaferisError, R] =
     build.queryStream[R]
 
   /** Stream pages of results using seek pagination.
@@ -456,7 +449,7 @@ final case class Query1Ready[A: Table](
       inline cursorSelector: A => K,
       pageSize: Int,
       startAfter: Option[K] = None,
-  )(using Trace): ZStream[ConnectionProvider & Scope, SaferisError, Page[A, K]] =
+  )(using Trace): ZStream[SqlSession, SaferisError, Page[A, K]] =
     val column        = baseInstance.column(cursorSelector)
     val extractCursor = Macros.extractFieldValueFunc(cursorSelector)
     PagedStreamOps.pagedStream[A, K](this, column, extractCursor, pageSize, startAfter)
@@ -479,7 +472,7 @@ final case class Query1Ready[A: Table](
       inline cursorSelector: A => K,
       batchSize: Int,
       startAfter: Option[K] = None,
-  )(using Trace): ZStream[ConnectionProvider & Scope, SaferisError, A] =
+  )(using Trace): ZStream[SqlSession, SaferisError, A] =
     val column        = baseInstance.column(cursorSelector)
     val extractCursor = Macros.extractFieldValueFunc(cursorSelector)
     PagedStreamOps.seekingStream[A, K](this, column, extractCursor, batchSize, startAfter)
@@ -862,28 +855,27 @@ final case class Query2Ready[A: Table, B: Table](
 
   def build: SqlFragment =
     // For derived tables, use (subquery) as alias; otherwise use table as alias
-    val (fromSql, fromWrites) = derivedSource match
+    val from = derivedSource match
       case Some(derived) =>
-        val subSql = derived.subquery.build
-        (s"(${subSql.sql}) as ${derived.alias.value}", subSql.writes)
+        SqlFragment.text("(").append(derived.subquery.build).append(SqlFragment.text(s") as ${derived.alias.value}"))
       case None =>
         val fromSqlPart = t1.alias.fold(t1.tableName)(a => s"${t1.tableName} as ${a.value}")
-        (fromSqlPart, Seq.empty)
+        SqlFragment.text(fromSqlPart)
 
-    var result = SqlFragment(s"select * from $fromSql", fromWrites)
+    var result = SqlFragment.text("select * from ").append(from)
 
     // Add joins
     for join <- joins do
       val joinSql = s" ${join.joinType.toSql} ${join.tableName} as ${join.alias.value}"
-      result = result :+ SqlFragment(joinSql, Seq.empty)
-      if join.condition.sql.nonEmpty then result = result :+ SqlFragment(" on ", Seq.empty) :+ join.condition
+      result = result :+ SqlFragment.text(joinSql)
+      if join.condition.sql.nonEmpty then result = result :+ SqlFragment.text(" on ") :+ join.condition
 
     // WHERE clause
     val seekPredicates = seeks.map(_.toWherePredicate)
     val allPredicates  = (wherePredicates ++ seekPredicates).filter(_.sql.trim.nonEmpty)
     if allPredicates.nonEmpty then
       val joined = Placeholder.join(allPredicates, " and ")
-      result = result :+ SqlFragment(" where ", Seq.empty) :+ SqlFragment(joined.sql, joined.writes, joined.issues)
+      result = result :+ SqlFragment.text(" where ") :+ SqlFragment(joined)
 
     // ORDER BY clause
     val seekSorts = seeks.map(_.toSort)
@@ -891,18 +883,18 @@ final case class Query2Ready[A: Table, B: Table](
     if allSorts.nonEmpty then
       val sortFragments = allSorts.map(_.toSqlFragment)
       val joined        = Placeholder.join(sortFragments, ", ")
-      result = result :+ SqlFragment(" order by ", Seq.empty) :+ SqlFragment(joined.sql, joined.writes, joined.issues)
+      result = result :+ SqlFragment.text(" order by ") :+ SqlFragment(joined)
 
     // LIMIT/OFFSET
-    limitValue.foreach(n => result = result :+ SqlFragment(s" limit $n", Seq.empty))
-    offsetValue.foreach(n => result = result :+ SqlFragment(s" offset $n", Seq.empty))
+    limitValue.foreach(n => result = result :+ SqlFragment.text(s" limit $n"))
+    offsetValue.foreach(n => result = result :+ SqlFragment.text(s" offset $n"))
 
     result
   end build
 
-  inline def query[R: Table](using Trace): ScopedQuery[Chunk[R]]     = build.query[R]
-  inline def queryOne[R: Table](using Trace): ScopedQuery[Option[R]] = build.queryOne[R]
-  inline def queryStream[R: Table](using Trace): ZStream[ConnectionProvider & Scope, SaferisError, R] =
+  inline def query[R: Table](using Trace): ZIO[SqlSession, SaferisError, Chunk[R]]     = build.query[R]
+  inline def queryOne[R: Table](using Trace): ZIO[SqlSession, SaferisError, Option[R]] = build.queryOne[R]
+  inline def queryStream[R: Table](using Trace): ZStream[SqlSession, SaferisError, R]  =
     build.queryStream[R]
 
 end Query2Ready
@@ -1159,35 +1151,35 @@ final case class Query3Ready[A: Table, B: Table, C: Table](
 
   def build: SqlFragment =
     val t1SqlPart = t1.alias.fold(t1.tableName)(a => s"${t1.tableName} as ${a.value}")
-    var result    = SqlFragment(s"select * from $t1SqlPart", Seq.empty)
+    var result    = SqlFragment.text(s"select * from $t1SqlPart")
 
     for join <- joins do
       val joinSql = s" ${join.joinType.toSql} ${join.tableName} as ${join.alias.value}"
-      result = result :+ SqlFragment(joinSql, Seq.empty)
-      if join.condition.sql.nonEmpty then result = result :+ SqlFragment(" on ", Seq.empty) :+ join.condition
+      result = result :+ SqlFragment.text(joinSql)
+      if join.condition.sql.nonEmpty then result = result :+ SqlFragment.text(" on ") :+ join.condition
 
     val seekPredicates = seeks.map(_.toWherePredicate)
     val allPredicates  = (wherePredicates ++ seekPredicates).filter(_.sql.trim.nonEmpty)
     if allPredicates.nonEmpty then
       val joined = Placeholder.join(allPredicates, " and ")
-      result = result :+ SqlFragment(" where ", Seq.empty) :+ SqlFragment(joined.sql, joined.writes, joined.issues)
+      result = result :+ SqlFragment.text(" where ") :+ SqlFragment(joined)
 
     val seekSorts = seeks.map(_.toSort)
     val allSorts  = sorts ++ seekSorts
     if allSorts.nonEmpty then
       val sortFragments = allSorts.map(_.toSqlFragment)
       val joined        = Placeholder.join(sortFragments, ", ")
-      result = result :+ SqlFragment(" order by ", Seq.empty) :+ SqlFragment(joined.sql, joined.writes, joined.issues)
+      result = result :+ SqlFragment.text(" order by ") :+ SqlFragment(joined)
 
-    limitValue.foreach(n => result = result :+ SqlFragment(s" limit $n", Seq.empty))
-    offsetValue.foreach(n => result = result :+ SqlFragment(s" offset $n", Seq.empty))
+    limitValue.foreach(n => result = result :+ SqlFragment.text(s" limit $n"))
+    offsetValue.foreach(n => result = result :+ SqlFragment.text(s" offset $n"))
 
     result
   end build
 
-  inline def query[R: Table](using Trace): ScopedQuery[Chunk[R]]     = build.query[R]
-  inline def queryOne[R: Table](using Trace): ScopedQuery[Option[R]] = build.queryOne[R]
-  inline def queryStream[R: Table](using Trace): ZStream[ConnectionProvider & Scope, SaferisError, R] =
+  inline def query[R: Table](using Trace): ZIO[SqlSession, SaferisError, Chunk[R]]     = build.query[R]
+  inline def queryOne[R: Table](using Trace): ZIO[SqlSession, SaferisError, Option[R]] = build.queryOne[R]
+  inline def queryStream[R: Table](using Trace): ZStream[SqlSession, SaferisError, R]  =
     build.queryStream[R]
 
 end Query3Ready
@@ -1361,35 +1353,35 @@ final case class Query4Ready[A: Table, B: Table, C: Table, D: Table](
 
   def build: SqlFragment =
     val t1SqlPart = t1.alias.fold(t1.tableName)(a => s"${t1.tableName} as ${a.value}")
-    var result    = SqlFragment(s"select * from $t1SqlPart", Seq.empty)
+    var result    = SqlFragment.text(s"select * from $t1SqlPart")
 
     for join <- joins do
       val joinSql = s" ${join.joinType.toSql} ${join.tableName} as ${join.alias.value}"
-      result = result :+ SqlFragment(joinSql, Seq.empty)
-      if join.condition.sql.nonEmpty then result = result :+ SqlFragment(" on ", Seq.empty) :+ join.condition
+      result = result :+ SqlFragment.text(joinSql)
+      if join.condition.sql.nonEmpty then result = result :+ SqlFragment.text(" on ") :+ join.condition
 
     val seekPredicates = seeks.map(_.toWherePredicate)
     val allPredicates  = (wherePredicates ++ seekPredicates).filter(_.sql.trim.nonEmpty)
     if allPredicates.nonEmpty then
       val joined = Placeholder.join(allPredicates, " and ")
-      result = result :+ SqlFragment(" where ", Seq.empty) :+ SqlFragment(joined.sql, joined.writes, joined.issues)
+      result = result :+ SqlFragment.text(" where ") :+ SqlFragment(joined)
 
     val seekSorts = seeks.map(_.toSort)
     val allSorts  = sorts ++ seekSorts
     if allSorts.nonEmpty then
       val sortFragments = allSorts.map(_.toSqlFragment)
       val joined        = Placeholder.join(sortFragments, ", ")
-      result = result :+ SqlFragment(" order by ", Seq.empty) :+ SqlFragment(joined.sql, joined.writes, joined.issues)
+      result = result :+ SqlFragment.text(" order by ") :+ SqlFragment(joined)
 
-    limitValue.foreach(n => result = result :+ SqlFragment(s" limit $n", Seq.empty))
-    offsetValue.foreach(n => result = result :+ SqlFragment(s" offset $n", Seq.empty))
+    limitValue.foreach(n => result = result :+ SqlFragment.text(s" limit $n"))
+    offsetValue.foreach(n => result = result :+ SqlFragment.text(s" offset $n"))
 
     result
   end build
 
-  inline def query[R: Table](using Trace): ScopedQuery[Chunk[R]]     = build.query[R]
-  inline def queryOne[R: Table](using Trace): ScopedQuery[Option[R]] = build.queryOne[R]
-  inline def queryStream[R: Table](using Trace): ZStream[ConnectionProvider & Scope, SaferisError, R] =
+  inline def query[R: Table](using Trace): ZIO[SqlSession, SaferisError, Chunk[R]]     = build.query[R]
+  inline def queryOne[R: Table](using Trace): ZIO[SqlSession, SaferisError, Option[R]] = build.queryOne[R]
+  inline def queryStream[R: Table](using Trace): ZStream[SqlSession, SaferisError, R]  =
     build.queryStream[R]
 
 end Query4Ready
@@ -1599,35 +1591,35 @@ final case class Query5Ready[
 
   def build: SqlFragment =
     val t1SqlPart = t1.alias.fold(t1.tableName)(a => s"${t1.tableName} as ${a.value}")
-    var result    = SqlFragment(s"select * from $t1SqlPart", Seq.empty)
+    var result    = SqlFragment.text(s"select * from $t1SqlPart")
 
     for join <- joins do
       val joinSql = s" ${join.joinType.toSql} ${join.tableName} as ${join.alias.value}"
-      result = result :+ SqlFragment(joinSql, Seq.empty)
-      if join.condition.sql.nonEmpty then result = result :+ SqlFragment(" on ", Seq.empty) :+ join.condition
+      result = result :+ SqlFragment.text(joinSql)
+      if join.condition.sql.nonEmpty then result = result :+ SqlFragment.text(" on ") :+ join.condition
 
     val seekPredicates = seeks.map(_.toWherePredicate)
     val allPredicates  = (wherePredicates ++ seekPredicates).filter(_.sql.trim.nonEmpty)
     if allPredicates.nonEmpty then
       val joined = Placeholder.join(allPredicates, " and ")
-      result = result :+ SqlFragment(" where ", Seq.empty) :+ SqlFragment(joined.sql, joined.writes, joined.issues)
+      result = result :+ SqlFragment.text(" where ") :+ SqlFragment(joined)
 
     val seekSorts = seeks.map(_.toSort)
     val allSorts  = sorts ++ seekSorts
     if allSorts.nonEmpty then
       val sortFragments = allSorts.map(_.toSqlFragment)
       val joined        = Placeholder.join(sortFragments, ", ")
-      result = result :+ SqlFragment(" order by ", Seq.empty) :+ SqlFragment(joined.sql, joined.writes, joined.issues)
+      result = result :+ SqlFragment.text(" order by ") :+ SqlFragment(joined)
 
-    limitValue.foreach(n => result = result :+ SqlFragment(s" limit $n", Seq.empty))
-    offsetValue.foreach(n => result = result :+ SqlFragment(s" offset $n", Seq.empty))
+    limitValue.foreach(n => result = result :+ SqlFragment.text(s" limit $n"))
+    offsetValue.foreach(n => result = result :+ SqlFragment.text(s" offset $n"))
 
     result
   end build
 
-  inline def query[R: Table](using Trace): ScopedQuery[Chunk[R]]     = build.query[R]
-  inline def queryOne[R: Table](using Trace): ScopedQuery[Option[R]] = build.queryOne[R]
-  inline def queryStream[R: Table](using Trace): ZStream[ConnectionProvider & Scope, SaferisError, R] =
+  inline def query[R: Table](using Trace): ZIO[SqlSession, SaferisError, Chunk[R]]     = build.query[R]
+  inline def queryOne[R: Table](using Trace): ZIO[SqlSession, SaferisError, Option[R]] = build.queryOne[R]
+  inline def queryStream[R: Table](using Trace): ZStream[SqlSession, SaferisError, R]  =
     build.queryStream[R]
 
 end Query5Ready

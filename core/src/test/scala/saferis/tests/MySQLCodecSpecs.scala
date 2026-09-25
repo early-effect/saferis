@@ -16,11 +16,11 @@ object MySQLCodecSpecs extends ZIOSpecDefault:
 
       val dialectName = dialect.name
       val colType     = encoder.columnType
-      val jdbcTypeVal = encoder.jdbcType
 
       assertTrue(dialectName == "MySQL") &&
       assertTrue(colType == "char(36)") &&
-      assertTrue(jdbcTypeVal == java.sql.Types.CHAR)
+      assertTrue(encoder.sqlType == SqlType.Text) &&
+      assertTrue(dialect.columnType(SqlType.Uuid) == "char(36)")
     },
     test("MySQL UUID encoder generates correct literal") {
       import saferis.mysql.given

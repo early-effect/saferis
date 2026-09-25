@@ -16,7 +16,7 @@ object JavaTimeCodecSpecs extends ZIOSpecDefault:
       assertTrue(encoder != null) &&
       assertTrue(decoder != null) &&
       assertTrue(codec != null) &&
-      assertTrue(encoder.jdbcType == java.sql.Types.TIMESTAMP_WITH_TIMEZONE)
+      assertTrue(encoder.sqlType == SqlType.Timestamptz)
     },
     test("LocalDateTime codec is available") {
       val encoder = summon[Encoder[LocalDateTime]]
@@ -26,7 +26,7 @@ object JavaTimeCodecSpecs extends ZIOSpecDefault:
       assertTrue(encoder != null) &&
       assertTrue(decoder != null) &&
       assertTrue(codec != null) &&
-      assertTrue(encoder.jdbcType == java.sql.Types.TIMESTAMP)
+      assertTrue(encoder.sqlType == SqlType.Timestamp)
     },
     test("LocalDate codec is available") {
       val encoder = summon[Encoder[LocalDate]]
@@ -36,7 +36,7 @@ object JavaTimeCodecSpecs extends ZIOSpecDefault:
       assertTrue(encoder != null) &&
       assertTrue(decoder != null) &&
       assertTrue(codec != null) &&
-      assertTrue(encoder.jdbcType == java.sql.Types.DATE)
+      assertTrue(encoder.sqlType == SqlType.Date)
     },
     test("LocalTime codec is available") {
       val encoder = summon[Encoder[LocalTime]]
@@ -46,7 +46,7 @@ object JavaTimeCodecSpecs extends ZIOSpecDefault:
       assertTrue(encoder != null) &&
       assertTrue(decoder != null) &&
       assertTrue(codec != null) &&
-      assertTrue(encoder.jdbcType == java.sql.Types.TIME)
+      assertTrue(encoder.sqlType == SqlType.Time)
     },
     test("ZonedDateTime codec is available and uses TIMESTAMP_WITH_TIMEZONE") {
       val encoder = summon[Encoder[ZonedDateTime]]
@@ -56,7 +56,7 @@ object JavaTimeCodecSpecs extends ZIOSpecDefault:
       assertTrue(encoder != null) &&
       assertTrue(decoder != null) &&
       assertTrue(codec != null) &&
-      assertTrue(encoder.jdbcType == java.sql.Types.TIMESTAMP_WITH_TIMEZONE)
+      assertTrue(encoder.sqlType == SqlType.Timestamptz)
     },
     test("OffsetDateTime codec is available and uses TIMESTAMP_WITH_TIMEZONE") {
       val encoder = summon[Encoder[OffsetDateTime]]
@@ -66,7 +66,7 @@ object JavaTimeCodecSpecs extends ZIOSpecDefault:
       assertTrue(encoder != null) &&
       assertTrue(decoder != null) &&
       assertTrue(codec != null) &&
-      assertTrue(encoder.jdbcType == java.sql.Types.TIMESTAMP_WITH_TIMEZONE)
+      assertTrue(encoder.sqlType == SqlType.Timestamptz)
     },
     test("Can use Instant in table definition with timestamptz column type") {
       @tableName("events")

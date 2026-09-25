@@ -10,4 +10,6 @@ import zio.test.*
   */
 trait SaferisDocSpecSuite extends DocSpecSuite:
   override def spec: Spec[TestEnvironment, Any] =
-    DocTestInterpreter.specOf(this).provideLayer(ExampleRunner.live) @@ TestAspect.sequential
+    DocTestInterpreter
+      .specOf(this)
+      .provideLayer(DocsTransactor.layer ++ ExampleRunner.live) @@ TestAspect.sequential

@@ -2,7 +2,6 @@ package saferis.docs
 
 import saferis.*
 import saferis.Schema.*
-import saferis.docs.DocsTransactor.xa
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.*
@@ -34,7 +33,10 @@ object Ddl extends SaferisDocSpecSuite:
     md"""The DDL layer provides type-safe schema management operations.""",
     section("Creating Tables")(
       exampleZIO {
-        xa.run(ddl.createTable[Customer](ifNotExists = true)).either
+        (ddl
+          .createTable[Customer](ifNotExists = true))
+          .either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(_)  => assertTrue(true)
         case Left(err) => assertTrue(false).label(err.message)
@@ -60,13 +62,13 @@ ddl.dropTable[Customer](ifExists = true)
 ddl.truncateTable[Customer]()
 
 // Add column
-ddl.addColumn[Customer, String]("new_column")
+ddl.addColumn[Customer, String](ColumnName("new_column"))
 
 // Drop column
-ddl.dropColumn[Customer]("old_column")
+ddl.dropColumn[Customer](ColumnName("old_column"))
 
 // Drop index
-ddl.dropIndex("idx_name", ifExists = true)
+ddl.dropIndex(IndexName("idx_name"), ifExists = true)
 ```"""
     ),
     section("createTable Options")(
@@ -109,7 +111,7 @@ ddl.createTable[MyTable](createIndexes = false)
         Schema[SchemaUser]
           .withIndex(_.name)
           .and(_.status)
-          .named("idx_name_status")
+          .named(IndexName("idx_name_status"))
           .ddl()
           .sql
       }.assert(sql => assertTrue(sql.contains("idx_name_status"))),
@@ -157,7 +159,10 @@ ddl.createTable[MyTable](createIndexes = false)
           .withUniqueIndex(_.email)
           .build
 
-        xa.run(ddl.createTable(schemaUsers)).either
+        (ddl
+          .createTable(schemaUsers))
+          .either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(_)  => assertTrue(true)
         case Left(err) => assertTrue(false).label(err.message)
@@ -166,19 +171,19 @@ ddl.createTable[MyTable](createIndexes = false)
     section("Partial Indexes via Runtime API")(
       md"""Create partial indexes programmatically using `ddl.createIndex`:""",
       exampleZIO {
-        xa.run(for
+        (for
           _ <- ddl.createTable[Job](createIndexes = false)
           // Create a partial index for pending jobs with retry times
           _ <- ddl.createIndex[Job](
-            "idx_pending_retry",
-            Seq("retryat"),
-            where = Some("status = 'pending'"),
+            IndexName("idx_pending_retry"),
+            Seq(ColumnName("retryat")),
+            where = Some(SqlText("status = 'pending'")),
           )
           _    <- dml.insert(Job(-1, "pending", Some(java.time.Instant.now())))
           _    <- dml.insert(Job(-1, "completed", None))
           jobs <- sql"SELECT * FROM ${Table[Job]}".query[Job]
-        yield jobs)
-          .either
+        yield jobs).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(jobs) => assertTrue(jobs.exists(_.status == "pending") && jobs.exists(_.status == "completed"))
         case Left(err)   => assertTrue(false).label(err.message)

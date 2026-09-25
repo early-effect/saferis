@@ -2,8 +2,6 @@ package saferis.sqlite
 
 import saferis.*
 
-import java.sql.Types
-
 /** SQLite dialect implementation providing SQLite-specific type mappings and SQL generation.
   *
   * SQLite characteristics:
@@ -12,35 +10,43 @@ import java.sql.Types
   *   - Uses double quotes for identifier escaping
   *   - Has a unique type affinity system (simplified here)
   */
-object SQLiteDialect extends Dialect with ReturningSupport with CommonTableExpressionSupport with WindowFunctionSupport:
+object SQLiteDialect
+    extends Dialect
+    with ReturningSupport
+    with CommonTableExpressionSupport
+    with WindowFunctionSupport
+    with SchemaIntrospectionSupport:
 
-  val name: String = "SQLite"
+  val name: DialectName = DialectName("SQLite")
 
-  // === Type Mappings ===
-  def columnType(jdbcType: Int): String = jdbcType match
-    case Types.VARCHAR     => "text"
-    case Types.LONGVARCHAR => "text"
-    case Types.CHAR        => "text"
-    case Types.CLOB        => "text"
-    case Types.INTEGER     => "integer"
-    case Types.BIGINT      => "integer"
-    case Types.SMALLINT    => "integer"
-    case Types.TINYINT     => "integer"
-    case Types.DOUBLE      => "real"
-    case Types.FLOAT       => "real"
-    case Types.DECIMAL     => "real"
-    case Types.NUMERIC     => "real"
-    case Types.BOOLEAN     => "integer"
-    case Types.DATE        => "text"
-    case Types.TIME        => "text"
-    case Types.TIMESTAMP   => "text"
-    case Types.BLOB        => "blob"
-    case Types.BINARY      => "blob"
-    case Types.VARBINARY   => "blob"
-    case _                 => "text"
+  def introspectTable(tableName: TableName)(using zio.Trace): zio.ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
+    SQLiteCatalog.introspect(tableName)
+
+  /** SQLite stores by affinity, not by declared type, but it keeps the declared name, and a driver reads that name
+    * back. So each `SqlType` declares a name that says what the column holds (`boolean`, `date`, `timestamptz`, `uuid`)
+    * and still lands on the right affinity. Every integer width is `integer`, so an integer primary key stays SQLite's
+    * rowid and autoincrements.
+    */
+  def columnType(tpe: SqlType): ColumnType = ColumnType:
+    tpe match
+      case SqlType.Bool                               => "boolean"
+      case SqlType.Int2 | SqlType.Int4 | SqlType.Int8 => "integer"
+      case SqlType.Float4                             => "real"
+      case SqlType.Float8                             => "double"
+      case SqlType.Numeric                            => "numeric"
+      case SqlType.VarChar                            => s"varchar($DefaultVarcharLength)"
+      case SqlType.Text                               => "text"
+      case SqlType.Bytea                              => "blob"
+      case SqlType.Date                               => "date"
+      case SqlType.Time                               => "time"
+      case SqlType.Timestamp                          => "timestamp"
+      case SqlType.Timestamptz                        => "timestamptz"
+      case SqlType.Jsonb                              => "json"
+      case SqlType.Uuid                               => "uuid"
+      case SqlType.Array(_) | SqlType.Other(_)        => "text"
 
   // === Auto-increment Syntax ===
-  override def autoIncrementClause(isGenerated: Boolean, isKey: Boolean, hasDefault: Boolean): String =
+  override def autoIncrementClause(isGenerated: Boolean, isKey: Boolean, hasDefault: Boolean): SqlText = SqlText:
     (isGenerated, isKey, hasDefault) match
       case (true, true, false)  => " primary key autoincrement"
       case (true, true, true)   => " autoincrement"
@@ -48,44 +54,36 @@ object SQLiteDialect extends Dialect with ReturningSupport with CommonTableExpre
       case (true, false, false) => " autoincrement"
       case _                    => ""
 
-  // === Table Operations ===
-  override def addColumnSql(tableName: String, columnName: String, columnDefinition: String): String =
-    s"alter table ${escapeIdentifier(tableName)} add column $columnDefinition"
-
-  override def dropColumnSql(tableName: String, columnName: String): String =
-    // SQLite has limited support for dropping columns - requires recreating table
-    throw new UnsupportedOperationException(
-      "SQLite does not support dropping columns directly. Use PRAGMA table_info and recreate table."
-    )
-
   // === Index Operations ===
   // SQLite supports partial indexes (WHERE clause)
   override def createIndexSql(
-      indexName: String,
-      tableName: String,
-      columnNames: Seq[String],
+      indexName: IndexName,
+      tableName: TableName,
+      columnNames: Seq[ColumnName],
       ifNotExists: Boolean = true,
-      where: Option[String] = None,
-  ): String =
+      where: Option[SqlText] = None,
+  ): SqlText =
     val ifNotExistsClause = if ifNotExists then " if not exists" else ""
     val columns           = columnNames.map(escapeIdentifier).mkString(", ")
     val whereClause       = where.map(w => s" where $w").getOrElse("")
     // nosemgrep: scala-security.scala.lang.security.audit.tainted-sql-string -- identifiers are escaped via escapeIdentifier (identifiers cannot be bind parameters)
-    s"create index$ifNotExistsClause ${escapeIdentifier(indexName)} on ${escapeIdentifier(tableName)} ($columns)$whereClause"
+    SqlText(
+      s"create index$ifNotExistsClause ${escapeIdentifier(indexName)} on ${escapeIdentifier(tableName)} ($columns)$whereClause"
+    )
   end createIndexSql
 
-  override def dropIndexSql(indexName: String, ifExists: Boolean = false): String =
+  override def dropIndexSql(indexName: IndexName, ifExists: Boolean = false): SqlText =
     val ifExistsClause = if ifExists then "if exists " else ""
     // nosemgrep: scala-security.scala.lang.security.audit.tainted-sql-string -- identifiers are escaped via escapeIdentifier (identifiers cannot be bind parameters)
-    s"drop index $ifExistsClause${escapeIdentifier(indexName)}"
+    SqlText(s"drop index $ifExistsClause${escapeIdentifier(indexName)}")
 
   // === SQLite-specific Query Features ===
   override def identifierQuote: String = "\""
 
   // === SQLite-specific Table Operations ===
-  override def truncateTableSql(tableName: String): String =
+  override def truncateTableSql(tableName: TableName): SqlText =
     // SQLite doesn't have TRUNCATE, use DELETE instead
-    s"delete from ${escapeIdentifier(tableName)}"
+    SqlText(s"delete from ${escapeIdentifier(tableName)}")
 
   // ReturningSupport uses default implementations since SQLite supports RETURNING
 

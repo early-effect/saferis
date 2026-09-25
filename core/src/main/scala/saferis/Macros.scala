@@ -1,14 +1,13 @@
 package saferis
 
-import java.sql.SQLException
 import scala.annotation.StaticAnnotation
 import scala.quoted.*
 
 object Macros:
 
-  private[saferis] inline def nameOf[A]: String = ${ nameOfImpl[A] }
+  private[saferis] inline def nameOf[A]: TableName = ${ nameOfImpl[A] }
 
-  private def nameOfImpl[A: Type](using Quotes): Expr[String] =
+  private def nameOfImpl[A: Type](using Quotes): Expr[TableName] =
     import quotes.reflect.*
     val tpe                 = TypeRepr.of[A]
     val tableNameTypeSymbol = TypeRepr.of[tableName].typeSymbol
@@ -16,9 +15,10 @@ object Macros:
       .collectFirst {
         case Apply(Select(New(tpt), _), List(Literal(StringConstant(name))))
             if tpt.tpe.typeSymbol == tableNameTypeSymbol =>
-          Expr(name)
+          name
       }
-      .getOrElse(Expr(tpe.typeSymbol.name))
+      .map(name => '{ TableName(${ Expr(name) }) })
+      .getOrElse('{ TableName(${ Expr(tpe.typeSymbol.name) }) })
   end nameOfImpl
 
   private[saferis] inline def columnsOf[A]: Seq[Column[?]] = ${ columnsOfImpl[A] }
@@ -158,8 +158,8 @@ object Macros:
                 val isGenerated = ${ elemHasAnnotation[A, saferis.generated](fieldName) }
 
                 Column[a](
-                  ${ Expr(fieldName) },
-                  label,
+                  FieldName(${ Expr(fieldName) }),
+                  ColumnName(label),
                   isKey,
                   isGenerated,
                   $isNullable,
@@ -374,73 +374,38 @@ object Macros:
         report.errorAndAbort(s"Could not find a Table instance for ${Type.show[T]}")
   end summonTable
 
-  private[saferis] inline def make[A](args: Seq[(String, Any)]): A = ${ makeImpl[A]('args) }
+  private[saferis] inline def make[A](args: Seq[(String, Any)]): Either[DecodeError, A] = ${ makeImpl[A]('args) }
 
-  private def makeImpl[A: Type](args: Expr[Seq[(String, Any)]])(using Quotes): Expr[A] =
+  private def makeImpl[A: Type](args: Expr[Seq[(String, Any)]])(using Quotes): Expr[Either[DecodeError, A]] =
     import quotes.reflect.*
 
-    val tpe         = TypeRepr.of[A]
-    val companion   = tpe.typeSymbol.companionModule
-    val applyMethod = companion.methodMember("apply").head
-    val fields      = tpe.typeSymbol.caseFields
-    val typeName    = Type.show[A]
+    val tpe          = TypeRepr.of[A]
+    val companion    = tpe.typeSymbol.companionModule
+    val applyMethod  = companion.methodMember("apply").head
+    val fields       = tpe.typeSymbol.caseFields
+    val typeName     = Type.show[A]
+    val expected     = Expr(fields.length)
+    val typeNameExpr = Expr(typeName)
 
-    val argsMap = '{ $args.toMap }
-
-    val argsExprs = fields.map { param =>
-      val paramName = param.name
-      val paramType = tpe.memberType(param)
-      argsMap match
-        case '{ $mapExpr: Map[String, Any] } =>
-          paramType.asType match
-            case '[t] =>
-              '{
-                val map = $mapExpr
-                map
-                  .get(${ Expr(paramName) })
-                  .map(x => x.asInstanceOf[t])
-                  .getOrElse:
-                    throw new SQLException(
-                      s"Error constructing instance of ${${ Expr(typeName) }}. Could not find value for parameter ${${
-                          Expr(paramName)
-                        }}"
-                    )
-              }
-      end match
-    }
-
-    // Handle generic case classes with type parameters and context bounds
-    val typeArgs = tpe.typeArgs
-
-    // Build the apply call with type arguments if needed
+    val typeArgs     = tpe.typeArgs
     val baseSelect   = Select(Ref(companion), applyMethod)
     val withTypeArgs =
       if typeArgs.nonEmpty then TypeApply(baseSelect, typeArgs.map(Inferred(_)))
       else baseSelect
 
-    // Check if the apply method has additional parameter lists (using clauses)
-    // paramSymss includes all parameter lists; we need to find using/given clauses
-    val paramLists = applyMethod.paramSymss
-
-    // Filter out type parameter lists (they only contain type param symbols)
-    val termParamLists = paramLists.filter(_.forall(!_.isTypeParam))
-
-    // First term param list is the regular parameters, rest may be using clauses
-    // Check both Given and Implicit flags (context bounds may use either)
+    val paramLists      = applyMethod.paramSymss
+    val termParamLists  = paramLists.filter(_.forall(!_.isTypeParam))
     val usingParamLists =
       termParamLists.drop(1).filter(_.exists(p => p.flags.is(Flags.Given) || p.flags.is(Flags.Implicit)))
 
-    val result =
-      if usingParamLists.nonEmpty then
-        // Build type substitution map for resolving generic parameter types
-        // Get type params from the apply method's type param list
+    val usingArgs: List[Term] =
+      if usingParamLists.isEmpty then Nil
+      else
         val typeParamNames = paramLists.headOption
           .filter(_.forall(_.isTypeParam))
           .map(_.map(_.name))
           .getOrElse(Nil)
-        val typeSubstitution = typeParamNames.zip(typeArgs).toMap
-
-        // Helper to substitute type parameters in a TypeRepr
+        val typeSubstitution                            = typeParamNames.zip(typeArgs).toMap
         def substituteTypeParams(t: TypeRepr): TypeRepr =
           t match
             case tr if tr.typeSymbol.isTypeParam =>
@@ -448,22 +413,58 @@ object Macros:
             case AppliedType(tycon, args) =>
               tycon.appliedTo(args.map(substituteTypeParams))
             case _ => t
-
-        // Search for and provide the context bound implicits
-        val usingArgs = usingParamLists.flatten.map { param =>
-          // Get the parameter's declared type and substitute type parameters
+        usingParamLists.flatten.map { param =>
           val rawType   = param.tree.asInstanceOf[ValDef].tpt.tpe
           val paramType = substituteTypeParams(rawType)
-
           Implicits.search(paramType) match
             case iss: ImplicitSearchSuccess => iss.tree
             case _: ImplicitSearchFailure   =>
               report.errorAndAbort(s"Could not find implicit for ${paramType.show} in makeImpl")
         }
-        Apply(Apply(withTypeArgs, argsExprs.map(_.asTerm).toList), usingArgs)
-      else Apply(withTypeArgs, argsExprs.map(_.asTerm).toList)
 
-    result.asExprOf[A]
+    def read[t: Type](paramName: String): Expr[Either[DecodeError, t]] =
+      val name = Expr(paramName)
+      '{
+        $args.toMap
+          .get($name)
+          .map(_.asInstanceOf[t])
+          .toRight(
+            DecodeError(
+              s"Error constructing instance of ${$typeNameExpr}. Could not find value for parameter ${$name}"
+            )
+          )
+      }
+    end read
+
+    def chain(rest: List[Symbol], acc: List[Term]): Expr[Either[DecodeError, A]] =
+      rest match
+        case Nil =>
+          val applied =
+            val base = Apply(withTypeArgs, acc)
+            if usingArgs.nonEmpty then Apply(base, usingArgs) else base
+          '{ Right(${ applied.asExprOf[A] }) }
+        case param :: tail =>
+          val paramType = tpe.memberType(param)
+          paramType.asType match
+            case '[t] =>
+              val reading = read[t](param.name)
+              '{
+                $reading.flatMap { (v: t) =>
+                  ${ chain(tail, acc :+ '{ v }.asTerm) }
+                }
+              }
+
+    val built = chain(fields.toList, Nil)
+    '{
+      val values = $args
+      if values.length != $expected then
+        Left(
+          DecodeError(
+            s"wrong arity constructing ${$typeNameExpr}: expected ${$expected} values, got ${values.length}"
+          )
+        )
+      else $built
+    }
   end makeImpl
 
   // This method is used to refine the Instance type with the field names/labels

@@ -23,7 +23,53 @@
 Add to your `build.sbt`:
 
 ```scala
-libraryDependencies += "rocks.earlyeffect" %% "saferis" % "<version>"
+// JVM. Add saferis and the one adapter for your database. Each adapter brings
+// saferis-jdbc (java.sql only) and its own JDBC driver.
+libraryDependencies ++= Seq(
+  "rocks.earlyeffect" %% "saferis" % "<version>",
+  "rocks.earlyeffect" %% "saferis-postgres-jdbc" % "<version>", // or one of the adapters below
+)
+```
+
+| Database | Adapter module | Layer | Dialect import |
+|----------|----------------|-------|----------------|
+| PostgreSQL | `saferis-postgres-jdbc` (pgjdbc) | `PostgresJdbc.layer()` | default |
+| MySQL | `saferis-mysql-jdbc` (Connector/J) | `MySqlJdbc.layer()` | `import saferis.mysql.given` |
+| SQLite | `saferis-sqlite-jdbc` (sqlite-jdbc) | `SqliteJdbc.layer()` | `import saferis.sqlite.given` |
+| H2, for fast in-memory tests | `saferis-h2-jdbc` | `H2Jdbc.memory("db") >>> H2Jdbc.layer()` | `import saferis.h2.given` |
+
+Each layer needs a `javax.sql.DataSource` (your pool) and provides a `SqlSession`.
+
+### Bring your own database
+
+A database Saferis does not ship needs a `Dialect` for its SQL and a `JdbcAdapter` for its driver. `StandardJdbcAdapter` covers what `java.sql` specifies, so an adapter overrides only what its driver does differently:
+
+```scala
+object MyDialect extends Dialect:
+  val name = DialectName("MyDb")
+  def columnType(tpe: SqlType): ColumnType = ...
+  def autoIncrementClause(isGenerated: Boolean, isPrimaryKey: Boolean, hasCompoundKey: Boolean): SqlText = ...
+
+object MyAdapter extends StandardJdbcAdapter:
+  // Map vendor error codes to the SQLSTATEs Saferis classifies (23505 unique, 40P01 deadlock, ...).
+  override def serverError(e: SQLException): ServerError = ...
+
+val session = JdbcSession.layer(MyAdapter)
+```
+
+Every shipped database runs one conformance suite by providing its `SqlSession` and a description of itself as layers, and a database brought from outside the library runs the same suite the same way.
+
+Node (Scala.js) uses `saferis-postgres-node`. Compile does not download `pg`. Install the same versions this repository links against, or `require` fails when the bundle loads:
+
+```scala
+libraryDependencies ++= Seq(
+  "rocks.earlyeffect" %%% "saferis" % "<version>",
+  "rocks.earlyeffect" %%% "saferis-postgres-node" % "<version>",
+)
+```
+
+```bash
+npm install pg@8.16.3 pg-cursor@2.22.0
 ```
 
 ## Database Dialects
@@ -36,6 +82,9 @@ Saferis provides compile-time guarantees that operations are only available when
 | JSON operations | Yes | Yes | No |
 | Array types | Yes | No | No |
 | UPSERT | Yes | No | No |
+| `Schema.verify` | Yes | Yes | Yes |
+
+The query builder's `.in` / `.inList` binds one array parameter on PostgreSQL and one parameter per value elsewhere. In a raw `sql` string, `in(...)` works on every database.
 
 Switch databases by changing one import - your code adapts automatically:
 

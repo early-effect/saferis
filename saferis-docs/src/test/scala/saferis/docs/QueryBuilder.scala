@@ -1,7 +1,6 @@
 package saferis.docs
 
 import saferis.*
-import saferis.docs.DocsTransactor.xa
 import saferis.postgres.given
 import specular.*
 import specular.ziotest.DocSpecSuite
@@ -116,11 +115,11 @@ Query[SafetyUser].build
       exampleValue {
         // Equality
         Query[QueryUser].where(_.name).eq("Alice").build.sql
-      }.assert(sql => assertTrue(sql.contains("?"))),
+      }.assert(sql => assertTrue(sql.contains("$1"))),
       exampleValue {
         // Comparison operators
         Query[QueryUser].where(_.age).gt(21).build.sql
-      }.assert(sql => assertTrue(sql.contains("?"))),
+      }.assert(sql => assertTrue(sql.contains("$1"))),
       exampleValue {
         // IS NULL / IS NOT NULL
         Query[QueryUser].where(_.email).isNotNull().build.sql
@@ -323,7 +322,7 @@ Query[SafetyUser].build
     section("Executing Queries")(
       md"""Use `.query[R]` to execute and decode results:""",
       exampleZIO {
-        xa.run(
+        (
           for
             _      <- ddl.createTable[ExecUser](ifNotExists = true)
             _      <- ddl.createTable[ExecOrder](ifNotExists = true)
@@ -341,6 +340,7 @@ Query[SafetyUser].build
               .query[ExecUser]
           yield result
         ).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(result) => assertTrue(result.exists(_.name == "Alice"))
         case Left(err)     => assertTrue(false).label(err.message)

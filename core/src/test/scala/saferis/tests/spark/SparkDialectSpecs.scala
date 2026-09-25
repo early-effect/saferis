@@ -4,8 +4,6 @@ import saferis.*
 import saferis.spark.given
 import zio.test.*
 
-import java.sql.Types
-
 object SparkDialectSpecs extends ZIOSpecDefault:
 
   val spec = suite("Spark Dialect Support")(
@@ -29,23 +27,18 @@ object SparkDialectSpecs extends ZIOSpecDefault:
     test("Spark type mappings") {
       val dialect = summon[Dialect]
       assertTrue(
-        // String types map to STRING
-        dialect.columnType(Types.VARCHAR) == "string" &&
-          dialect.columnType(Types.CHAR) == "string" &&
-          dialect.columnType(Types.LONGVARCHAR) == "string" &&
-          // Integer types
-          dialect.columnType(Types.TINYINT) == "tinyint" &&
-          dialect.columnType(Types.SMALLINT) == "smallint" &&
-          dialect.columnType(Types.INTEGER) == "int" &&
-          dialect.columnType(Types.BIGINT) == "bigint" &&
-          // Floating point
-          dialect.columnType(Types.FLOAT) == "float" &&
-          dialect.columnType(Types.DOUBLE) == "double" &&
-          // Boolean
-          dialect.columnType(Types.BOOLEAN) == "boolean" &&
-          // Date/Time
-          dialect.columnType(Types.DATE) == "date" &&
-          dialect.columnType(Types.TIMESTAMP) == "timestamp"
+        dialect.columnType(SqlType.VarChar) == "string" &&
+          dialect.columnType(SqlType.Text) == "string" &&
+          dialect.columnType(SqlType.Int2) == "smallint" &&
+          dialect.columnType(SqlType.Int4) == "int" &&
+          dialect.columnType(SqlType.Int8) == "bigint" &&
+          dialect.columnType(SqlType.Float4) == "float" &&
+          dialect.columnType(SqlType.Float8) == "double" &&
+          dialect.columnType(SqlType.Bool) == "boolean" &&
+          dialect.columnType(SqlType.Date) == "date" &&
+          dialect.columnType(SqlType.Timestamp) == "timestamp" &&
+          dialect.columnType(SqlType.Bytea) == "binary" &&
+          dialect.columnType(SqlType.Uuid) == "string"
       )
     },
     test("Spark DDL uses IF NOT EXISTS") {
@@ -53,8 +46,8 @@ object SparkDialectSpecs extends ZIOSpecDefault:
       assertTrue(
         dialect.createTableClause(ifNotExists = true) == "create table if not exists" &&
           dialect.createTableClause(ifNotExists = false) == "create table" &&
-          dialect.dropTableSql("my_table", ifExists = true) == "drop table if exists my_table" &&
-          dialect.dropTableSql("my_table", ifExists = false) == "drop table my_table"
+          dialect.dropTableSql(TableName("my_table"), ifExists = true) == "drop table if exists `my_table`" &&
+          dialect.dropTableSql(TableName("my_table"), ifExists = false) == "drop table `my_table`"
       )
     },
     test("Spark does not support indexes") {
@@ -62,17 +55,17 @@ object SparkDialectSpecs extends ZIOSpecDefault:
       // Just verify that these methods throw UnsupportedOperationException
       val createsIndex =
         try
-          dialect.createIndexSql("idx", "table", Seq("col"))
+          dialect.createIndexSql(IndexName("idx"), TableName("table"), Seq(ColumnName("col")))
           false
         catch case _: UnsupportedOperationException => true
       val createsUnique =
         try
-          dialect.createUniqueIndexSql("idx", "table", Seq("col"))
+          dialect.createUniqueIndexSql(IndexName("idx"), TableName("table"), Seq(ColumnName("col")))
           false
         catch case _: UnsupportedOperationException => true
       val dropsIndex =
         try
-          dialect.dropIndexSql("idx")
+          dialect.dropIndexSql(IndexName("idx"))
           false
         catch case _: UnsupportedOperationException => true
       assertTrue(createsIndex && createsUnique && dropsIndex)
@@ -82,7 +75,7 @@ object SparkDialectSpecs extends ZIOSpecDefault:
         case dialect: JsonSupport =>
           assertTrue(
             dialect.jsonType == "string" &&
-              dialect.jsonExtractSql("data", "field") == "get_json_object(data, '$.field')"
+              dialect.jsonExtractSql(SqlText("data"), "field") == "get_json_object(data, '$.field')"
           )
         case _ => assertTrue(false)
     },
@@ -90,8 +83,8 @@ object SparkDialectSpecs extends ZIOSpecDefault:
       summon[Dialect] match
         case dialect: ArraySupport =>
           assertTrue(
-            dialect.arrayType("int") == "array<int>" &&
-              dialect.arrayContainsSql("tags", "value") == "array_contains(tags, value)"
+            dialect.arrayType(ColumnType("int")) == "array<int>" &&
+              dialect.arrayContainsSql(SqlText("tags"), SqlText("value")) == "array_contains(tags, value)"
           )
         case _ => assertTrue(false)
     },

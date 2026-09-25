@@ -10,41 +10,48 @@ class silent extends Annotation
 export Interpolator.sql
 export Interpolator.sqlEcho
 export Interpolator.in
+export Interpolator.array
 
 object Interpolator:
 
-  /** Splice a collection of values as `(?, ?, ?, ...)` for an IN clause:
+  /** Splice a collection as a parenthesized list, `($1, $2, $3)`, for an IN clause. Works on every dialect.
     *
     * {{{
     *   sql"select * from $table where ${table.id} in ${in(ids)}"
     * }}}
     *
-    * Accepts any `Iterable[A]` (`Seq`, `List`, `Set`, `LinkedHashSet`, etc.). Duplicates are removed before placeholder
-    * construction. Each remaining element binds one parameter via the implicit `Encoder[A]`.
+    * Duplicates are removed, and each remaining value binds one parameter. On Postgres, `= any(${array(ids)})` binds
+    * one array parameter instead, which keeps the statement text the same for every list length.
     *
-    * On empty (or degenerate-empty-after-dedupe) input, the resulting placeholder carries a
-    * [[FragmentIssue.EmptyCollection]] that surfaces as [[SaferisError.InvalidStatement]] at execution. No DB
-    * round-trip on failure.
+    * On empty (or degenerate-empty-after-dedupe) input, the placeholder carries a [[FragmentIssue.EmptyCollection]]
+    * that surfaces as [[SaferisError.InvalidStatement]] at execution, with no database round trip.
     */
   def in[A](values: Iterable[A])(using Encoder[A]): Placeholder =
-    Placeholder.concat(
-      Placeholder.raw("("),
-      Placeholder.listTagged(values, helper = "in", origin = Placeholder.captureOrigin()),
-      Placeholder.raw(")"),
-    )
+    parenthesized(Placeholder.listTagged(values, helper = "in", origin = Placeholder.captureOrigin()))
 
-  /** Varargs convenience overload — at least one element by construction.
+  /** Varargs form. At least one element by construction. */
+  def in[A](first: A, rest: A*)(using Encoder[A]): Placeholder =
+    parenthesized(Placeholder.listTagged(first +: rest, helper = "in", origin = Placeholder.captureOrigin()))
+
+  private def parenthesized(list: Placeholder): Placeholder =
+    Placeholder.concat(Placeholder.raw("("), list, Placeholder.raw(")"))
+
+  /** One array value. Write the operator in the SQL string. Postgres only.
     *
     * {{{
-    *   sql"... where ${table.status} in ${in("active", "pending")}"
+    *   sql"select * from $table where ${table.id} = any(${array(ids)})"
+    *   sql"select * from $table where ${table.id} <> all(${array(names)})"
     * }}}
+    *
+    * Accepts any `Iterable[A]`. The values are kept as given, duplicates included, so the same helper can store an
+    * array column. An empty collection is one empty array parameter.
     */
-  def in[A](first: A, rest: A*)(using Encoder[A]): Placeholder =
-    Placeholder.concat(
-      Placeholder.raw("("),
-      Placeholder.listTagged(first +: rest, helper = "in", origin = Placeholder.captureOrigin()),
-      Placeholder.raw(")"),
-    )
+  def array[A](values: Iterable[A])(using Encoder[A]): Placeholder =
+    Placeholder.array(values)
+
+  /** Varargs form. At least one element by construction. */
+  def array[A](first: A, rest: A*)(using Encoder[A]): Placeholder =
+    Placeholder.array(first +: rest)
 
   extension (inline sc: StringContext)
     /** Interpolates a string context creating an [[SqlFragment]].
@@ -98,13 +105,7 @@ object Interpolator:
 
     val holder     = '{ (Vector.newBuilder[Placeholder]) }
     val placeExprs = getPlaceHoldersExpr(allArgsExprs, holder)
-    val writeExprs = '{ Placeholder.allWrites($placeExprs) }
-    val issueExprs = '{ Placeholder.allIssues($placeExprs) }
-    val query      = '{ $sc.s($placeExprs.map(_.sql)*) }
-    val res        = '{
-      SqlFragment($query, $writeExprs, $issueExprs)
-    }
-    res
+    '{ SqlFragment.interpolate($sc.parts, $placeExprs) }
 
   end sqlImpl
 

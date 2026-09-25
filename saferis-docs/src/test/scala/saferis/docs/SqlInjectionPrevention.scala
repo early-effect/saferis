@@ -47,12 +47,12 @@ flowchart LR
     exampleValue {
       val userName = "Alice"
       sql"SELECT * FROM $users WHERE ${users.name} = $userName".sql
-    }.assert(sql => assertTrue(sql == "SELECT * FROM sql_injection_users WHERE name = ?")),
-    md"""The generated SQL uses a `?` placeholder, and the actual value is bound separately. It never touches the SQL string. Even malicious input is harmless:""",
+    }.assert(sql => assertTrue(sql == "SELECT * FROM sql_injection_users WHERE name = $1")),
+    md"""The generated SQL uses a `$$1` placeholder, and the actual value is bound separately. It never touches the SQL string. Even malicious input is harmless:""",
     exampleValue {
       val malicious = "'; DROP TABLE sql_injection_users; --"
       sql"SELECT * FROM $users WHERE ${users.name} = $malicious".sql
-    }.assert(sql => assertTrue(sql == "SELECT * FROM sql_injection_users WHERE name = ?")),
+    }.assert(sql => assertTrue(sql == "SELECT * FROM sql_injection_users WHERE name = $1")),
     md"""The malicious string becomes a parameter value, not part of the SQL syntax. (`.show`, used elsewhere in these docs, inlines the bound values for debugging, but it is **not** what gets sent to the database.)
 
 ## Table Aliases: Compile-Time Literal Enforcement
@@ -108,9 +108,9 @@ Never pass user input to `Placeholder.raw()`.
 ## JSON Operations: Automatic Escaping
 
 When using JSON operations in the Schema DSL or dialect methods, Saferis automatically escapes single quotes to prevent injection:""",
-    exampleValue(PostgresDialect.jsonHasKeySql("data", "user's_key"))
+    exampleValue(PostgresDialect.jsonHasKeySql(SqlText("data"), "user's_key"))
       .assert(sql => assertTrue(sql == "jsonb_exists(data, 'user''s_key')")),
-    exampleValue(PostgresDialect.jsonHasKeySql("data", "'); DROP TABLE sql_injection_profiles; --"))
+    exampleValue(PostgresDialect.jsonHasKeySql(SqlText("data"), "'); DROP TABLE sql_injection_profiles; --"))
       .assert(sql => assertTrue(sql == "jsonb_exists(data, '''); DROP TABLE sql_injection_profiles; --')")),
     md"""The single quote in the injection attempt is escaped to `''`, rendering it harmless.
 

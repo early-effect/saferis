@@ -20,12 +20,11 @@ final case class SingleCondition(fragment: SqlFragment) extends WhereGroup:
   */
 final case class OrGroup(conditions: Vector[WhereGroup]) extends WhereGroup:
   def toSqlFragment: SqlFragment =
-    if conditions.isEmpty then SqlFragment("", Seq.empty)
+    if conditions.isEmpty then SqlFragment.empty
     else
       val parts  = conditions.map(_.toSqlFragment)
       val joined = Placeholder.join(parts, " or ")
-      val writes = parts.flatMap(_.writes)
-      SqlFragment(s"(${joined.sql})", writes)
+      SqlFragment.text("(").append(SqlFragment(joined)).append(SqlFragment.text(")"))
 
 /** AND group: combines conditions with AND, wrapped in parentheses.
   *
@@ -33,12 +32,11 @@ final case class OrGroup(conditions: Vector[WhereGroup]) extends WhereGroup:
   */
 final case class AndGroup(conditions: Vector[WhereGroup]) extends WhereGroup:
   def toSqlFragment: SqlFragment =
-    if conditions.isEmpty then SqlFragment("", Seq.empty)
+    if conditions.isEmpty then SqlFragment.empty
     else
       val parts  = conditions.map(_.toSqlFragment)
       val joined = Placeholder.join(parts, " and ")
-      val writes = parts.flatMap(_.writes)
-      SqlFragment(s"(${joined.sql})", writes)
+      SqlFragment.text("(").append(SqlFragment(joined)).append(SqlFragment.text(")"))
 
 // ============================================================================
 // WhereGroupBuilder - Entry point for grouped conditions
@@ -79,8 +77,8 @@ final case class WhereGroupColumnBuilder[A: Table, T](
     alias: Alias,
     column: Column[T],
 ):
-  private def complete(operator: Operator, write: Write[?]): WhereGroupChain[A] =
-    val condition = LiteralCondition(alias, column, operator, write)
+  private def complete(operator: Operator, value: SqlValue): WhereGroupChain[A] =
+    val condition = LiteralCondition(alias, column, operator, value)
     val fragment  = Condition.toSqlFragment(Vector(condition))
     WhereGroupChain(builder, SingleCondition(fragment))
 
@@ -91,27 +89,27 @@ final case class WhereGroupColumnBuilder[A: Table, T](
 
   /** Equals comparison */
   def eq(value: T)(using enc: Encoder[T]): WhereGroupChain[A] =
-    complete(Operator.Eq, enc(value))
+    complete(Operator.Eq, enc.encode(value))
 
   /** Not equals comparison */
   def neq(value: T)(using enc: Encoder[T]): WhereGroupChain[A] =
-    complete(Operator.Neq, enc(value))
+    complete(Operator.Neq, enc.encode(value))
 
   /** Less than comparison */
   def lt(value: T)(using enc: Encoder[T]): WhereGroupChain[A] =
-    complete(Operator.Lt, enc(value))
+    complete(Operator.Lt, enc.encode(value))
 
   /** Less than or equal comparison */
   def lte(value: T)(using enc: Encoder[T]): WhereGroupChain[A] =
-    complete(Operator.Lte, enc(value))
+    complete(Operator.Lte, enc.encode(value))
 
   /** Greater than comparison */
   def gt(value: T)(using enc: Encoder[T]): WhereGroupChain[A] =
-    complete(Operator.Gt, enc(value))
+    complete(Operator.Gt, enc.encode(value))
 
   /** Greater than or equal comparison */
   def gte(value: T)(using enc: Encoder[T]): WhereGroupChain[A] =
-    complete(Operator.Gte, enc(value))
+    complete(Operator.Gte, enc.encode(value))
 
   /** IS NULL check */
   def isNull: WhereGroupChain[A] =
@@ -123,7 +121,7 @@ final case class WhereGroupColumnBuilder[A: Table, T](
 
   /** Custom operator */
   def op(operator: Operator)(value: T)(using enc: Encoder[T]): WhereGroupChain[A] =
-    complete(operator, enc(value))
+    complete(operator, enc.encode(value))
 
 end WhereGroupColumnBuilder
 
@@ -182,8 +180,8 @@ final case class WhereGroupOrBuilder[A: Table, T](
     previous: WhereGroup,
     isOr: Boolean,
 ):
-  private def complete(operator: Operator, write: Write[?]): WhereGroupChain[A] =
-    val condition    = LiteralCondition(alias, column, operator, write)
+  private def complete(operator: Operator, value: SqlValue): WhereGroupChain[A] =
+    val condition    = LiteralCondition(alias, column, operator, value)
     val fragment     = Condition.toSqlFragment(Vector(condition))
     val newCondition = SingleCondition(fragment)
     val combined     =
@@ -216,27 +214,27 @@ final case class WhereGroupOrBuilder[A: Table, T](
 
   /** Equals comparison */
   def eq(value: T)(using enc: Encoder[T]): WhereGroupChain[A] =
-    complete(Operator.Eq, enc(value))
+    complete(Operator.Eq, enc.encode(value))
 
   /** Not equals comparison */
   def neq(value: T)(using enc: Encoder[T]): WhereGroupChain[A] =
-    complete(Operator.Neq, enc(value))
+    complete(Operator.Neq, enc.encode(value))
 
   /** Less than comparison */
   def lt(value: T)(using enc: Encoder[T]): WhereGroupChain[A] =
-    complete(Operator.Lt, enc(value))
+    complete(Operator.Lt, enc.encode(value))
 
   /** Less than or equal comparison */
   def lte(value: T)(using enc: Encoder[T]): WhereGroupChain[A] =
-    complete(Operator.Lte, enc(value))
+    complete(Operator.Lte, enc.encode(value))
 
   /** Greater than comparison */
   def gt(value: T)(using enc: Encoder[T]): WhereGroupChain[A] =
-    complete(Operator.Gt, enc(value))
+    complete(Operator.Gt, enc.encode(value))
 
   /** Greater than or equal comparison */
   def gte(value: T)(using enc: Encoder[T]): WhereGroupChain[A] =
-    complete(Operator.Gte, enc(value))
+    complete(Operator.Gte, enc.encode(value))
 
   /** IS NULL check */
   def isNull: WhereGroupChain[A] =
@@ -248,6 +246,6 @@ final case class WhereGroupOrBuilder[A: Table, T](
 
   /** Custom operator */
   def op(operator: Operator)(value: T)(using enc: Encoder[T]): WhereGroupChain[A] =
-    complete(operator, enc(value))
+    complete(operator, enc.encode(value))
 
 end WhereGroupOrBuilder

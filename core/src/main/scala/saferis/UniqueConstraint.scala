@@ -10,16 +10,16 @@ package saferis
   *   Optional custom constraint name (auto-generated if None)
   */
 final case class UniqueConstraintSpec[A](
-    columns: Seq[String],
-    constraintName: Option[String] = None,
+    columns: Seq[FieldName],
+    constraintName: Option[ConstraintName] = None,
 ):
   /** Generate UNIQUE constraint SQL for this spec
     *
     * @param fieldToLabel
     *   Function to convert field names to column labels (respects @label annotations)
     */
-  def toConstraintSql(fieldToLabel: String => String): String =
+  def toConstraintSql(fieldToLabel: String => ColumnName): SqlText =
     val columnLabels = columns.map(fieldToLabel)
     val name         = constraintName.getOrElse(s"uq_${columnLabels.mkString("_")}")
-    s"constraint $name unique (${columnLabels.mkString(", ")})"
+    SqlText(s"constraint $name unique (${columnLabels.mkString(", ")})")
 end UniqueConstraintSpec

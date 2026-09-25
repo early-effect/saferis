@@ -1,166 +1,206 @@
 package saferis
 
-import zio.*
+import zio.Chunk
 
-import java.sql.ResultSet
-import java.sql.SQLException
+import scala.util.NotGiven
+
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
+import java.time.ZonedDateTime
+import java.util.UUID
+
+final case class DecodeError(detail: String)
 
 trait Decoder[A]:
   self =>
-
-  /** Transform a Decoder[A] to Decoder[B] by mapping the value of A to Task[B]
-    * @param f
-    * @return
-    */
-  def transform[B](f: A => Task[B]): Decoder[B] =
+  def decode(value: SqlValue): Either[DecodeError, A]
+  def transform[B](f: A => Either[DecodeError, B]): Decoder[B] =
     new Decoder[B]:
-      def decode(rs: ResultSet, name: String)(using Trace): Task[B] =
-        self.decode(rs, name).flatMap(f)
+      def decode(value: SqlValue): Either[DecodeError, B] =
+        self.decode(value).flatMap(f)
 
-  /** Decode a value from the result set
-    *
-    * @param rs
-    * @param name
-    * @return
-    */
-  def decode(rs: ResultSet, name: String)(using Trace): Task[A]
-end Decoder
+trait RowDecoder[A]:
+  def decode(row: SqlRow): Either[DecodeError, A]
 
 object Decoder:
+  private def reject(expected: String, value: SqlValue): Left[DecodeError, Nothing] =
+    value match
+      case SqlValue.Null(_) => Left(DecodeError("null value"))
+      case other            => Left(DecodeError(s"expected $expected, found ${other.productPrefix}"))
+
   given option[A](using decoder: Decoder[A]): Decoder[Option[A]] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[Option[A]] =
-      ZIO
-        .attempt(rs.getObject(name))
-        .flatMap: a =>
-          if a == null then ZIO.succeed(None)
-          else decoder.decode(rs, name).map(Some(_))
+    def decode(value: SqlValue): Either[DecodeError, Option[A]] = value match
+      case SqlValue.Null(_) => Right(None)
+      case other            => decoder.decode(other).map(Some(_))
+
   given string: Decoder[String] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[String] =
-      ZIO.attempt(rs.getString(name))
-  given short: Decoder[Short] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[Short] =
-      ZIO.attempt(rs.getShort(name))
-  given int: Decoder[Int] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[Int] =
-      ZIO.attempt(rs.getInt(name))
-  given long: Decoder[Long] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[Long] =
-      ZIO.attempt(rs.getLong(name))
-  given boolean: Decoder[Boolean] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[Boolean] =
-      ZIO.attempt(rs.getBoolean(name))
-  given float: Decoder[Float] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[Float] =
-      ZIO.attempt(rs.getFloat(name))
-  given double: Decoder[Double] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[Double] =
-      ZIO.attempt(rs.getDouble(name))
-  given date: Decoder[java.sql.Date] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[java.sql.Date] =
-      ZIO.attempt(rs.getDate(name))
-  given bigDecimal: Decoder[BigDecimal] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[BigDecimal] =
-      ZIO.attempt(rs.getBigDecimal(name))
-  given bigInt: Decoder[BigInt] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[BigInt] =
-      ZIO.attempt(rs.getBigDecimal(name)).map(x => (x: BigDecimal).toBigInt)
-  given time: Decoder[java.sql.Time] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[java.sql.Time] =
-      ZIO.attempt(rs.getTime(name))
-  given timestamp: Decoder[java.sql.Timestamp] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[java.sql.Timestamp] =
-      ZIO.attempt(rs.getTimestamp(name))
-  given url: Decoder[java.net.URL] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[java.net.URL] =
-      ZIO.attempt(rs.getURL(name))
+    def decode(value: SqlValue): Either[DecodeError, String] = value match
+      case SqlValue.VarChar(v)  => Right(v)
+      case SqlValue.Text(v)     => Right(v)
+      case SqlValue.Other(_, v) => Right(v)
+      case other                => reject("varchar", other)
 
-  // Java time API decoders
-  given instant: Decoder[java.time.Instant] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[java.time.Instant] =
-      ZIO.attempt:
-        val ts = rs.getTimestamp(name)
-        if ts == null then null else ts.toInstant
-
-  given localDateTime: Decoder[java.time.LocalDateTime] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[java.time.LocalDateTime] =
-      ZIO.attempt:
-        val ts = rs.getTimestamp(name)
-        if ts == null then null else ts.toLocalDateTime
-
-  given localDate: Decoder[java.time.LocalDate] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[java.time.LocalDate] =
-      ZIO.attempt:
-        val d = rs.getDate(name)
-        if d == null then null else d.toLocalDate
-
-  given localTime: Decoder[java.time.LocalTime] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[java.time.LocalTime] =
-      ZIO.attempt:
-        val t = rs.getTime(name)
-        if t == null then null else t.toLocalTime
-
-  given zonedDateTime: Decoder[java.time.ZonedDateTime] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[java.time.ZonedDateTime] =
-      ZIO.attempt:
-        val ts = rs.getTimestamp(name)
-        if ts == null then null
-        else
-          // Convert to Instant, then to ZonedDateTime in system default zone
-          java.time.ZonedDateTime.ofInstant(ts.toInstant, java.time.ZoneId.systemDefault)
-
-  given offsetDateTime: Decoder[java.time.OffsetDateTime] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[java.time.OffsetDateTime] =
-      ZIO.attempt:
-        val ts = rs.getTimestamp(name)
-        if ts == null then null
-        else
-          // Convert to Instant, then to OffsetDateTime in system default offset
-          java.time.OffsetDateTime.ofInstant(ts.toInstant, java.time.ZoneId.systemDefault)
-
-  /** Default UUID decoder from PostgreSQL dialect - provided as a low priority given. This allows users to work with
-    * UUIDs out of the box with just `import saferis.*` Users can override this by importing dialect-specific codecs
-    * (e.g., `import saferis.mysql.{given}`)
+  /** Any integer width, when the value fits. SQLite stores every integer as 64 bits, and `count(*)` is `int8` on
+    * Postgres, so the column width alone does not decide the Scala type.
     */
-  given defaultUuidDecoder: Decoder[java.util.UUID] = postgres.uuidDecoder
+  private def integral(value: SqlValue): Option[Long] = value match
+    case SqlValue.Int2(v) => Some(v.toLong)
+    case SqlValue.Int4(v) => Some(v.toLong)
+    case SqlValue.Int8(v) => Some(v)
+    case _                => None
 
-  // Tuple decoders - decode using column indices for tuple types
-  def failTupleDecode(expected: Int, actual: Int) = ZIO.fail(
-    new SQLException(s"Expected exactly $expected columns in result set, got $actual")
-  )
-  given tuple2[A, B](using decoderA: Decoder[A], decoderB: Decoder[B]): Decoder[(A, B)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B)] =
-      if rs.getMetaData.getColumnCount != 2 then failTupleDecode(2, rs.getMetaData.getColumnCount)
-      else
+  private def fits(expected: String, value: SqlValue, min: Long, max: Long): Either[DecodeError, Long] =
+    integral(value) match
+      case Some(v) if v >= min && v <= max => Right(v)
+      case Some(v)                         => Left(DecodeError(s"$v does not fit in $expected"))
+      case None                            => reject(expected, value)
+
+  given short: Decoder[Short] with
+    def decode(value: SqlValue): Either[DecodeError, Short] =
+      fits("int2", value, Short.MinValue.toLong, Short.MaxValue.toLong).map(_.toShort)
+
+  given int: Decoder[Int] with
+    def decode(value: SqlValue): Either[DecodeError, Int] =
+      fits("int4", value, Int.MinValue.toLong, Int.MaxValue.toLong).map(_.toInt)
+
+  given long: Decoder[Long] with
+    def decode(value: SqlValue): Either[DecodeError, Long] =
+      fits("int8", value, Long.MinValue, Long.MaxValue)
+
+  given boolean: Decoder[Boolean] with
+    def decode(value: SqlValue): Either[DecodeError, Boolean] = value match
+      case SqlValue.Bool(v) => Right(v)
+      case other            => reject("bool", other)
+
+  /** A `float8` decodes when it is exactly a `Float`, as every value written from a `Float` is. SQLite stores every
+    * `real` as 8 bytes, so this is how a `Float` column reads there. Anything else fails instead of rounding.
+    */
+  given float: Decoder[Float] with
+    def decode(value: SqlValue): Either[DecodeError, Float] = value match
+      case SqlValue.Float4(v)                                       => Right(v)
+      case SqlValue.Float8(v) if v.isNaN || v.toFloat.toDouble == v => Right(v.toFloat)
+      case SqlValue.Float8(v)                                       => Left(DecodeError(s"$v is not exactly a float4"))
+      case other                                                    => reject("float4", other)
+
+  given double: Decoder[Double] with
+    def decode(value: SqlValue): Either[DecodeError, Double] = value match
+      case SqlValue.Float8(v) => Right(v)
+      case SqlValue.Float4(v) => Right(v.toDouble)
+      case other              => reject("float8", other)
+
+  given bigDecimal: Decoder[BigDecimal] with
+    def decode(value: SqlValue): Either[DecodeError, BigDecimal] = value match
+      case SqlValue.Numeric(v) => Right(v)
+      case other               => reject("numeric", other)
+
+  given bigInt: Decoder[BigInt] with
+    def decode(value: SqlValue): Either[DecodeError, BigInt] = value match
+      case SqlValue.Numeric(v) => Right(v.toBigInt)
+      case other               => reject("numeric", other)
+
+  given chunkByte: Decoder[Chunk[Byte]] with
+    def decode(value: SqlValue): Either[DecodeError, Chunk[Byte]] = value match
+      case SqlValue.Bytea(v) => Right(v)
+      case other             => reject("bytea", other)
+
+  given instant: Decoder[Instant] with
+    def decode(value: SqlValue): Either[DecodeError, Instant] = value match
+      case SqlValue.Timestamptz(v) => Right(v)
+      case other                   => reject("timestamptz", other)
+
+  given localDateTime: Decoder[LocalDateTime] with
+    def decode(value: SqlValue): Either[DecodeError, LocalDateTime] = value match
+      case SqlValue.Timestamp(v) => Right(v)
+      case other                 => reject("timestamp", other)
+
+  given localDate: Decoder[LocalDate] with
+    def decode(value: SqlValue): Either[DecodeError, LocalDate] = value match
+      case SqlValue.Date(v) => Right(v)
+      case other            => reject("date", other)
+
+  given localTime: Decoder[LocalTime] with
+    def decode(value: SqlValue): Either[DecodeError, LocalTime] = value match
+      case SqlValue.Time(v) => Right(v)
+      case other            => reject("time", other)
+
+  given zonedDateTime: Decoder[ZonedDateTime] with
+    def decode(value: SqlValue): Either[DecodeError, ZonedDateTime] = value match
+      case SqlValue.Timestamptz(v) => Right(ZonedDateTime.ofInstant(v, ZoneOffset.UTC))
+      case other                   => reject("timestamptz", other)
+
+  given offsetDateTime: Decoder[OffsetDateTime] with
+    def decode(value: SqlValue): Either[DecodeError, OffsetDateTime] = value match
+      case SqlValue.Timestamptz(v) => Right(OffsetDateTime.ofInstant(v, ZoneOffset.UTC))
+      case other                   => reject("timestamptz", other)
+
+  given defaultUuidDecoder: Decoder[UUID] = postgres.uuidDecoder
+
+  /** A Postgres array column. `Chunk[Byte]` stays `bytea` ([[chunkByte]]). */
+  given array[A](using element: Decoder[A], notBytes: NotGiven[A =:= Byte]): Decoder[Chunk[A]] with
+    def decode(value: SqlValue): Either[DecodeError, Chunk[A]] = value match
+      case SqlValue.Array(_, values) =>
+        values.foldLeft[Either[DecodeError, Chunk[A]]](Right(Chunk.empty)):
+          case (Left(err), _)       => Left(err)
+          case (Right(acc), member) => element.decode(member).map(acc :+ _)
+      case other => reject("array", other)
+
+  def fromJsonCodec[T](using codec: zio.json.JsonCodec[T]): Decoder[T] =
+    new Decoder[T]:
+      def decode(value: SqlValue): Either[DecodeError, T] = value match
+        case SqlValue.Jsonb(json) =>
+          codec.decoder.decodeJson(json).left.map(e => DecodeError(s"Failed to decode JSON: $e"))
+        case SqlValue.Null(_) => Left(DecodeError("null value"))
+        case other            => Left(DecodeError(s"expected jsonb, found ${other.productPrefix}"))
+
+end Decoder
+
+object RowDecoder:
+  given rowFromCell[A](using cell: Decoder[A]): RowDecoder[A] with
+    def decode(row: SqlRow): Either[DecodeError, A] =
+      row.at(0).flatMap(cell.decode)
+
+  private def cell[A](row: SqlRow, index: Int)(using decoder: Decoder[A]): Either[DecodeError, A] =
+    row.at(index).flatMap(decoder.decode).left.map(err => DecodeError(s"column ${index + 1}: ${err.detail}"))
+
+  private def width(row: SqlRow, expected: Int): Either[DecodeError, Unit] =
+    if row.width == expected then Right(())
+    else Left(DecodeError(s"Expected exactly $expected columns in result set, got ${row.width}"))
+
+  given tuple2[A, B](using decoderA: Decoder[A], decoderB: Decoder[B]): RowDecoder[(A, B)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B)] =
+      width(row, 2).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
         yield (a, b)
 
-  given tuple3[A, B, C](using decoderA: Decoder[A], decoderB: Decoder[B], decoderC: Decoder[C]): Decoder[(A, B, C)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C)] =
-      if rs.getMetaData.getColumnCount != 3 then failTupleDecode(3, rs.getMetaData.getColumnCount)
-      else
+  given tuple3[A, B, C](using decoderA: Decoder[A], decoderB: Decoder[B], decoderC: Decoder[C]): RowDecoder[(A, B, C)]
+  with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C)] =
+      width(row, 3).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
         yield (a, b, c)
-  end tuple3
 
   given tuple4[A, B, C, D](using
       decoderA: Decoder[A],
       decoderB: Decoder[B],
       decoderC: Decoder[C],
       decoderD: Decoder[D],
-  ): Decoder[(A, B, C, D)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C, D)] =
-      if rs.getMetaData.getColumnCount != 4 then failTupleDecode(4, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D)] =
+      width(row, 4).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
         yield (a, b, c, d)
   end tuple4
 
@@ -170,16 +210,15 @@ object Decoder:
       decoderC: Decoder[C],
       decoderD: Decoder[D],
       decoderE: Decoder[E],
-  ): Decoder[(A, B, C, D, E)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C, D, E)] =
-      if rs.getMetaData.getColumnCount != 5 then failTupleDecode(5, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E)] =
+      width(row, 5).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
         yield (a, b, c, d, e)
   end tuple5
 
@@ -190,17 +229,16 @@ object Decoder:
       decoderD: Decoder[D],
       decoderE: Decoder[E],
       decoderF: Decoder[F],
-  ): Decoder[(A, B, C, D, E, F)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C, D, E, F)] =
-      if rs.getMetaData.getColumnCount != 6 then failTupleDecode(6, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F)] =
+      width(row, 6).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
         yield (a, b, c, d, e, f)
   end tuple6
 
@@ -212,18 +250,17 @@ object Decoder:
       decoderE: Decoder[E],
       decoderF: Decoder[F],
       decoderG: Decoder[G],
-  ): Decoder[(A, B, C, D, E, F, G)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C, D, E, F, G)] =
-      if rs.getMetaData.getColumnCount != 7 then failTupleDecode(7, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G)] =
+      width(row, 7).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
         yield (a, b, c, d, e, f, g)
   end tuple7
 
@@ -236,19 +273,18 @@ object Decoder:
       decoderF: Decoder[F],
       decoderG: Decoder[G],
       decoderH: Decoder[H],
-  ): Decoder[(A, B, C, D, E, F, G, H)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C, D, E, F, G, H)] =
-      if rs.getMetaData.getColumnCount != 8 then failTupleDecode(8, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G, H)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G, H)] =
+      width(row, 8).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
-          h <- decoderH.decode(rs, rs.getMetaData.getColumnLabel(8))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
+          h <- cell[H](row, 7)
         yield (a, b, c, d, e, f, g, h)
   end tuple8
 
@@ -262,20 +298,19 @@ object Decoder:
       decoderG: Decoder[G],
       decoderH: Decoder[H],
       decoderI: Decoder[I],
-  ): Decoder[(A, B, C, D, E, F, G, H, I)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C, D, E, F, G, H, I)] =
-      if rs.getMetaData.getColumnCount != 9 then failTupleDecode(9, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G, H, I)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G, H, I)] =
+      width(row, 9).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
-          h <- decoderH.decode(rs, rs.getMetaData.getColumnLabel(8))
-          i <- decoderI.decode(rs, rs.getMetaData.getColumnLabel(9))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
+          h <- cell[H](row, 7)
+          i <- cell[I](row, 8)
         yield (a, b, c, d, e, f, g, h, i)
   end tuple9
 
@@ -290,21 +325,20 @@ object Decoder:
       decoderH: Decoder[H],
       decoderI: Decoder[I],
       decoderJ: Decoder[J],
-  ): Decoder[(A, B, C, D, E, F, G, H, I, J)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C, D, E, F, G, H, I, J)] =
-      if rs.getMetaData.getColumnCount != 10 then failTupleDecode(10, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G, H, I, J)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G, H, I, J)] =
+      width(row, 10).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
-          h <- decoderH.decode(rs, rs.getMetaData.getColumnLabel(8))
-          i <- decoderI.decode(rs, rs.getMetaData.getColumnLabel(9))
-          j <- decoderJ.decode(rs, rs.getMetaData.getColumnLabel(10))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
+          h <- cell[H](row, 7)
+          i <- cell[I](row, 8)
+          j <- cell[J](row, 9)
         yield (a, b, c, d, e, f, g, h, i, j)
   end tuple10
 
@@ -320,22 +354,21 @@ object Decoder:
       decoderI: Decoder[I],
       decoderJ: Decoder[J],
       decoderK: Decoder[K],
-  ): Decoder[(A, B, C, D, E, F, G, H, I, J, K)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C, D, E, F, G, H, I, J, K)] =
-      if rs.getMetaData.getColumnCount != 11 then failTupleDecode(11, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G, H, I, J, K)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G, H, I, J, K)] =
+      width(row, 11).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
-          h <- decoderH.decode(rs, rs.getMetaData.getColumnLabel(8))
-          i <- decoderI.decode(rs, rs.getMetaData.getColumnLabel(9))
-          j <- decoderJ.decode(rs, rs.getMetaData.getColumnLabel(10))
-          k <- decoderK.decode(rs, rs.getMetaData.getColumnLabel(11))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
+          h <- cell[H](row, 7)
+          i <- cell[I](row, 8)
+          j <- cell[J](row, 9)
+          k <- cell[K](row, 10)
         yield (a, b, c, d, e, f, g, h, i, j, k)
   end tuple11
 
@@ -352,23 +385,22 @@ object Decoder:
       decoderJ: Decoder[J],
       decoderK: Decoder[K],
       decoderL: Decoder[L],
-  ): Decoder[(A, B, C, D, E, F, G, H, I, J, K, L)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C, D, E, F, G, H, I, J, K, L)] =
-      if rs.getMetaData.getColumnCount != 12 then failTupleDecode(12, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G, H, I, J, K, L)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G, H, I, J, K, L)] =
+      width(row, 12).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
-          h <- decoderH.decode(rs, rs.getMetaData.getColumnLabel(8))
-          i <- decoderI.decode(rs, rs.getMetaData.getColumnLabel(9))
-          j <- decoderJ.decode(rs, rs.getMetaData.getColumnLabel(10))
-          k <- decoderK.decode(rs, rs.getMetaData.getColumnLabel(11))
-          l <- decoderL.decode(rs, rs.getMetaData.getColumnLabel(12))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
+          h <- cell[H](row, 7)
+          i <- cell[I](row, 8)
+          j <- cell[J](row, 9)
+          k <- cell[K](row, 10)
+          l <- cell[L](row, 11)
         yield (a, b, c, d, e, f, g, h, i, j, k, l)
   end tuple12
 
@@ -386,24 +418,23 @@ object Decoder:
       decoderK: Decoder[K],
       decoderL: Decoder[L],
       decoderM: Decoder[M],
-  ): Decoder[(A, B, C, D, E, F, G, H, I, J, K, L, M)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C, D, E, F, G, H, I, J, K, L, M)] =
-      if rs.getMetaData.getColumnCount != 13 then failTupleDecode(13, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G, H, I, J, K, L, M)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G, H, I, J, K, L, M)] =
+      width(row, 13).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
-          h <- decoderH.decode(rs, rs.getMetaData.getColumnLabel(8))
-          i <- decoderI.decode(rs, rs.getMetaData.getColumnLabel(9))
-          j <- decoderJ.decode(rs, rs.getMetaData.getColumnLabel(10))
-          k <- decoderK.decode(rs, rs.getMetaData.getColumnLabel(11))
-          l <- decoderL.decode(rs, rs.getMetaData.getColumnLabel(12))
-          m <- decoderM.decode(rs, rs.getMetaData.getColumnLabel(13))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
+          h <- cell[H](row, 7)
+          i <- cell[I](row, 8)
+          j <- cell[J](row, 9)
+          k <- cell[K](row, 10)
+          l <- cell[L](row, 11)
+          m <- cell[M](row, 12)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m)
   end tuple13
 
@@ -422,25 +453,24 @@ object Decoder:
       decoderL: Decoder[L],
       decoderM: Decoder[M],
       decoderN: Decoder[N],
-  ): Decoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C, D, E, F, G, H, I, J, K, L, M, N)] =
-      if rs.getMetaData.getColumnCount != 14 then failTupleDecode(14, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G, H, I, J, K, L, M, N)] =
+      width(row, 14).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
-          h <- decoderH.decode(rs, rs.getMetaData.getColumnLabel(8))
-          i <- decoderI.decode(rs, rs.getMetaData.getColumnLabel(9))
-          j <- decoderJ.decode(rs, rs.getMetaData.getColumnLabel(10))
-          k <- decoderK.decode(rs, rs.getMetaData.getColumnLabel(11))
-          l <- decoderL.decode(rs, rs.getMetaData.getColumnLabel(12))
-          m <- decoderM.decode(rs, rs.getMetaData.getColumnLabel(13))
-          n <- decoderN.decode(rs, rs.getMetaData.getColumnLabel(14))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
+          h <- cell[H](row, 7)
+          i <- cell[I](row, 8)
+          j <- cell[J](row, 9)
+          k <- cell[K](row, 10)
+          l <- cell[L](row, 11)
+          m <- cell[M](row, 12)
+          n <- cell[N](row, 13)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n)
   end tuple14
 
@@ -460,26 +490,25 @@ object Decoder:
       decoderM: Decoder[M],
       decoderN: Decoder[N],
       decoderO: Decoder[O],
-  ): Decoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O)] =
-      if rs.getMetaData.getColumnCount != 15 then failTupleDecode(15, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G, H, I, J, K, L, M, N, O)] =
+      width(row, 15).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
-          h <- decoderH.decode(rs, rs.getMetaData.getColumnLabel(8))
-          i <- decoderI.decode(rs, rs.getMetaData.getColumnLabel(9))
-          j <- decoderJ.decode(rs, rs.getMetaData.getColumnLabel(10))
-          k <- decoderK.decode(rs, rs.getMetaData.getColumnLabel(11))
-          l <- decoderL.decode(rs, rs.getMetaData.getColumnLabel(12))
-          m <- decoderM.decode(rs, rs.getMetaData.getColumnLabel(13))
-          n <- decoderN.decode(rs, rs.getMetaData.getColumnLabel(14))
-          o <- decoderO.decode(rs, rs.getMetaData.getColumnLabel(15))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
+          h <- cell[H](row, 7)
+          i <- cell[I](row, 8)
+          j <- cell[J](row, 9)
+          k <- cell[K](row, 10)
+          l <- cell[L](row, 11)
+          m <- cell[M](row, 12)
+          n <- cell[N](row, 13)
+          o <- cell[O](row, 14)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o)
   end tuple15
 
@@ -500,27 +529,26 @@ object Decoder:
       decoderN: Decoder[N],
       decoderO: Decoder[O],
       decoderP: Decoder[P],
-  ): Decoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P)] =
-      if rs.getMetaData.getColumnCount != 16 then failTupleDecode(16, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P)] =
+      width(row, 16).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
-          h <- decoderH.decode(rs, rs.getMetaData.getColumnLabel(8))
-          i <- decoderI.decode(rs, rs.getMetaData.getColumnLabel(9))
-          j <- decoderJ.decode(rs, rs.getMetaData.getColumnLabel(10))
-          k <- decoderK.decode(rs, rs.getMetaData.getColumnLabel(11))
-          l <- decoderL.decode(rs, rs.getMetaData.getColumnLabel(12))
-          m <- decoderM.decode(rs, rs.getMetaData.getColumnLabel(13))
-          n <- decoderN.decode(rs, rs.getMetaData.getColumnLabel(14))
-          o <- decoderO.decode(rs, rs.getMetaData.getColumnLabel(15))
-          p <- decoderP.decode(rs, rs.getMetaData.getColumnLabel(16))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
+          h <- cell[H](row, 7)
+          i <- cell[I](row, 8)
+          j <- cell[J](row, 9)
+          k <- cell[K](row, 10)
+          l <- cell[L](row, 11)
+          m <- cell[M](row, 12)
+          n <- cell[N](row, 13)
+          o <- cell[O](row, 14)
+          p <- cell[P](row, 15)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p)
   end tuple16
 
@@ -542,28 +570,27 @@ object Decoder:
       decoderO: Decoder[O],
       decoderP: Decoder[P],
       decoderQ: Decoder[Q],
-  ): Decoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q)] =
-      if rs.getMetaData.getColumnCount != 17 then failTupleDecode(17, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q)] =
+      width(row, 17).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
-          h <- decoderH.decode(rs, rs.getMetaData.getColumnLabel(8))
-          i <- decoderI.decode(rs, rs.getMetaData.getColumnLabel(9))
-          j <- decoderJ.decode(rs, rs.getMetaData.getColumnLabel(10))
-          k <- decoderK.decode(rs, rs.getMetaData.getColumnLabel(11))
-          l <- decoderL.decode(rs, rs.getMetaData.getColumnLabel(12))
-          m <- decoderM.decode(rs, rs.getMetaData.getColumnLabel(13))
-          n <- decoderN.decode(rs, rs.getMetaData.getColumnLabel(14))
-          o <- decoderO.decode(rs, rs.getMetaData.getColumnLabel(15))
-          p <- decoderP.decode(rs, rs.getMetaData.getColumnLabel(16))
-          q <- decoderQ.decode(rs, rs.getMetaData.getColumnLabel(17))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
+          h <- cell[H](row, 7)
+          i <- cell[I](row, 8)
+          j <- cell[J](row, 9)
+          k <- cell[K](row, 10)
+          l <- cell[L](row, 11)
+          m <- cell[M](row, 12)
+          n <- cell[N](row, 13)
+          o <- cell[O](row, 14)
+          p <- cell[P](row, 15)
+          q <- cell[Q](row, 16)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q)
   end tuple17
 
@@ -586,29 +613,28 @@ object Decoder:
       decoderP: Decoder[P],
       decoderQ: Decoder[Q],
       decoderR: Decoder[R],
-  ): Decoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R)] with
-    def decode(rs: ResultSet, name: String)(using Trace): Task[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R)] =
-      if rs.getMetaData.getColumnCount != 18 then failTupleDecode(18, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R)] =
+      width(row, 18).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
-          h <- decoderH.decode(rs, rs.getMetaData.getColumnLabel(8))
-          i <- decoderI.decode(rs, rs.getMetaData.getColumnLabel(9))
-          j <- decoderJ.decode(rs, rs.getMetaData.getColumnLabel(10))
-          k <- decoderK.decode(rs, rs.getMetaData.getColumnLabel(11))
-          l <- decoderL.decode(rs, rs.getMetaData.getColumnLabel(12))
-          m <- decoderM.decode(rs, rs.getMetaData.getColumnLabel(13))
-          n <- decoderN.decode(rs, rs.getMetaData.getColumnLabel(14))
-          o <- decoderO.decode(rs, rs.getMetaData.getColumnLabel(15))
-          p <- decoderP.decode(rs, rs.getMetaData.getColumnLabel(16))
-          q <- decoderQ.decode(rs, rs.getMetaData.getColumnLabel(17))
-          r <- decoderR.decode(rs, rs.getMetaData.getColumnLabel(18))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
+          h <- cell[H](row, 7)
+          i <- cell[I](row, 8)
+          j <- cell[J](row, 9)
+          k <- cell[K](row, 10)
+          l <- cell[L](row, 11)
+          m <- cell[M](row, 12)
+          n <- cell[N](row, 13)
+          o <- cell[O](row, 14)
+          p <- cell[P](row, 15)
+          q <- cell[Q](row, 16)
+          r <- cell[R](row, 17)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r)
   end tuple18
 
@@ -632,32 +658,29 @@ object Decoder:
       decoderQ: Decoder[Q],
       decoderR: Decoder[R],
       decoderS: Decoder[S],
-  ): Decoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S)] with
-    def decode(rs: ResultSet, name: String)(using
-        Trace
-    ): Task[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S)] =
-      if rs.getMetaData.getColumnCount != 19 then failTupleDecode(19, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S)] =
+      width(row, 19).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
-          h <- decoderH.decode(rs, rs.getMetaData.getColumnLabel(8))
-          i <- decoderI.decode(rs, rs.getMetaData.getColumnLabel(9))
-          j <- decoderJ.decode(rs, rs.getMetaData.getColumnLabel(10))
-          k <- decoderK.decode(rs, rs.getMetaData.getColumnLabel(11))
-          l <- decoderL.decode(rs, rs.getMetaData.getColumnLabel(12))
-          m <- decoderM.decode(rs, rs.getMetaData.getColumnLabel(13))
-          n <- decoderN.decode(rs, rs.getMetaData.getColumnLabel(14))
-          o <- decoderO.decode(rs, rs.getMetaData.getColumnLabel(15))
-          p <- decoderP.decode(rs, rs.getMetaData.getColumnLabel(16))
-          q <- decoderQ.decode(rs, rs.getMetaData.getColumnLabel(17))
-          r <- decoderR.decode(rs, rs.getMetaData.getColumnLabel(18))
-          s <- decoderS.decode(rs, rs.getMetaData.getColumnLabel(19))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
+          h <- cell[H](row, 7)
+          i <- cell[I](row, 8)
+          j <- cell[J](row, 9)
+          k <- cell[K](row, 10)
+          l <- cell[L](row, 11)
+          m <- cell[M](row, 12)
+          n <- cell[N](row, 13)
+          o <- cell[O](row, 14)
+          p <- cell[P](row, 15)
+          q <- cell[Q](row, 16)
+          r <- cell[R](row, 17)
+          s <- cell[S](row, 18)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s)
   end tuple19
 
@@ -682,33 +705,30 @@ object Decoder:
       decoderR: Decoder[R],
       decoderS: Decoder[S],
       decoderT: Decoder[T],
-  ): Decoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T)] with
-    def decode(rs: ResultSet, name: String)(using
-        Trace
-    ): Task[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T)] =
-      if rs.getMetaData.getColumnCount != 20 then failTupleDecode(20, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T)] =
+      width(row, 20).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
-          h <- decoderH.decode(rs, rs.getMetaData.getColumnLabel(8))
-          i <- decoderI.decode(rs, rs.getMetaData.getColumnLabel(9))
-          j <- decoderJ.decode(rs, rs.getMetaData.getColumnLabel(10))
-          k <- decoderK.decode(rs, rs.getMetaData.getColumnLabel(11))
-          l <- decoderL.decode(rs, rs.getMetaData.getColumnLabel(12))
-          m <- decoderM.decode(rs, rs.getMetaData.getColumnLabel(13))
-          n <- decoderN.decode(rs, rs.getMetaData.getColumnLabel(14))
-          o <- decoderO.decode(rs, rs.getMetaData.getColumnLabel(15))
-          p <- decoderP.decode(rs, rs.getMetaData.getColumnLabel(16))
-          q <- decoderQ.decode(rs, rs.getMetaData.getColumnLabel(17))
-          r <- decoderR.decode(rs, rs.getMetaData.getColumnLabel(18))
-          s <- decoderS.decode(rs, rs.getMetaData.getColumnLabel(19))
-          t <- decoderT.decode(rs, rs.getMetaData.getColumnLabel(20))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
+          h <- cell[H](row, 7)
+          i <- cell[I](row, 8)
+          j <- cell[J](row, 9)
+          k <- cell[K](row, 10)
+          l <- cell[L](row, 11)
+          m <- cell[M](row, 12)
+          n <- cell[N](row, 13)
+          o <- cell[O](row, 14)
+          p <- cell[P](row, 15)
+          q <- cell[Q](row, 16)
+          r <- cell[R](row, 17)
+          s <- cell[S](row, 18)
+          t <- cell[T](row, 19)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t)
   end tuple20
 
@@ -734,34 +754,31 @@ object Decoder:
       decoderS: Decoder[S],
       decoderT: Decoder[T],
       decoderU: Decoder[U],
-  ): Decoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U)] with
-    def decode(rs: ResultSet, name: String)(using
-        Trace
-    ): Task[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U)] =
-      if rs.getMetaData.getColumnCount != 21 then failTupleDecode(21, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U)] =
+      width(row, 21).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
-          h <- decoderH.decode(rs, rs.getMetaData.getColumnLabel(8))
-          i <- decoderI.decode(rs, rs.getMetaData.getColumnLabel(9))
-          j <- decoderJ.decode(rs, rs.getMetaData.getColumnLabel(10))
-          k <- decoderK.decode(rs, rs.getMetaData.getColumnLabel(11))
-          l <- decoderL.decode(rs, rs.getMetaData.getColumnLabel(12))
-          m <- decoderM.decode(rs, rs.getMetaData.getColumnLabel(13))
-          n <- decoderN.decode(rs, rs.getMetaData.getColumnLabel(14))
-          o <- decoderO.decode(rs, rs.getMetaData.getColumnLabel(15))
-          p <- decoderP.decode(rs, rs.getMetaData.getColumnLabel(16))
-          q <- decoderQ.decode(rs, rs.getMetaData.getColumnLabel(17))
-          r <- decoderR.decode(rs, rs.getMetaData.getColumnLabel(18))
-          s <- decoderS.decode(rs, rs.getMetaData.getColumnLabel(19))
-          t <- decoderT.decode(rs, rs.getMetaData.getColumnLabel(20))
-          u <- decoderU.decode(rs, rs.getMetaData.getColumnLabel(21))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
+          h <- cell[H](row, 7)
+          i <- cell[I](row, 8)
+          j <- cell[J](row, 9)
+          k <- cell[K](row, 10)
+          l <- cell[L](row, 11)
+          m <- cell[M](row, 12)
+          n <- cell[N](row, 13)
+          o <- cell[O](row, 14)
+          p <- cell[P](row, 15)
+          q <- cell[Q](row, 16)
+          r <- cell[R](row, 17)
+          s <- cell[S](row, 18)
+          t <- cell[T](row, 19)
+          u <- cell[U](row, 20)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u)
   end tuple21
 
@@ -788,47 +805,32 @@ object Decoder:
       decoderT: Decoder[T],
       decoderU: Decoder[U],
       decoderV: Decoder[V],
-  ): Decoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V)] with
-    def decode(rs: ResultSet, name: String)(using
-        Trace
-    ): Task[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V)] =
-      if rs.getMetaData.getColumnCount != 22 then failTupleDecode(22, rs.getMetaData.getColumnCount)
-      else
+  ): RowDecoder[(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V)] with
+    def decode(row: SqlRow): Either[DecodeError, (A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V)] =
+      width(row, 22).flatMap: _ =>
         for
-          a <- decoderA.decode(rs, rs.getMetaData.getColumnLabel(1))
-          b <- decoderB.decode(rs, rs.getMetaData.getColumnLabel(2))
-          c <- decoderC.decode(rs, rs.getMetaData.getColumnLabel(3))
-          d <- decoderD.decode(rs, rs.getMetaData.getColumnLabel(4))
-          e <- decoderE.decode(rs, rs.getMetaData.getColumnLabel(5))
-          f <- decoderF.decode(rs, rs.getMetaData.getColumnLabel(6))
-          g <- decoderG.decode(rs, rs.getMetaData.getColumnLabel(7))
-          h <- decoderH.decode(rs, rs.getMetaData.getColumnLabel(8))
-          i <- decoderI.decode(rs, rs.getMetaData.getColumnLabel(9))
-          j <- decoderJ.decode(rs, rs.getMetaData.getColumnLabel(10))
-          k <- decoderK.decode(rs, rs.getMetaData.getColumnLabel(11))
-          l <- decoderL.decode(rs, rs.getMetaData.getColumnLabel(12))
-          m <- decoderM.decode(rs, rs.getMetaData.getColumnLabel(13))
-          n <- decoderN.decode(rs, rs.getMetaData.getColumnLabel(14))
-          o <- decoderO.decode(rs, rs.getMetaData.getColumnLabel(15))
-          p <- decoderP.decode(rs, rs.getMetaData.getColumnLabel(16))
-          q <- decoderQ.decode(rs, rs.getMetaData.getColumnLabel(17))
-          r <- decoderR.decode(rs, rs.getMetaData.getColumnLabel(18))
-          s <- decoderS.decode(rs, rs.getMetaData.getColumnLabel(19))
-          t <- decoderT.decode(rs, rs.getMetaData.getColumnLabel(20))
-          u <- decoderU.decode(rs, rs.getMetaData.getColumnLabel(21))
-          v <- decoderV.decode(rs, rs.getMetaData.getColumnLabel(22))
+          a <- cell[A](row, 0)
+          b <- cell[B](row, 1)
+          c <- cell[C](row, 2)
+          d <- cell[D](row, 3)
+          e <- cell[E](row, 4)
+          f <- cell[F](row, 5)
+          g <- cell[G](row, 6)
+          h <- cell[H](row, 7)
+          i <- cell[I](row, 8)
+          j <- cell[J](row, 9)
+          k <- cell[K](row, 10)
+          l <- cell[L](row, 11)
+          m <- cell[M](row, 12)
+          n <- cell[N](row, 13)
+          o <- cell[O](row, 14)
+          p <- cell[P](row, 15)
+          q <- cell[Q](row, 16)
+          r <- cell[R](row, 17)
+          s <- cell[S](row, 18)
+          t <- cell[T](row, 19)
+          u <- cell[U](row, 20)
+          v <- cell[V](row, 21)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v)
   end tuple22
-
-  /** Create a Decoder from a zio-json JsonCodec - reads from JSONB columns in PostgreSQL.
-    *
-    * This is used by the macro system when a field type has a JsonCodec but no explicit Decoder.
-    */
-  def fromJsonCodec[T](using codec: zio.json.JsonCodec[T]): Decoder[T] =
-    string.transform(jsonString =>
-      ZIO
-        .fromEither(codec.decoder.decodeJson(jsonString))
-        .mapError(e => new SQLException(s"Failed to decode JSON: $e"))
-    )
-
-end Decoder
+end RowDecoder

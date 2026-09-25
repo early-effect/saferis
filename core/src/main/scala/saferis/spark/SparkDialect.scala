@@ -2,8 +2,6 @@ package saferis.spark
 
 import saferis.*
 
-import java.sql.Types
-
 given Dialect = SparkDialect
 
 /** Spark/Databricks/Hive dialect implementation
@@ -22,59 +20,33 @@ object SparkDialect
     with WindowFunctionSupport
     with CommonTableExpressionSupport:
 
-  val name: String = "Spark SQL"
+  val name: DialectName = DialectName("Spark SQL")
 
-  def columnType(jdbcType: Int): String = jdbcType match
-    // String types - Spark uses STRING instead of VARCHAR
-    case Types.VARCHAR     => "string"
-    case Types.CHAR        => "string"
-    case Types.LONGVARCHAR => "string"
-    case Types.CLOB        => "string"
-
-    // Integer types
-    case Types.TINYINT  => "tinyint"
-    case Types.SMALLINT => "smallint"
-    case Types.INTEGER  => "int"
-    case Types.BIGINT   => "bigint"
-
-    // Floating point types
-    case Types.FLOAT   => "float"
-    case Types.DOUBLE  => "double"
-    case Types.REAL    => "float"
-    case Types.DECIMAL => "decimal(10,0)"
-    case Types.NUMERIC => "decimal(10,0)"
-
-    // Boolean type
-    case Types.BOOLEAN => "boolean"
-    case Types.BIT     => "boolean"
-
-    // Date and time types
-    case Types.DATE                    => "date"
-    case Types.TIME                    => "timestamp" // Spark doesn't have separate TIME type
-    case Types.TIMESTAMP               => "timestamp"
-    case Types.TIMESTAMP_WITH_TIMEZONE => "timestamp" // Spark stores timestamps in UTC
-
-    // Binary types
-    case Types.BINARY        => "binary"
-    case Types.VARBINARY     => "binary"
-    case Types.LONGVARBINARY => "binary"
-    case Types.BLOB          => "binary"
-
-    // Complex types
-    case Types.DATALINK => "string" // URLs stored as string
-    case Types.ARRAY    => "array<string>"
-    case Types.STRUCT   => "struct<>"
-    case Types.OTHER    => "string" // Fallback
-
-    // Fallback for unknown types
-    case other =>
-      try java.sql.JDBCType.valueOf(other).getName.toLowerCase
-      catch case _: IllegalArgumentException => "string"
+  def columnType(tpe: SqlType): ColumnType = ColumnType:
+    tpe match
+      case SqlType.Bool        => "boolean"
+      case SqlType.Int2        => "smallint"
+      case SqlType.Int4        => "int"
+      case SqlType.Int8        => "bigint"
+      case SqlType.Float4      => "float"
+      case SqlType.Float8      => "double"
+      case SqlType.Numeric     => "decimal(10,0)"
+      case SqlType.VarChar     => "string"
+      case SqlType.Text        => "string"
+      case SqlType.Bytea       => "binary"
+      case SqlType.Date        => "date"
+      case SqlType.Time        => "timestamp"
+      case SqlType.Timestamp   => "timestamp"
+      case SqlType.Timestamptz => "timestamp"
+      case SqlType.Jsonb       => "string"
+      case SqlType.Uuid        => "string"
+      case SqlType.Array(_)    => "array<string>"
+      case SqlType.Other(_)    => "string"
 
   // === Spark SQL Auto-increment and Primary Key Support ===
   // Spark SQL does not support auto-increment or primary key constraints in standard DDL
   // Some distributions (like Databricks) may support GENERATED ALWAYS AS IDENTITY
-  def autoIncrementClause(isGenerated: Boolean, isPrimaryKey: Boolean, hasCompoundKey: Boolean): String = ???
+  def autoIncrementClause(isGenerated: Boolean, isPrimaryKey: Boolean, hasCompoundKey: Boolean): SqlText = ???
 
   // === Spark SQL uses backticks for identifier escaping ===
   // This is critical: backticks are ONLY for identifiers (tables, columns, aliases)
@@ -83,75 +55,64 @@ object SparkDialect
 
   // === Override DDL operations for Spark SQL syntax ===
 
-  override def createTableClause(ifNotExists: Boolean): String =
-    if ifNotExists then "create table if not exists"
-    else "create table"
-
-  override def dropTableSql(tableName: String, ifExists: Boolean): String =
-    if ifExists then s"drop table if exists $tableName"
-    else s"drop table $tableName"
-
-  override def truncateTableSql(tableName: String): String =
-    s"truncate table $tableName"
-
   // Spark SQL doesn't support indexes at all
   override def createIndexSql(
-      indexName: String,
-      tableName: String,
-      columnNames: Seq[String],
+      indexName: IndexName,
+      tableName: TableName,
+      columnNames: Seq[ColumnName],
       ifNotExists: Boolean = true,
-      where: Option[String] = None,
-  ): String = throw new UnsupportedOperationException(
+      where: Option[SqlText] = None,
+  ): SqlText = throw new UnsupportedOperationException(
     "Spark SQL does not support CREATE INDEX. Consider using partitioning, bucketing, or Z-ordering instead."
   )
 
   override def createUniqueIndexSql(
-      indexName: String,
-      tableName: String,
-      columnNames: Seq[String],
+      indexName: IndexName,
+      tableName: TableName,
+      columnNames: Seq[ColumnName],
       ifNotExists: Boolean = true,
-      where: Option[String] = None,
-  ): String =
+      where: Option[SqlText] = None,
+  ): SqlText =
     throw new UnsupportedOperationException(
       "Spark SQL does not support CREATE UNIQUE INDEX. Uniqueness must be enforced at the application level."
     )
 
-  override def dropIndexSql(indexName: String, ifExists: Boolean = false): String =
+  override def dropIndexSql(indexName: IndexName, ifExists: Boolean = false): SqlText =
     throw new UnsupportedOperationException("Spark SQL does not support DROP INDEX")
 
   // === JsonSupport implementation ===
   // Spark SQL has JSON functions like get_json_object, from_json, to_json
-  def jsonType: String = "string" // JSON is stored as STRING type
+  def jsonType: ColumnType = ColumnType("string") // JSON is stored as STRING type
 
-  def jsonExtractSql(columnName: String, fieldPath: String): String =
+  def jsonExtractSql(column: SqlText, fieldPath: String): SqlText =
     val escaped = fieldPath.replace("'", "''")
-    s"get_json_object($columnName, '$$.$escaped')"
+    SqlText(s"get_json_object($column, '$$.$escaped')")
 
   // Spark doesn't have a native @> operator, but we can use get_json_object to compare
-  def jsonContainsSql(columnName: String, jsonValue: String): String =
+  def jsonContainsSql(column: SqlText, jsonValue: JsonText): SqlText =
     throw new UnsupportedOperationException(
       "Spark SQL does not support JSON containment. Use get_json_object for field extraction instead."
     )
 
   // Check if a key exists by checking if get_json_object returns non-null
-  def jsonHasKeySql(columnName: String, key: String): String =
+  def jsonHasKeySql(column: SqlText, key: String): SqlText =
     val escaped = key.replace("'", "''")
-    s"get_json_object($columnName, '$$.$escaped') is not null"
+    SqlText(s"get_json_object($column, '$$.$escaped') is not null")
 
   // Check if any of the keys exist
-  def jsonHasAnyKeySql(columnName: String, keys: Seq[String]): String =
-    val checks = keys.map(k => s"get_json_object($columnName, '$$.${k.replace("'", "''")}') is not null")
-    checks.mkString("(", " or ", ")")
+  def jsonHasAnyKeySql(column: SqlText, keys: Seq[String]): SqlText =
+    val checks = keys.map(k => s"get_json_object($column, '$$.${k.replace("'", "''")}') is not null")
+    SqlText(checks.mkString("(", " or ", ")"))
 
   // Check if all keys exist
-  def jsonHasAllKeysSql(columnName: String, keys: Seq[String]): String =
-    val checks = keys.map(k => s"get_json_object($columnName, '$$.${k.replace("'", "''")}') is not null")
-    checks.mkString("(", " and ", ")")
+  def jsonHasAllKeysSql(column: SqlText, keys: Seq[String]): SqlText =
+    val checks = keys.map(k => s"get_json_object($column, '$$.${k.replace("'", "''")}') is not null")
+    SqlText(checks.mkString("(", " and ", ")"))
 
   // === ArraySupport implementation ===
-  def arrayType(elementType: String): String = s"array<$elementType>"
+  def arrayType(elementType: ColumnType): ColumnType = ColumnType(s"array<$elementType>")
 
-  def arrayContainsSql(columnName: String, value: String): String =
-    s"array_contains($columnName, $value)"
+  def arrayContainsSql(column: SqlText, value: SqlText): SqlText =
+    SqlText(s"array_contains($column, $value)")
 
 end SparkDialect

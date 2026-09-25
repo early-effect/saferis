@@ -1,0 +1,514 @@
+package saferis.pg
+
+import saferis.*
+import saferis.postgres.DatabaseName
+import saferis.postgres.Host
+import saferis.postgres.PgConnectionConfig
+import saferis.postgres.UserName
+import saferis.tests.PostgresTestContainer
+import zio.*
+import zio.test.*
+
+import java.time.Instant
+import scala.scalajs.js
+
+object PgSessionSpecs extends ZIOSpecDefault:
+  private val pastInt8    = 9223372036854775807L
+  private val pastNumeric = BigDecimal("9223372036854775808.25")
+  private val micros      = Instant.parse("2024-09-23T15:04:05.123456Z")
+
+  extension (pg: PostgresTestContainer)
+    private def config(
+        defaultTimeout: Option[Duration] = None,
+        poolSize: Int = 4,
+    ): PgConfig =
+      PgConfig(
+        connection = PgConnectionConfig(
+          host = Host(pg.host),
+          port = pg.port,
+          database = DatabaseName(pg.database),
+          user = UserName(pg.user),
+          password = zio.Config.Secret(pg.password),
+        ),
+        poolSize = poolSize,
+        defaultTimeout = defaultTimeout,
+      )
+  end extension
+
+  private def session(config: PgConfig): ZLayer[Any, SaferisError, SqlSession] =
+    ZLayer.succeed(config) >>> NodeSession.layer
+
+  private def listening(config: PgConfig, listener: SqlListener): ZLayer[Any, SaferisError, SqlSession] =
+    session(config) >>> SqlListener.observe(listener)
+
+  private def sessions(
+      configure: PostgresTestContainer => PgConfig
+  ): ZLayer[PostgresTestContainer, SaferisError, SqlSession] =
+    ZLayer.fromZIO(ZIO.serviceWith[PostgresTestContainer](configure)) >>> NodeSession.layer
+
+  /** One row from a long cursor, then the scope ends, then another statement on the same pool. */
+  private def pullOneThenSelect(read: SqlRow => Either[SaferisError, Int]) =
+    ZIO
+      .scoped {
+        for
+          command <- sql"select n::int4 from generate_series(1, 100000) n".toCommand
+          session <- ZIO.service[SqlSession]
+          pull    <- session.stream(command)(read).toPull
+          chunk   <- pull
+        yield chunk
+      }
+      .zip(sql"select 1".queryValue[Int])
+      .map { (first, after) =>
+        assertTrue(first.headOption.contains(1), after.contains(1))
+      }
+
+  private val open  = sessions(_.config())
+  private val timed = sessions(_.config(defaultTimeout = Some(30.seconds)))
+
+  private final class Recording(events: Ref[Chunk[String]]) extends SqlListener:
+    def executed(event: SqlExecuted): UIO[Unit] =
+      events.update(_ :+ event.sql)
+
+  private def isTimeout(exit: Exit[SaferisError, ?]): Boolean =
+    exit match
+      case Exit.Failure(cause) =>
+        cause.failureOption match
+          case Some(_: SaferisError.Timeout) => true
+          case _                             => false
+      case _ => false
+
+  private val reads =
+    suite("reads raw DateStyle=ISO text")(
+      test("BigInt past 2^53-1 round-trips through $n::int8"):
+        for
+          _        <- sql"drop table if exists pg_int8".dml
+          _        <- sql"create table pg_int8 (n bigint)".dml
+          selected <- sql"select ${pastInt8}".queryValue[Long]
+          _        <- sql"insert into pg_int8 (n) values (${pastInt8})".dml
+          stored   <- sql"select n from pg_int8".queryValue[Long]
+        yield assertTrue(selected.contains(pastInt8), stored.contains(pastInt8))
+      ,
+      test("Numeric past 2^53-1 round-trips through $n::numeric"):
+        for
+          _        <- sql"drop table if exists pg_numeric".dml
+          _        <- sql"create table pg_numeric (n numeric)".dml
+          selected <- sql"select ${pastNumeric}".queryValue[BigDecimal]
+          _        <- sql"insert into pg_numeric (n) values (${pastNumeric})".dml
+          stored   <- sql"select n from pg_numeric".queryValue[BigDecimal]
+        yield assertTrue(
+          selected.exists(_.compare(pastNumeric) == 0),
+          stored.exists(_.compare(pastNumeric) == 0),
+        )
+      ,
+      test("timestamptz keeps microseconds"):
+        for
+          bound   <- sql"select ${micros}".queryValue[Instant]
+          literal <- sql"select '2024-09-23 15:04:05.123456+00'::timestamptz".queryValue[Instant]
+        yield assertTrue(bound.contains(micros), literal.contains(micros))
+      ,
+      test("bool false is the text f"):
+        for
+          literal <- sql"select false".queryValue[Boolean]
+          bound   <- sql"select ${false}".queryValue[Boolean]
+        yield assertTrue(literal.contains(false), bound.contains(false))
+      ,
+      test("JSON null is jsonb text and SQL null is Null"):
+        for
+          command <- sql"select 'null'::jsonb, null::jsonb".toCommand
+          rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(row => Right(row)))
+          row = rows.head
+        yield assertTrue(
+          row.at(0) == Right(SqlValue.Jsonb(JsonText("null"))),
+          row.at(1) == Right(SqlValue.Null(SqlType.Jsonb)),
+        )
+      ,
+      test("bpchar round-trips padded"):
+        for
+          _   <- sql"drop table if exists pg_bpchar".dml
+          _   <- sql"create table pg_bpchar (v char(4))".dml
+          _   <- sql"insert into pg_bpchar (v) values (${"ab"})".dml
+          got <- sql"select v from pg_bpchar".queryValue[String]
+        yield assertTrue(got.contains("ab  "))
+      ,
+      test("duplicate labels keep the first cell"):
+        for
+          command <- sql"select ${1} as a, ${2} as a".toCommand
+          rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(row => Right(row)))
+        yield assertTrue(rows.head.get(ColumnName("a")) == Right(SqlValue.Int4(1)))
+      ,
+      test("an unknown oid is Other and String reads its text"):
+        for
+          command <- sql"select '1 day'::interval".toCommand
+          rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(row => Right(row)))
+          text    <- sql"select '1 day'::interval".queryValue[String]
+          cell = rows.head.at(0)
+        yield assertTrue:
+          cell match
+            case Right(SqlValue.Other(ServerType.Oid(1186), raw)) =>
+              raw.contains("1") && text.exists(_.contains("1"))
+            case _ => false
+      ,
+      test("stream emits rows through the server cursor"):
+        val read: SqlRow => Either[SaferisError, Long] = row =>
+          summon[RowDecoder[Long]]
+            .decode(row)
+            .left
+            .map(err => SaferisError.DecodingError(ColumnName("value"), TypeName("Long"), err.detail))
+        for
+          command <- sql"select ${pastInt8}".toCommand
+          session <- ZIO.service[SqlSession]
+          rows    <- session.stream(command)(read).runCollect
+        yield assertTrue(rows == Chunk(pastInt8))
+      ,
+      test("closing the stream scope releases the checkout") {
+        val read: SqlRow => Either[SaferisError, Int] = row =>
+          summon[RowDecoder[Int]]
+            .decode(row)
+            .left
+            .map(err => SaferisError.DecodingError(ColumnName("n"), TypeName("Int"), err.detail))
+        for
+          pg     <- ZIO.service[PostgresTestContainer]
+          events <- Ref.make(Chunk.empty[String])
+          result <- pullOneThenSelect(read).provideLayer(
+            listening(pg.config(poolSize = 1), new Recording(events))
+          )
+          seen <- events.get
+        yield result && assertTrue(
+          seen.size == 2,
+          seen.headOption.exists(_.contains("generate_series")),
+          seen.forall(!_.contains("BEGIN")),
+        )
+        end for
+      },
+      test("take(10) of a million rows reads one cursor batch"):
+        val read: SqlRow => Either[SaferisError, Int] = row =>
+          summon[RowDecoder[Int]]
+            .decode(row)
+            .left
+            .map(err => SaferisError.DecodingError(ColumnName("n"), TypeName("Int"), err.detail))
+        for
+          _       <- NodeSession.cursorReads.set(0)
+          command <- sql"select n::int4 from generate_series(1, 1000000) n".toCommand
+          session <- ZIO.service[SqlSession]
+          rows    <- session.stream(command)(read).take(10).runCollect
+          reads   <- NodeSession.cursorReads.get
+        yield assertTrue(rows == Chunk.fromIterable(1 to 10), reads >= 1, reads <= 2),
+    )
+
+  private val writes =
+    suite("transactions")(
+      test("unique violation message is exactly unique violation"):
+        for
+          _    <- sql"drop table if exists pg_uniq".dml
+          _    <- sql"create table pg_uniq (id integer primary key)".dml
+          _    <- sql"insert into pg_uniq (id) values (1)".dml
+          exit <- sql"insert into pg_uniq (id) values (1)".dml.exit
+        yield assertTrue:
+          exit match
+            case Exit.Failure(cause) =>
+              cause.failureOption match
+                case Some(SaferisError.UniqueViolation(_, message, _)) => message == "unique violation"
+                case _                                                 => false
+            case _ => false
+      ,
+      test("a failed transact rolls back"):
+        for
+          _    <- sql"drop table if exists pg_rollback".dml
+          _    <- sql"create table pg_rollback (id integer primary key)".dml
+          exit <- transact(
+            for
+              _ <- sql"insert into pg_rollback (id) values (1)".dml
+              _ <- ZIO.fail(SaferisError.Unexpected("rollback"))
+            yield ()
+          ).exit
+          count <- sql"select count(*) from pg_rollback".queryValue[Long]
+        yield assertTrue(exit.isFailure, count.contains(0L))
+      ,
+      test("a pool statement timeout is Timeout and is not BEGIN"):
+        for
+          pg    <- ZIO.service[PostgresTestContainer]
+          heard <- Ref.make(Chunk.empty[String])
+          exit  <- sql"select pg_sleep(5)"
+            .withTimeout(1.second)
+            .queryValue[Int]
+            .exit
+            .provide(
+              listening(pg.config(), new Recording(heard))
+            )
+          sqls <- heard.get
+        yield assertTrue(
+          isTimeout(exit),
+          sqls.exists(_.contains("pg_sleep")),
+          sqls.forall(sql => !sql.contains("BEGIN") && !sql.contains("SET LOCAL") && !sql.contains("COMMIT")),
+        )
+      ,
+      test("defaultTimeout cancels a statement inside transact"):
+        for
+          pg   <- ZIO.service[PostgresTestContainer]
+          exit <- transact(sql"select pg_sleep(5)".queryValue[Int]).exit.provide(
+            session(pg.config(defaultTimeout = Some(1.second)))
+          )
+        yield assertTrue(isTimeout(exit)),
+    )
+
+  private val joined =
+    suite("nested transact with defaultTimeout")(
+      test("the outer body sees the inner write and a later failure rolls it back"):
+        for
+          _    <- sql"drop table if exists pg_nested".dml
+          _    <- sql"create table pg_nested (id integer primary key)".dml
+          seen <- Ref.make[Option[Long]](None)
+          exit <- transact(
+            for
+              _ <- transact(sql"insert into pg_nested (id) values (1)".dml)
+              n <- sql"select count(*) from pg_nested".queryValue[Long]
+              _ <- seen.set(n)
+              _ <- ZIO.fail(SaferisError.Unexpected("still open"))
+            yield ()
+          ).exit
+          captured <- seen.get
+          count    <- sql"select count(*) from pg_nested".queryValue[Long]
+          outerFailed = exit match
+            case Exit.Failure(cause) =>
+              cause.failureOption match
+                case Some(SaferisError.Unexpected("still open")) => true
+                case _                                           => false
+            case _ => false
+        yield assertTrue(captured.contains(1L), count.contains(0L), outerFailed)
+      ,
+      test("catching a statement failure rolls back and the next command is 25P02"):
+        for
+          pg     <- ZIO.service[PostgresTestContainer]
+          heard  <- Ref.make(Chunk.empty[String])
+          result <- (
+            for
+              _    <- sql"drop table if exists pg_abort".dml
+              _    <- sql"create table pg_abort (id integer primary key)".dml
+              _    <- heard.set(Chunk.empty)
+              seen <- Ref.make[Option[Either[SaferisError, Option[Long]]]](None)
+              exit <- transact(
+                for
+                  _     <- sql"insert into pg_abort (id) values (1)".dml
+                  _     <- sql"deli meat from pg_abort".dml.catchAll(_ => ZIO.succeed(0L))
+                  later <- sql"select count(*) as later_count from pg_abort".queryValue[Long].either
+                  _     <- seen.set(Some(later))
+                yield ()
+              ).exit
+              captured <- seen.get
+              count    <- sql"select count(*) from pg_abort".queryValue[Long]
+            yield (exit, captured, count)
+          ).provide(listening(pg.config(defaultTimeout = Some(30.seconds)), new Recording(heard)))
+          (exit, captured, count) = result
+          aborted                 = captured match
+            case Some(Left(SaferisError.QueryError(Some(SqlState.InFailedTransaction), _, sql))) =>
+              sql.exists(_.contains("later_count"))
+            case _ => false
+          recorded = exit match
+            case Exit.Failure(cause) =>
+              cause.failureOption match
+                case Some(_: SaferisError.SyntaxError) => true
+                case _                                 => false
+            case _ => false
+        yield assertTrue(aborted, recorded, count.contains(0L)),
+    )
+
+  private def onSession[A](
+      configure: PostgresTestContainer => PgConfig
+  )(use: SqlSession => ZIO[Any, SaferisError, A]): ZIO[PostgresTestContainer, SaferisError, A] =
+    ZIO.serviceWithZIO[PostgresTestContainer]: pg =>
+      ZIO.serviceWithZIO[SqlSession](use).provide(session(configure(pg)))
+
+  private def onePool =
+    ZIO.serviceWithZIO[PostgresTestContainer]: pg =>
+      NodeSession.layer.build.provideSome[Scope](ZLayer.succeed(pg.config(poolSize = 1)))
+
+  private def run[A](db: SqlSession)(f: ZIO[SqlSession, SaferisError, A]): ZIO[Any, SaferisError, A] =
+    f.provideEnvironment(ZEnvironment(db))
+
+  private def untilActive(pid: Int): ZIO[SqlSession, SaferisError, Unit] =
+    (ZIO.sleep(20.millis) *>
+      sql"select count(*)::int from pg_stat_activity where pid = ${pid} and state = 'active'".queryValue[Int])
+      .repeatUntil(_.contains(1))
+      .timeout(5.seconds)
+      .flatMap:
+        case Some(_) => ZIO.unit
+        case None    => ZIO.fail(SaferisError.Unexpected("backend did not become active"))
+
+  private val review =
+    suite("review")(
+      test("shutdown sqlstates break the client and a connection-shaped message does not"):
+        val shutdown = List(SqlState.AdminShutdown, SqlState.CrashShutdown, SqlState.CannotConnectNow).map: state =>
+          PgErrors.broken(
+            SaferisError.QueryError(Some(state), "terminating connection due to administrator command", None)
+          )
+        val unique =
+          PgErrors.broken(SaferisError.UniqueViolation(Some(ConstraintName("pg_uniq_pkey")), "unique violation", None))
+        val mentioned = PgErrors.broken(SaferisError.QueryError(None, "the connection is still usable", None))
+        assertTrue(shutdown.forall(identity), !unique, !mentioned)
+      ,
+      test("a transport code is 08006, keeps the code in the message, and breaks the client"):
+        val info  = PgErrors.info(js.JavaScriptException(js.Dynamic.literal(code = "ECONNRESET", message = "reset")))
+        val error = SqlState.classify(info, None, SqlState.defaultRetryable)
+        assertTrue(
+          info.sqlState.contains(SqlState.ConnectionFailure),
+          info.message == "reset (ECONNRESET)",
+          error.isInstanceOf[SaferisError.ConnectionLost],
+          PgErrors.broken(error),
+        )
+      ,
+      test("a script of two selects fails and one select still returns the row"):
+        onSession(_.config()): db =>
+          for
+            script <- run(db)(sql"select 1; select 2".queryValue[Int].exit)
+            one    <- run(db)(sql"select 1".queryValue[Int])
+          yield assertTrue(script.isFailure, one.contains(1))
+      ,
+      test("a unique violation keeps the same backend"):
+        onSession(_.config(poolSize = 1)): db =>
+          for
+            _    <- run(db)(sql"drop table if exists pg_uniq_keep".dml)
+            _    <- run(db)(sql"create table pg_uniq_keep (id integer primary key)".dml)
+            pid1 <- run(db)(sql"select pg_backend_pid()".queryValue[Int])
+            _    <- run(db)(sql"insert into pg_uniq_keep (id) values (1)".dml)
+            exit <- run(db)(sql"insert into pg_uniq_keep (id) values (1)".dml.exit)
+            pid2 <- run(db)(sql"select pg_backend_pid()".queryValue[Int])
+            kept = exit match
+              case Exit.Failure(cause) =>
+                cause.failureOption match
+                  case Some(SaferisError.UniqueViolation(_, "unique violation", _)) => true
+                  case _                                                            => false
+              case _ => false
+          yield assertTrue(kept, pid1 == pid2, pid1.isDefined)
+      ,
+      test("interrupting pg_sleep does not leave a transaction for the next checkout"):
+        ZIO
+          .scoped:
+            for
+              sleeperEnv <- onePool
+              watcherEnv <- onePool
+              sleeper = sleeperEnv.get[SqlSession]
+              watcher = watcherEnv.get[SqlSession]
+              pid   <- run(sleeper)(sql"select pg_backend_pid()".queryValue[Int])
+              id    <- ZIO.fromOption(pid).orElseFail(SaferisError.Unexpected("no backend pid"))
+              fiber <- run(sleeper)(sql"select pg_sleep(30)".queryValue[Int]).fork
+              _     <- run(watcher)(untilActive(id))
+              _     <- fiber.interrupt
+              tx    <- run(sleeper)(sql"select txid_current_if_assigned()::text".queryValue[Option[String]])
+            yield assertTrue(tx.forall(_.isEmpty))
+          .timeoutFail(SaferisError.Unexpected("interrupted sleep left the checkout busy"))(8.seconds)
+      ,
+      test("an interrupted checkout does not hang pool.end"):
+        val close =
+          ZIO.scoped:
+            for
+              held <- onePool
+              db = held.get[SqlSession]
+              hold   <- run(db)(sql"select pg_sleep(30)".queryValue[Int]).fork
+              _      <- ZIO.sleep(400.millis)
+              second <- run(db)(sql"select 1".queryValue[Int]).fork
+              _      <- ZIO.sleep(200.millis)
+              _      <- second.interrupt
+              _      <- hold.interrupt
+            yield ()
+        close.timeout(8.seconds).map(done => assertTrue(done.isDefined))
+      ,
+      test("terminating the backend fails the sleep and the pool still serves"):
+        ZIO.scoped:
+          for
+            sleeperEnv <- onePool
+            killerEnv  <- onePool
+            sleeper = sleeperEnv.get[SqlSession]
+            killer  = killerEnv.get[SqlSession]
+            pid   <- run(sleeper)(sql"select pg_backend_pid()".queryValue[Int])
+            id    <- ZIO.fromOption(pid).orElseFail(SaferisError.Unexpected("no backend pid"))
+            fiber <- run(sleeper)(sql"select pg_sleep(30)".queryValue[Int]).fork
+            _     <- run(killer)(untilActive(id))
+            _     <- run(killer)(sql"select pg_terminate_backend(${id})".queryValue[Boolean])
+            exit  <- fiber.join.exit
+            next  <- run(sleeper)(sql"select 1".queryValue[Int])
+            failed = exit match
+              case Exit.Failure(cause) => cause.failureOption.isDefined
+              case _                   => false
+          yield assertTrue(failed, next.contains(1))
+      ,
+      test("interrupting transact after BEGIN rolls back on the same backend"):
+        ZIO.scoped:
+          for
+            held <- onePool
+            db = held.get[SqlSession]
+            seen  <- Promise.make[Nothing, Int]
+            _     <- run(db)(sql"drop table if exists pg_idle_txn".dml)
+            _     <- run(db)(sql"create table pg_idle_txn (id integer primary key)".dml)
+            fiber <- run(db)(
+              transact(
+                for
+                  _   <- sql"insert into pg_idle_txn (id) values (1)".dml
+                  pid <- sql"select pg_backend_pid()".queryValue[Int]
+                  id  <- ZIO.fromOption(pid).orElseFail(SaferisError.Unexpected("no backend pid"))
+                  _   <- seen.succeed(id)
+                  _   <- ZIO.never
+                yield ()
+              )
+            ).fork
+            id   <- seen.await
+            _    <- fiber.interrupt
+            pid2 <- run(db)(sql"select pg_backend_pid()".queryValue[Int])
+            tx   <- run(db)(sql"select txid_current_if_assigned()::text".queryValue[Option[String]])
+            n    <- run(db)(sql"select count(*)::int from pg_idle_txn".queryValue[Int])
+          yield assertTrue(pid2.contains(id), tx.forall(_.isEmpty), n.contains(0))
+      ,
+      test("interrupting an in-flight timed statement leaves no transaction"):
+        ZIO
+          .scoped:
+            for
+              sleeperEnv <- onePool
+              watcherEnv <- onePool
+              sleeper = sleeperEnv.get[SqlSession]
+              watcher = watcherEnv.get[SqlSession]
+              _     <- run(sleeper)(sql"drop table if exists pg_timed_inflight".dml)
+              _     <- run(sleeper)(sql"create table pg_timed_inflight (id integer primary key)".dml)
+              pid   <- run(sleeper)(sql"select pg_backend_pid()".queryValue[Int])
+              id    <- ZIO.fromOption(pid).orElseFail(SaferisError.Unexpected("no backend pid"))
+              fiber <- run(sleeper)(
+                sql"insert into pg_timed_inflight (id) select 7 from pg_sleep(30)".withTimeout(30.seconds).dml
+              ).fork
+              _  <- run(watcher)(untilActive(id))
+              _  <- fiber.interrupt
+              tx <- run(sleeper)(sql"select txid_current_if_assigned()::text".queryValue[Option[String]])
+              n  <- run(sleeper)(sql"select count(*)::int from pg_timed_inflight".queryValue[Int])
+            yield assertTrue(tx.forall(_.isEmpty), n.contains(0))
+          .timeoutFail(SaferisError.Unexpected("in-flight timed statement left the checkout busy"))(8.seconds),
+    ) @@ TestAspect.withLiveClock @@ TestAspect.timeout(45.seconds) @@ TestAspect.sequential
+
+  private val startupTimeout =
+    test("a missing timeout restores the server statement_timeout"):
+      for
+        pg <- ZIO.service[PostgresTestContainer]
+        config = PgConfig(
+          connection = PgConnectionConfig(
+            host = Host(pg.host),
+            port = pg.port,
+            database = DatabaseName(pg.database),
+            user = UserName(pg.user),
+            password = zio.Config.Secret(pg.password),
+            parameters = Map("statement_timeout" -> "1s"),
+          ),
+          poolSize = 1,
+        )
+        exit <- transact(
+          sql"select 1".withTimeout(8.seconds).queryValue[Int] *>
+            sql"select pg_sleep(3)".queryValue[Int]
+        ).provide(ZLayer.succeed(config) >>> NodeSession.layer).exit
+      yield assertTrue(isTimeout(exit))
+
+  private val live =
+    suite("Node pg")(
+      reads.provideSomeShared[PostgresTestContainer](open),
+      writes.provideSomeShared[PostgresTestContainer](open),
+      joined.provideSomeShared[PostgresTestContainer](timed),
+      review,
+      startupTimeout,
+    ) @@ TestAspect.withLiveClock @@ TestAspect.timeout(45.seconds) @@ TestAspect.sequential
+
+  def spec = live.provideShared(PostgresTestContainer.live)
+end PgSessionSpecs

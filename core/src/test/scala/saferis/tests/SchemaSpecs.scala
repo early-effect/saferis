@@ -96,7 +96,7 @@ object SchemaSpecs extends ZIOSpecDefault:
       test("named index") {
         val sql = Schema[User]
           .withIndex(_.name)
-          .named("idx_custom_name")
+          .named(IndexName("idx_custom_name"))
           .ddl(ifNotExists = false)
           .sql
         assertTrue(sql.contains("idx_custom_name"))
@@ -365,7 +365,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .withIndex(_.status)
           .where(_.status)
           .eql("active")
-          .named("idx_active_users")
+          .named(IndexName("idx_active_users"))
           .ddl(ifNotExists = false)
           .sql
         assertTrue(
@@ -378,7 +378,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .withUniqueIndex(_.email)
           .where(_.status)
           .eql("active")
-          .named("idx_unique_active_email")
+          .named(IndexName("idx_unique_active_email"))
           .ddl(ifNotExists = false)
           .sql
         assertTrue(
@@ -512,23 +512,23 @@ object SchemaSpecs extends ZIOSpecDefault:
     // === MySQL JSON Dialect ===
     suite("MySQL JSON dialect SQL generation")(
       test("MySQLDialect.jsonHasKeySql generates correct SQL") {
-        val sql = saferis.mysql.MySQLDialect.jsonHasKeySql("data", "email")
+        val sql = saferis.mysql.MySQLDialect.jsonHasKeySql(SqlText("data"), "email")
         assertTrue(sql == "JSON_CONTAINS_PATH(data, 'one', '$.email')")
       },
       test("MySQLDialect.jsonContainsSql generates correct SQL") {
-        val sql = saferis.mysql.MySQLDialect.jsonContainsSql("data", """{"verified":true}""")
+        val sql = saferis.mysql.MySQLDialect.jsonContainsSql(SqlText("data"), JsonText("""{"verified":true}"""))
         assertTrue(sql == """JSON_CONTAINS(data, '{"verified":true}')""")
       },
       test("MySQLDialect.jsonExtractSql generates correct SQL") {
-        val sql = saferis.mysql.MySQLDialect.jsonExtractSql("data", "email")
+        val sql = saferis.mysql.MySQLDialect.jsonExtractSql(SqlText("data"), "email")
         assertTrue(sql == "JSON_EXTRACT(data, '$.email')")
       },
       test("MySQLDialect.jsonHasAnyKeySql generates correct SQL") {
-        val sql = saferis.mysql.MySQLDialect.jsonHasAnyKeySql("data", Seq("email", "name"))
+        val sql = saferis.mysql.MySQLDialect.jsonHasAnyKeySql(SqlText("data"), Seq("email", "name"))
         assertTrue(sql == "JSON_CONTAINS_PATH(data, 'one', '$.email', '$.name')")
       },
       test("MySQLDialect.jsonHasAllKeysSql generates correct SQL") {
-        val sql = saferis.mysql.MySQLDialect.jsonHasAllKeysSql("data", Seq("email", "name"))
+        val sql = saferis.mysql.MySQLDialect.jsonHasAllKeysSql(SqlText("data"), Seq("email", "name"))
         assertTrue(sql == "JSON_CONTAINS_PATH(data, 'all', '$.email', '$.name')")
       },
     ),
@@ -570,7 +570,7 @@ object SchemaSpecs extends ZIOSpecDefault:
         val sql = Schema[Order]
           .withForeignKey(_.userId)
           .references[User](_.id)
-          .named("fk_order_user")
+          .named(ConstraintName("fk_order_user"))
           .ddl(ifNotExists = false)
           .sql
         assertTrue(sql.contains("constraint fk_order_user foreign key"))
@@ -654,7 +654,7 @@ object SchemaSpecs extends ZIOSpecDefault:
       test("named unique constraint") {
         val sql = Schema[User]
           .withUniqueConstraint(_.email)
-          .named("uq_user_email")
+          .named(ConstraintName("uq_user_email"))
           .ddl(ifNotExists = false)
           .sql
         assertTrue(sql.contains("constraint uq_user_email unique"))

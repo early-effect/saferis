@@ -1,7 +1,6 @@
 package saferis.docs
 
 import saferis.*
-import saferis.docs.DocsTransactor.xa
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.*
@@ -57,15 +56,15 @@ object Dml extends SaferisDocSpecSuite:
     section("Running DML Operations")(
       exampleZIO {
         // Full workflow with actual database
-        xa.run(for
+        (for
           _    <- ddl.createTable[Task](ifNotExists = true)
           _    <- dml.insert(Task(-1, "Task 1", false))
           _    <- dml.insert(Task(-1, "Task 2", false))
           _    <- dml.insert(Task(-1, "Task 3", true))
           all  <- sql"SELECT * FROM $tasks".query[Task]
           done <- sql"SELECT * FROM $tasks WHERE ${tasks.done} = ${true}".query[Task]
-        yield (all, done))
-          .either
+        yield (all, done)).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right((all, done)) => assertTrue(all.size >= 3 && done.exists(_.done))
         case Left(err)          => assertTrue(false).label(err.message)
@@ -74,11 +73,11 @@ object Dml extends SaferisDocSpecSuite:
     section("Insert with RETURNING")(
       md"""For databases that support it (PostgreSQL, SQLite), get the inserted row back:""",
       exampleZIO {
-        xa.run(for
+        (for
           _      <- ddl.createTable[Task](ifNotExists = true)
           result <- dml.insertReturning(Task(-1, "New Task", false))
-        yield result)
-          .either
+        yield result).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(result) => assertTrue(result.title == "New Task" && !result.done)
         case Left(err)     => assertTrue(false).label(err.message)
@@ -88,13 +87,13 @@ object Dml extends SaferisDocSpecSuite:
       md"""Use the `sql` interpolator for any query:""",
       exampleZIO {
         // Query with ordering
-        xa.run(for
+        (for
           _      <- ddl.createTable[Task](ifNotExists = true)
           _      <- dml.insert(Task(-1, "Alpha", false))
           _      <- dml.insert(Task(-1, "Beta", true))
           sorted <- sql"SELECT * FROM $tasks ORDER BY ${tasks.title}".query[Task]
-        yield sorted)
-          .either
+        yield sorted).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(sorted) => assertTrue(sorted.nonEmpty)
         case Left(err)     => assertTrue(false).label(err.message)
@@ -103,7 +102,7 @@ object Dml extends SaferisDocSpecSuite:
     section("Update Operations")(
       md"""Update records by primary key or with custom conditions:""",
       exampleZIO {
-        xa.run(
+        (
           for
             _        <- ddl.createTable[Item](ifNotExists = true)
             inserted <- dml.insertReturning(Item(-1, "Widget", 10))
@@ -118,6 +117,7 @@ object Dml extends SaferisDocSpecSuite:
             result <- sql"SELECT * FROM $items WHERE ${items.id} = ${inserted.id}".queryOne[Item]
           yield (updated, result)
         ).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right((updated, result)) =>
           assertTrue(updated.name == "Super Widget" && updated.quantity == 20 && result.exists(_.quantity == 20))
@@ -125,7 +125,7 @@ object Dml extends SaferisDocSpecSuite:
       },
       md"""Update multiple rows with a WHERE clause:""",
       exampleZIO {
-        xa.run(for
+        (for
           _ <- ddl.createTable[Item](ifNotExists = true)
           _ <- dml.insert(Item(-1, "Gadget A", 5))
           _ <- dml.insert(Item(-1, "Gadget B", 3))
@@ -137,8 +137,8 @@ object Dml extends SaferisDocSpecSuite:
           )
 
           all <- sql"SELECT * FROM $items".query[Item]
-        yield (rowsUpdated, all))
-          .either
+        yield (rowsUpdated, all)).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right((rowsUpdated, all)) => assertTrue(rowsUpdated >= 2 && all.exists(_.name == "Low Stock Item"))
         case Left(err)                 => assertTrue(false).label(err.message)
@@ -147,7 +147,7 @@ object Dml extends SaferisDocSpecSuite:
     section("Delete Operations")(
       md"""Delete records by primary key or with custom conditions:""",
       exampleZIO {
-        xa.run(
+        (
           for
             _      <- ddl.createTable[LogEntry](ifNotExists = true)
             entry1 <- dml.insertReturning(LogEntry(-1, "INFO", "Application started"))
@@ -163,6 +163,7 @@ object Dml extends SaferisDocSpecSuite:
             remaining <- sql"SELECT * FROM $logs".query[LogEntry]
           yield (deleted, remaining)
         ).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right((deleted, remaining)) =>
           assertTrue(deleted.message == "Application started" && !remaining.exists(_.id == deleted.id))
@@ -170,7 +171,7 @@ object Dml extends SaferisDocSpecSuite:
       },
       md"""Delete multiple rows with a WHERE clause:""",
       exampleZIO {
-        xa.run(
+        (
           for
             _ <- ddl.createTable[LogEntry](ifNotExists = true)
             _ <- dml.insert(LogEntry(-1, "DEBUG", "Debug 1"))
@@ -186,6 +187,7 @@ object Dml extends SaferisDocSpecSuite:
             remaining <- sql"SELECT * FROM $logs".query[LogEntry]
           yield (rowsDeleted, deletedEntries, remaining)
         ).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right((rowsDeleted, deletedEntries, remaining)) =>
           assertTrue(rowsDeleted >= 2 && remaining.exists(_.level == "INFO") && !remaining.exists(_.level == "DEBUG"))
@@ -204,7 +206,7 @@ object Dml extends SaferisDocSpecSuite:
             .value(_.age, 30)
             .build
             .sql
-        }.assert(sql => assertTrue(sql.toLowerCase.contains("insert") && sql.contains("?"))),
+        }.assert(sql => assertTrue(sql.toLowerCase.contains("insert") && sql.contains("$1"))),
         exampleValue {
           // INSERT with RETURNING clause
           Insert[BuilderUser]
@@ -220,13 +222,13 @@ object Dml extends SaferisDocSpecSuite:
 - Call `.where(...)` to specify which rows to update
 - Call `.all` to explicitly update all rows""",
         exampleZIO {
-          xa.run(for
+          (for
             _     <- ddl.createTable[BuilderUser](ifNotExists = true)
             _     <- dml.insert(BuilderUser(-1, "Alice", "alice@example.com", 30))
             _     <- dml.insert(BuilderUser(-1, "Bob", "bob@example.com", 25))
             users <- sql"SELECT * FROM ${Table[BuilderUser]}".query[BuilderUser]
-          yield users)
-            .either
+          yield users).either
+            .provideLayer(DocsTransactor.layer)
         }.assert {
           case Right(users) => assertTrue(users.size >= 2)
           case Left(err)    => assertTrue(false).label(err.message)
@@ -327,7 +329,7 @@ You can also use raw `SqlFragment` for complex conditions:""",
             .where(sql"${users.name} LIKE ${"A%"}")
             .build
             .sql
-        }.assert(sql => assertTrue(sql.toLowerCase.contains("like") || sql.contains("?"))),
+        }.assert(sql => assertTrue(sql.toLowerCase.contains("like") || sql.contains("$1"))),
       ),
       section("Complex WHERE with OR and Grouping")(
         md"""Use `andWhere` with a lambda for complex conditions with OR logic:""",
@@ -383,12 +385,12 @@ Delete also supports `andWhere`:""",
 - Uses capability constraint: requires `Dialect & ReturningSupport`""",
         exampleValue {
           // Execute and get the updated row
-          val result: ScopedQuery[Option[LockRow]] = Update[LockRow]
+          val result: ZIO[SqlSession, SaferisError, Option[LockRow]] = Update[LockRow]
             .set(_.expiresAt, java.time.Instant.now())
             .where(_.instanceId)
             .eq("id")
             .returningAs
-            .queryOne // Returns ScopedQuery[Option[LockRow]]
+            .queryOne
           result.getClass.getSimpleName
         }.assert(name => assertTrue(name.nonEmpty)),
         md"""Delete also supports `returningAs`:""",

@@ -1,8 +1,8 @@
 package saferis
 
 import zio.Chunk
-import zio.Scope
 import zio.Trace
+import zio.ZIO
 import zio.stream.ZStream
 
 import scala.annotation.unused
@@ -31,7 +31,7 @@ import scala.annotation.unused
   *   The case class type representing the table
   */
 final case class Instance[A](
-    private[saferis] val tableName: String,
+    private[saferis] val tableName: TableName,
     private[saferis] val columns: Seq[Column[?]],
     private[saferis] val alias: Option[Alias],
     private[saferis] val foreignKeys: Vector[ForeignKeySpec[A, ?]] = Vector.empty,
@@ -39,17 +39,17 @@ final case class Instance[A](
     private[saferis] val uniqueConstraints: Vector[UniqueConstraintSpec[?]] = Vector.empty,
 )(using val tableEvidence: Table[A])
     extends Selectable:
-  private[saferis] val fieldNamesToColumns: Map[String, Column[?]] = columns.map(c => c.name -> c).toMap
+  private[saferis] val fieldNamesToColumns: Map[String, Column[?]] = columns.map(c => (c.name: String) -> c).toMap
 
-  private[saferis] val fieldToLabel: Map[String, String] =
-    columns.map(c => c.name -> c.label).toMap
+  private[saferis] val fieldToLabel: Map[String, ColumnName] =
+    columns.map(c => (c.name: String) -> c.label).toMap
 
   /** Get foreign key constraint SQL - use via `foreignKeyConstraints(instance)` */
-  private[saferis] def foreignKeyConstraints: Seq[String] =
+  private[saferis] def foreignKeyConstraints: Seq[SqlText] =
     foreignKeys.map(_.toConstraintSql(fieldToLabel)).toSeq
 
   /** Get unique constraint SQL - use via `uniqueConstraints(instance)` */
-  private[saferis] def uniqueConstraintsSql: Seq[String] =
+  private[saferis] def uniqueConstraintsSql: Seq[SqlText] =
     uniqueConstraints.map(_.toConstraintSql(fieldToLabel)).toSeq
 
   /** Column access via field name - the ONLY public method besides applyDynamic */
@@ -116,10 +116,10 @@ final case class Instance[A](
     Macros.extractColumn(this, selector)
 
   final private[saferis] class TypedFragment(val fragment: SqlFragment):
-    def sql                                                                                   = fragment.sql
-    inline def query(using Trace): ScopedQuery[Chunk[A]]                                      = fragment.query[A]
-    inline def queryOne(using Trace): ScopedQuery[Option[A]]                                  = fragment.queryOne[A]
-    inline def queryStream(using Trace): ZStream[ConnectionProvider & Scope, SaferisError, A] =
+    def sql                                                                    = fragment.sql
+    inline def query(using Trace): ZIO[SqlSession, SaferisError, Chunk[A]]     = fragment.query[A]
+    inline def queryOne(using Trace): ZIO[SqlSession, SaferisError, Option[A]] = fragment.queryOne[A]
+    inline def queryStream(using Trace): ZStream[SqlSession, SaferisError, A]  =
       fragment.queryStream[A]
 end Instance
 

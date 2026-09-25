@@ -1,15 +1,10 @@
 package saferis
 
-/** Internal representation of a condition in ON or WHERE clauses.
-  *
-  * These are used internally by the query builders and converted to SqlFragment for execution.
-  */
-sealed trait Condition:
-  /** Generate the SQL string for this condition */
-  def toSql: String
+import zio.Chunk
 
-  /** Get any Write instances needed for prepared statement binding */
-  def writes: Seq[Write[?]]
+/** Internal representation of a condition in ON or WHERE clauses. */
+sealed trait Condition:
+  def toFragment: SqlFragment
 
 /** Binary condition: column op column (e.g., t1.id = t2.user_id) */
 final case class BinaryCondition(
@@ -19,62 +14,53 @@ final case class BinaryCondition(
     rightAlias: Alias,
     rightColumn: Column[?],
 ) extends Condition:
-  def toSql: String =
-    s"${leftAlias.toSql}.${leftColumn.label} ${operator.sql} ${rightAlias.toSql}.${rightColumn.label}"
-
-  def writes: Seq[Write[?]] = Seq.empty
+  def toFragment: SqlFragment =
+    SqlFragment.text(
+      s"${leftAlias.toSql}.${leftColumn.label} ${operator.sql} ${rightAlias.toSql}.${rightColumn.label}"
+    )
 end BinaryCondition
 
 /** Unary condition: column IS NULL / IS NOT NULL */
 final case class UnaryCondition(
     alias: Alias,
     column: Column[?],
-    operator: Operator, // IsNull or IsNotNull
+    operator: Operator,
 ) extends Condition:
-  def toSql: String =
-    s"${alias.toSql}.${column.label} ${operator.sql}"
+  def toFragment: SqlFragment =
+    SqlFragment.text(s"${alias.toSql}.${column.label} ${operator.sql}")
 
-  def writes: Seq[Write[?]] = Seq.empty
-end UnaryCondition
-
-/** Literal condition: column op ? (prepared statement style)
-  *
-  * Values are NEVER interpolated into SQL - always bound via ? placeholders. This follows the same pattern as the
-  * sql"..." interpolator.
-  */
+/** Literal condition: column op parameter. The value is a `Param` piece, never interpolated text. */
 final case class LiteralCondition(
     alias: Alias,
     column: Column[?],
     operator: Operator,
-    write: Write[?],
+    value: SqlValue,
 ) extends Condition:
-  def toSql: String =
-    s"${alias.toSql}.${column.label} ${operator.sql} ?"
-
-  def writes: Seq[Write[?]] = Seq(write)
+  def toFragment: SqlFragment =
+    SqlFragment(
+      Chunk(
+        SqlPiece.Text(SqlText(s"${alias.toSql}.${column.label} ${operator.sql} ")),
+        SqlPiece.Param(value),
+      )
+    )
 end LiteralCondition
 
-/** Condition comparing a column to the EXCLUDED pseudo-table (for upsert WHERE clauses).
-  *
-  * In PostgreSQL: `ON CONFLICT (id) DO UPDATE SET ... WHERE table.column = EXCLUDED.column`
-  */
+/** Condition comparing a column to the EXCLUDED pseudo-table (for upsert WHERE clauses). */
 final case class ExcludedCondition(
     alias: Alias,
     column: Column[?],
     operator: Operator,
     excludedColumn: Column[?],
 ) extends Condition:
-  def toSql: String =
-    s"${alias.toSql}.${column.label} ${operator.sql} excluded.${excludedColumn.label}"
-
-  def writes: Seq[Write[?]] = Seq.empty
-end ExcludedCondition
+  def toFragment: SqlFragment =
+    SqlFragment.text(s"${alias.toSql}.${column.label} ${operator.sql} excluded.${excludedColumn.label}")
 
 object Condition:
-  /** Convert a sequence of conditions to SQL with AND between them */
   def toSqlFragment(conditions: Seq[Condition]): SqlFragment =
-    if conditions.isEmpty then SqlFragment("", Seq.empty)
+    if conditions.isEmpty then SqlFragment.empty
     else
-      val sql    = conditions.map(_.toSql).mkString(" and ")
-      val writes = conditions.flatMap(_.writes)
-      SqlFragment(sql, writes)
+      conditions
+        .map(_.toFragment)
+        .reduce: (left, right) =>
+          left.append(SqlFragment.text(" and ")).append(right)
+end Condition

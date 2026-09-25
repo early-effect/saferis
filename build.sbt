@@ -1,3 +1,9 @@
+import org.scalajs.linker.interface.ModuleKind
+import org.scalajs.sbtplugin.ScalaJSPlugin.autoImport.*
+import scala.scalanative.sbtplugin.ScalaNativePlugin.autoImport.nativeConfig
+// sbt has its own `Exec` (a queued command). This is the shell AST's simple command.
+import zipx.shell.Exec
+
 MyVersions.settings
 
 // Global settings. Iterable/saferis overrides group via PUBLISH_ORG from ZipxGitHubPackages.
@@ -56,26 +62,40 @@ githubPackagesRepo match {
 /** Pre-pull with retries. Verbatim shell, so runRaw declares the escape hatch and earns a
   * generate-time warning naming the step, rather than hiding it in a bare `run =`.
   */
-val prePullPostgres = Steps.built("pre-pull-postgres")(
+val pgJsCiSetup = Steps.buildingWith("pg-js-ci") { ctx =>
+  List(
+    Step
+      .usesRef(ctx.actions.setupNode)
+      .named("Set up Node")
+      .withInputs(scala.collection.immutable.ListMap("node-version" -> "24", "cache" -> "npm")),
+    Step.run(Script(Exec("npm", Word.lit("ci")))).named("Install Node dependencies"),
+  )
+}
+
+/** Pull `image` with retries, so a registry flake does not fail the suite. The tag matches the testkit container. */
+def prePull(id: String, image: String, label: String) = Steps.built(id)(
   Step
     .runRaw(
-      """|set -euo pipefail
-         |image=postgres:latest
-         |max=5
-         |for attempt in $(seq 1 "$max"); do
-         |  if docker pull "$image"; then
-         |    exit 0
-         |  fi
-         |  if [ "$attempt" -eq "$max" ]; then
-         |    echo "Failed to pull $image after $max attempts" >&2
-         |    exit 1
-         |  fi
-         |  sleep $((attempt * 10))
-         |done
-         |""".stripMargin
+      s"""|set -euo pipefail
+          |image=$image
+          |max=5
+          |for attempt in $$(seq 1 "$$max"); do
+          |  if docker pull "$$image"; then
+          |    exit 0
+          |  fi
+          |  if [ "$$attempt" -eq "$$max" ]; then
+          |    echo "Failed to pull $$image after $$max attempts" >&2
+          |    exit 1
+          |  fi
+          |  sleep $$((attempt * 10))
+          |done
+          |""".stripMargin
     )
-    .named("Pre-pull Postgres image")
+    .named(s"Pre-pull $label image")
 )
+
+val prePullPostgres = prePull("pre-pull-postgres", "postgres:17", "Postgres")
+val prePullMysql    = prePull("pre-pull-mysql", "mysql:8.4", "MySQL")
 
 zipxJavaVersion      := JdkVersion("25")
 zipxWorkflowDispatch := true
@@ -84,15 +104,35 @@ zipxCapabilities ++= {
   Seq(
     Capability.once(
       name = Capability.TestName,
-      command = zipxTasks.session(testFull, LocalProject("docs") / specularSite),
+      command = zipxTasks.session(
+        LocalProject("core") / testFull,
+        LocalProject("coreJS") / testFull,
+        LocalProject("coreNative") / testFull,
+        LocalProject("postgres") / testFull,
+        LocalProject("postgresJS") / testFull,
+        LocalProject("postgresNative") / testFull,
+        LocalProject("jdbc") / testFull,
+        LocalProject("postgresJdbc") / testFull,
+        LocalProject("mysqlJdbc") / testFull,
+        LocalProject("sqliteJdbc") / testFull,
+        LocalProject("h2Jdbc") / testFull,
+        LocalProject("docs") / specularSite,
+      ),
       // GHA VMs are disposable; skip Ryuk so Hub flakes on testcontainers/ryuk cannot fail CI.
       env = Map("TESTCONTAINERS_RYUK_DISABLED" -> EnvValue.plain("true")),
-      extraSteps = prePullPostgres,
+      extraSteps = prePullPostgres ++ prePullMysql,
     ),
-    // Same core-only command as before; sessionTail cleared so sonaRelease is not appended twice.
+    // Node pg suite. Not part of verify: it needs npm, and it starts Postgres itself.
+    // The `test` job must not wait on this one.
+    Capability.once(
+      name = CapabilityName("test-pg"),
+      command = zipxTasks.session(LocalProject("pgJS") / testFull, LocalProject("pgEsm") / pgEsmProbe),
+      extraSteps = pgJsCiSetup ++ prePullPostgres,
+      // GHA VMs are disposable; skip Ryuk so Hub flakes on testcontainers/ryuk cannot fail CI.
+      env = Map("TESTCONTAINERS_RYUK_DISABLED" -> EnvValue.plain("true")),
+    ),
+    // Every publishing row, then sonaRelease once. docs and root do not publish.
     ZipxCentral.release
-      .runningPerModule(cmd"core/publishSigned; sonaRelease")
-      .copy(sessionTail = None)
       .withCondition(upstream),
     ZipxGitHubPackages
       .sharedRegistry(
@@ -102,8 +142,7 @@ zipxCapabilities ++= {
         packagesRepo = Some("https://maven.pkg.github.com/iterable/maven-packages"),
         publishOrg = Some("com.iterable"),
         publishOrgName = Some("Iterable"),
-      )
-      .runningPerModule(cmd"core/publish"),
+      ),
     // Same org reusable workflow as peers; generated into ci.yml (no hand-rolled docs.yml).
     ZipxDocs.pages().andCondition(upstream),
   )
@@ -122,30 +161,226 @@ lazy val publishSettings = Seq(
   pomIncludeRepository := { _ => false },
 )
 
+lazy val scala3Version: String = MyVersions.scala
+lazy val scalaVersions         = Seq(scala3Version)
+
 // Root project aggregates all modules but is not published
 lazy val root = project
   .in(file("."))
-  .aggregate(core, docs)
+  .aggregate(
+    (core.projectRefs ++ postgres.projectRefs ++ jdbc.projectRefs ++ postgresJdbc.projectRefs ++
+      mysqlJdbc.projectRefs ++ sqliteJdbc.projectRefs ++ h2Jdbc.projectRefs ++ pg.projectRefs ++ testkit.projectRefs ++
+      Seq[sbt.ProjectReference](docs, pgEsm))*
+  )
   .settings(
     name           := "saferis-root",
     publish / skip := true,
   )
 
-// Core library - the main publishable artifact
-lazy val core = project
-  .in(file("core"))
+// Core library. JVM, Scala.js, and Scala Native. No JDBC.
+lazy val nativeCore =
+  MyVersions.nativeJavaTime ++ Seq(
+    nativeConfig ~= (_.withMultithreading(true)),
+    libraryDependencySchemes += "org.scala-native" % "test-interface_native0.5_3" % "early-semver",
+    dependencyOverrides += Def.uncached(
+      "org.scala-native" % "test-interface_native0.5_3" % (MyVersions.scalaNative.version: String)
+    ),
+  )
+
+lazy val core = (projectMatrix in file("core"))
   .settings(commonSettings)
   .settings(publishSettings)
+  .settings(MyVersions.coreLib)
+  .settings(MyVersions.coreTest)
   .settings(
     name        := "saferis",
     description := "Saferis mitigates the discord of unsafe SQL. It is a resource safe SQL client library.",
+  )
+  .jvmPlatform(scalaVersions = scalaVersions)
+  .jsPlatform(scalaVersions = scalaVersions)
+  .nativePlatform(scalaVersions = scalaVersions, nativeCore)
+
+// Postgres text codec and connection settings. JVM, Scala.js, and Scala Native. No driver.
+lazy val postgres = (projectMatrix in file("postgres"))
+  .dependsOn(core)
+  .settings(commonSettings)
+  .settings(publishSettings)
+  .settings(MyVersions.coreLib)
+  .settings(MyVersions.coreTest)
+  .settings(
+    name        := "saferis-postgres",
+    description := "Postgres text codec and connection settings shared by drivers.",
+  )
+  .jvmPlatform(scalaVersions = scalaVersions)
+  .jsPlatform(scalaVersions = scalaVersions)
+  .nativePlatform(scalaVersions = scalaVersions, nativeCore)
+
+// Test container and the conformance suite. Not published: it starts Docker.
+lazy val testkit = (projectMatrix in file("testkit"))
+  .dependsOn(core)
+  .settings(commonSettings)
+  .settings(
+    name           := "saferis-testkit",
+    description    := "Postgres test container and the driver conformance suite.",
+    publish / skip := true,
     MyVersions.coreLib,
     MyVersions.coreTest,
+    MyVersions.testkitTest,
+
+  )
+  .jvmPlatform(scalaVersions = scalaVersions, MyVersions.testkitJvm)
+  .jsPlatform(
+    scalaVersions = scalaVersions,
+    settings = Seq(
+      scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.CommonJSModule)),
+      Compile / sourceGenerators += Def.task {
+        val in  = (ThisBuild / baseDirectory).value / "testkit" / "src" / "main" / "resources" / "init.sql"
+        val out = (Compile / sourceManaged).value / "saferis" / "tests" / "InitScript.scala"
+        val body = sbt.io.IO.read(in).replace("\"\"\"", "\\\"\\\"\\\"")
+        sbt.io.IO.write(
+          out,
+          s"""|package saferis.tests
+              |
+              |private[tests] object InitScript:
+              |  val sql: String =
+              |    \"\"\"$body\"\"\"
+              |""".stripMargin,
+        )
+        Seq(out)
+      }.taskValue,
+    ),
+  )
+
+// java.sql session. No database driver. A JdbcAdapter supplies bind, read, and errors.
+lazy val jdbc = (projectMatrix in file("jdbc"))
+  .dependsOn(core)
+  // The bring-your-own-database spec runs the portable conformance suite on H2, with no Docker.
+  .dependsOn(testkit % "test->compile;test->test")
+  .settings(commonSettings)
+  .settings(publishSettings)
+  .settings(MyVersions.jdbcLib)
+  .settings(MyVersions.coreTest)
+  .settings(MyVersions.jdbcTest)
+  .settings(
+    name        := "saferis-jdbc",
+    description := "JDBC SqlSession. Database behavior is a JdbcAdapter.",
+  )
+  .jvmPlatform(scalaVersions = scalaVersions)
+
+// MySQL JdbcAdapter on Connector/J. Pull this and saferis-jdbc for MySQL.
+lazy val mysqlJdbc = (projectMatrix in file("mysql-jdbc"))
+  .dependsOn(jdbc)
+  .dependsOn(testkit % "test->compile;test->test")
+  .settings(commonSettings)
+  .settings(publishSettings)
+  .settings(MyVersions.mysqlJdbcLib)
+  .settings(MyVersions.coreTest)
+  .settings(MyVersions.mysqlJdbcTest)
+  .settings(
+    name        := "saferis-mysql-jdbc",
+    description := "MySQL JdbcAdapter on Connector/J.",
+  )
+  .jvmPlatform(scalaVersions = scalaVersions)
+
+// H2 JdbcAdapter and dialect. Pull this and saferis-jdbc for fast in-memory tests.
+lazy val h2Jdbc = (projectMatrix in file("h2-jdbc"))
+  .dependsOn(jdbc)
+  .dependsOn(testkit % "test->compile;test->test")
+  .settings(commonSettings)
+  .settings(publishSettings)
+  .settings(MyVersions.h2JdbcLib)
+  .settings(MyVersions.coreTest)
+  .settings(MyVersions.h2JdbcTest)
+  .settings(
+    name        := "saferis-h2-jdbc",
+    description := "H2 JdbcAdapter and dialect, for fast in-memory tests.",
+  )
+  .jvmPlatform(scalaVersions = scalaVersions)
+
+// SQLite JdbcAdapter on sqlite-jdbc. Pull this and saferis-jdbc for SQLite.
+lazy val sqliteJdbc = (projectMatrix in file("sqlite-jdbc"))
+  .dependsOn(jdbc)
+  .dependsOn(testkit % "test->compile;test->test")
+  .settings(commonSettings)
+  .settings(publishSettings)
+  .settings(MyVersions.sqliteJdbcLib)
+  .settings(MyVersions.coreTest)
+  .settings(MyVersions.sqliteJdbcTest)
+  .settings(
+    name        := "saferis-sqlite-jdbc",
+    description := "SQLite JdbcAdapter on sqlite-jdbc.",
+  )
+  .jvmPlatform(scalaVersions = scalaVersions)
+
+// Postgres JdbcAdapter. The only JVM module that depends on pgjdbc and saferis-postgres.
+lazy val postgresJdbc = (projectMatrix in file("postgres-jdbc"))
+  .dependsOn(jdbc, postgres)
+  .dependsOn(testkit % "test->compile;test->test")
+  .settings(commonSettings)
+  .settings(publishSettings)
+  .settings(MyVersions.postgresJdbcLib)
+  .settings(MyVersions.coreTest)
+  .settings(MyVersions.postgresJdbcTest)
+  .settings(
+    name        := "saferis-postgres-jdbc",
+    description := "Postgres JdbcAdapter on pgjdbc.",
+  )
+  .jvmPlatform(scalaVersions = scalaVersions)
+
+// Node pg driver. Scala.js only. Depends on the core JS row and the shared Postgres codec.
+lazy val pg = (projectMatrix in file("pg"))
+  .dependsOn(core, postgres)
+  .dependsOn(testkit % "test->compile;test->test")
+  .settings(commonSettings)
+  .settings(publishSettings)
+  .settings(MyVersions.pgLib)
+  .settings(MyVersions.coreTest)
+  .settings(
+    name        := "saferis-postgres-node",
+    description := "Node pg SqlSession for Postgres.",
+  )
+  .jsPlatform(
+    scalaVersions = scalaVersions,
+    Seq(
+      scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.CommonJSModule)),
+    ),
+  )
+
+lazy val pgEsmProbe = taskKey[Unit]("Load the Node driver as an ES module under Node")
+
+// Second link of the Node driver as an ES module. Sources are the pg module. Not published.
+lazy val pgEsm = project
+  .in(file("pg/esm"))
+  .enablePlugins(ScalaJSPlugin)
+  .dependsOn(core.js(scala3Version), postgres.js(scala3Version))
+  .settings(commonSettings)
+  .settings(MyVersions.pgLib)
+  .settings(
+    name           := "saferis-pg-esm",
+    publish / skip := true,
+    Compile / unmanagedSourceDirectories += Def.uncached(
+      (ThisBuild / baseDirectory).value / "pg" / "src" / "main" / "scala"
+    ),
+    scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.ESModule)),
+    scalaJSUseMainModuleInitializer := true,
+    // sbt's `run` executes the `.js` output as CommonJS. Node only treats this file as
+    // an ES module when the name is `.mjs`, which is when a wrong `pg` import fails.
+    pgEsmProbe := Def.uncached {
+      val report = (Compile / fastLinkJS).value
+      val output = (Compile / fastLinkJS / scalaJSLinkerOutputDirectory).value
+      val js     = output / report.data.publicModules.head.jsFileName
+      val mjs    = output / "main.mjs"
+      sbt.io.IO.copyFile(js, mjs)
+      val code = scala.sys.process
+        .Process(List("node", mjs.getAbsolutePath), (ThisBuild / baseDirectory).value)
+        .!
+      if code != 0 then sys.error(s"ES module load exited $code")
+    },
   )
 
 lazy val docs = project
   .in(file("saferis-docs"))
-  .dependsOn(core)
+  .dependsOn(postgresJdbc.jvm(scala3Version))
   .enablePlugins(SpecularPlugin)
   .settings(commonSettings)
   .settings(

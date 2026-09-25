@@ -2,7 +2,6 @@ package saferis.docs
 
 import saferis.*
 import saferis.Schema.*
-import saferis.docs.DocsTransactor.xa
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.*
@@ -86,15 +85,14 @@ Use multiple `@key` annotations to create a composite primary key:""",
         Schema[OrderItem].ddl().sql
       }.assert(sql => assertTrue(sql.contains("primary key") && sql.contains("orderId"))),
       exampleZIO {
-        xa
-          .run(for
-            _     <- ddl.createTable[OrderItem](ifNotExists = true)
-            _     <- dml.insert(OrderItem(1, 100, 2))
-            _     <- dml.insert(OrderItem(1, 101, 1))
-            _     <- dml.insert(OrderItem(2, 100, 3))
-            items <- sql"SELECT * FROM ${Table[OrderItem]}".query[OrderItem]
-          yield items)
-          .either
+        (for
+          _     <- ddl.createTable[OrderItem](ifNotExists = true)
+          _     <- dml.insert(OrderItem(1, 100, 2))
+          _     <- dml.insert(OrderItem(1, 101, 1))
+          _     <- dml.insert(OrderItem(2, 100, 3))
+          items <- sql"SELECT * FROM ${Table[OrderItem]}".query[OrderItem]
+        yield items).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right(items) => assertTrue(items.exists(_.orderId == 1L) && items.exists(_.productId == 101L))
         case Left(err)    => assertTrue(false).label(err.message)
@@ -105,68 +103,74 @@ Use multiple `@key` annotations to create a composite primary key:""",
       exampleValue {
         val minPrice = 10.0
         sql"SELECT * FROM $products WHERE ${products.price} > $minPrice".sql
-      }.assert(sql => assertTrue(sql.contains("?"))),
+      }.assert(sql => assertTrue(sql.contains("$1"))),
       exampleValue {
         sql"SELECT ${products.name}, ${products.price} FROM $products WHERE ${products.inStock} = ${true}".sql
-      }.assert(sql => assertTrue(sql.contains("core_concepts_products") && sql.contains("?"))),
+      }.assert(sql => assertTrue(sql.contains("core_concepts_products") && sql.contains("$1"))),
       md"""The interpolator handles each type differently:
 
 | Interpolated Type | Treatment | Example |
 |-------------------|-----------|---------|
 | Table instance | SQL identifier | `$$products` → `products` |
 | Column reference | SQL identifier | `$${products.name}` → `name` |
-| Scalar values | Prepared statement `?` | `$$minPrice` → `?` with bound value |
-| `SqlFragment` | Embedded SQL | Nested fragments are composed |
+| Scalar values | Parameter | `$$minPrice` → `$$1` with a bound value |
+| `SqlFragment` | Embedded SQL | Nested fragments are spliced in |
 
+`fragment.sql` is the Postgres inspection form (`$$1`, `$$2`). It is not the text a driver sends.
 See [SQL Injection Prevention](sql-injection-prevention.html) for the complete security model.""",
     ),
-    section("The Transactor")(
-      md"""The `Transactor` wraps a `ConnectionProvider` and executes SQL operations:
+    section("Names and SQL are typed")(
+      md"""Every name Saferis puts into SQL, and every piece of SQL it hands back, has its own type. Each reads as a `String` (interpolation, comparison, logging), but a plain `String` is none of them until its companion says so, and one cannot stand in for another:
+
+| Type | What it is |
+|------|------------|
+| `TableName`, `ColumnName`, `IndexName`, `ConstraintName` | A name as SQL spells it |
+| `FieldName` | A case-class field, which `@label` can make differ from its column |
+| `TypeName`, `ColumnType` | A server type name (`int4`, `mood`) and a DDL spelling (`varchar(255)`) |
+| `SqlText` | SQL: a statement, clause, or rendered fragment. `fragment.sql`, every `Dialect` method, and the SQL on errors and on `SqlExecuted` |
+| `JsonText` | JSON document text, as `SqlValue.Jsonb` carries it |
+| `SqlState` | A five-character SQLSTATE. `SqlState.parse` accepts one, and the constants (`SqlState.UniqueViolation`) name the ones Saferis classifies |
+| `DialectName` | A dialect's display name |
+
+`SqlText(...)`, `SqlFragment.text(...)`, and `Placeholder.raw(...)` are where a `String` becomes SQL. Pass them identifiers and keywords you wrote, never user data. A name's `.sql` splices it unquoted, and `Dialect.escapeIdentifier` quotes it.""",
+      exampleValue {
+        val index = IndexName("idx_products_sku")
+        val sql   = summon[Dialect].createIndexSql(index, TableName("core_concepts_products"), Seq(ColumnName("sku")))
+        val found = SqlState.parse("23505")
+        (sql, found)
+      }.assert { case (sql, found) =>
+        assertTrue(
+          sql == """create index if not exists "idx_products_sku" on "core_concepts_products" ("sku")""",
+          found.contains(SqlState.UniqueViolation),
+          SqlState.parse("ECONNRESET").isEmpty,
+        )
+      },
+    ),
+    section("The session")(
+      md"""`SqlSession` executes statements. On the JVM, `PostgresJdbc.layer` builds one from a `DataSource`. `JdbcSession.layer` is the same session with a `JdbcAdapter` you supply:
 
 ```scala
 import saferis.*
+import saferis.postgres.jdbc.PostgresJdbc
 import zio.*
 import javax.sql.DataSource
 
-// Assuming you have a DataSource
 val dataSource: DataSource = ???
 
 @tableName("core_concepts_users")
 case class User(@generated @key id: Int, name: String) derives Table
 
-// From a ConnectionProvider
-val provider = ConnectionProvider.FromDataSource(dataSource)
-val xa = Transactor(provider, _ => (), None)
+val session = ZLayer.succeed(dataSource) >>> PostgresJdbc.layer()
 
-// Execute operations
-val result = xa.run(
+val result: ZIO[SqlSession, SaferisError, Chunk[User]] =
   sql"SELECT * FROM $${Table[User]}".query[User]
-)
 ```
 
-### Concurrency Limiting
+`JdbcSessionConfig` carries the session-wide statement timeout, a JDBC `configure` callback, and a vendor retry hook. Statement observation is `SqlListener.observe`, not a field on the driver config. A connection pool already queues callers. The session does not add a second semaphore.
 
-The `Transactor.layer` method accepts an optional `maxConcurrency` parameter that limits concurrent database operations using a ZIO Semaphore:
+Open a transaction with `transact`. Nested `transact` joins the outer transaction: one commit, one rollback. See [Statement Timeouts](statement-timeouts.html) for `defaultTimeout`.
 
-```scala
-import saferis.*
-
-// Default: no concurrency limit (recommended for connection pools)
-val defaultLayer = Transactor.layer()
-
-// With concurrency limit (for SQLite or direct JDBC without pooling)
-val limitedLayer = Transactor.layer(maxConcurrency = 1L)
-```
-
-`Transactor.layer` also accepts an optional `defaultTimeout` that applies a JDBC statement timeout to every query run through the Transactor, see [Statement Timeouts](statement-timeouts.html).
-
-**When to use `maxConcurrency`:**
-- SQLite or other embedded databases without connection pooling
-- Direct JDBC connections without a pool
-- When you need concurrency limits below pool size for backpressure
-
-**When NOT to use `maxConcurrency`:**
-- With HikariCP or similar connection pools. The pool handles queuing more efficiently and HikariCP specifically recommends letting threads wait on the pool rather than limiting concurrency externally. Using a semaphore with a pool creates double-queuing and adds overhead in high-contention scenarios."""
+Once `COMMIT` is sent, the session waits for the answer and an interrupt does not cut it off, because an abandoned commit leaves you not knowing whether it happened. The statement timeout does not cover `COMMIT`, so the bound on that wait is the socket. On Node the pool turns on TCP keepalive. On JDBC set your driver's socket timeout on the `DataSource` (pgjdbc `socketTimeout`, Connector/J `socketTimeout`) so a peer that vanished without a reset fails the commit instead of hanging it."""
     ),
   )
 end CoreConcepts

@@ -32,14 +32,13 @@ object DialectSpecs extends ZIOSpecDefault:
       assertTrue(SQLiteDialect.autoIncrementClause(false, false, false) == "")
     },
     test("Dialects have different column type mappings") {
-      import java.sql.Types
       val pgDialect = summon[Dialect]
-      assertTrue(pgDialect.columnType(Types.VARCHAR) == "varchar(255)") &&
-      assertTrue(MySQLDialect.columnType(Types.VARCHAR) == "varchar(255)") &&
-      assertTrue(SQLiteDialect.columnType(Types.VARCHAR) == "text") &&
-      assertTrue(pgDialect.columnType(Types.INTEGER) == "integer") &&
-      assertTrue(MySQLDialect.columnType(Types.INTEGER) == "int") &&
-      assertTrue(SQLiteDialect.columnType(Types.INTEGER) == "integer")
+      assertTrue(pgDialect.columnType(SqlType.VarChar) == "varchar(255)") &&
+      assertTrue(MySQLDialect.columnType(SqlType.VarChar) == "varchar(255)") &&
+      assertTrue(SQLiteDialect.columnType(SqlType.VarChar) == "varchar(255)") &&
+      assertTrue(pgDialect.columnType(SqlType.Int4) == "integer") &&
+      assertTrue(MySQLDialect.columnType(SqlType.Int4) == "int") &&
+      assertTrue(SQLiteDialect.columnType(SqlType.Int4) == "integer")
     },
     test("Dialects have different identifier quoting") {
       val pgDialect = summon[Dialect]
@@ -49,13 +48,16 @@ object DialectSpecs extends ZIOSpecDefault:
     },
     test("Dialects generate correct index SQL with escaped identifiers") {
       val pgDialect = summon[Dialect]
-      val indexSql  = pgDialect.createIndexSql("idx_test", "test_table", Seq("name"), true)
+      val indexSql  =
+        pgDialect.createIndexSql(IndexName("idx_test"), TableName("test_table"), Seq(ColumnName("name")), true)
       assertTrue(indexSql == "create index if not exists \"idx_test\" on \"test_table\" (\"name\")")
 
-      val mysqlIndexSql = MySQLDialect.createIndexSql("idx_test", "test_table", Seq("name"), true)
+      val mysqlIndexSql =
+        MySQLDialect.createIndexSql(IndexName("idx_test"), TableName("test_table"), Seq(ColumnName("name")), true)
       assertTrue(mysqlIndexSql == "create index `idx_test` on `test_table` (`name`)")
 
-      val sqliteIndexSql = SQLiteDialect.createIndexSql("idx_test", "test_table", Seq("name"), true)
+      val sqliteIndexSql =
+        SQLiteDialect.createIndexSql(IndexName("idx_test"), TableName("test_table"), Seq(ColumnName("name")), true)
       assertTrue(sqliteIndexSql == "create index if not exists \"idx_test\" on \"test_table\" (\"name\")")
     },
     test("PostgreSQL escapeIdentifier handles SQL injection attempts") {

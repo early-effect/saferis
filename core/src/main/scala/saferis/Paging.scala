@@ -60,26 +60,22 @@ object PagedStreamOps:
       extractCursor: A => K,
       pageSize: Int,
       startAfter: Option[K],
-  )(using enc: Encoder[K], trace: Trace): ZStream[ConnectionProvider & Scope, SaferisError, Page[A, K]] =
+  )(using enc: Encoder[K], trace: Trace): ZStream[SqlSession, SaferisError, Page[A, K]] =
     ZStream.unfoldZIO((startAfter, 0, false)) { case (cursor, pageNum, done) =>
       if done then ZIO.succeed(None) // We've already emitted the last page
       else
         val query = cursor match
           case Some(c) => ready.seekAfter(column, c)(using enc).limit(pageSize)
           case None    => ready.orderBy(column.asc).limit(pageSize)
-        // Use scoped to ensure connection is released after each page
-        ZIO
-          .scoped:
-            query.build.query[A]
-          .map { items =>
-            if items.isEmpty then None
-            else
-              val nextCursor = items.lastOption.map(extractCursor)
-              val page       = Page(items, nextCursor, pageNum)
-              val hasMore    = items.size == pageSize
-              if hasMore then Some((page, (nextCursor, pageNum + 1, false)))
-              else Some((page, (None, pageNum + 1, true))) // Mark done after emitting partial page
-          }
+        query.build.query[A].map { items =>
+          if items.isEmpty then None
+          else
+            val nextCursor = items.lastOption.map(extractCursor)
+            val page       = Page(items, nextCursor, pageNum)
+            val hasMore    = items.size == pageSize
+            if hasMore then Some((page, (nextCursor, pageNum + 1, false)))
+            else Some((page, (None, pageNum + 1, true))) // Mark done after emitting partial page
+        }
     }
 
   /** Create a seeking stream from a Query1Ready
@@ -92,25 +88,21 @@ object PagedStreamOps:
       extractCursor: A => K,
       batchSize: Int,
       startAfter: Option[K],
-  )(using enc: Encoder[K], trace: Trace): ZStream[ConnectionProvider & Scope, SaferisError, A] =
+  )(using enc: Encoder[K], trace: Trace): ZStream[SqlSession, SaferisError, A] =
     ZStream.unfoldChunkZIO((startAfter, false)) { case (cursor, done) =>
       if done then ZIO.succeed(None) // We've already emitted the last batch
       else
         val query = cursor match
           case Some(c) => ready.seekAfter(column, c)(using enc).limit(batchSize)
           case None    => ready.orderBy(column.asc).limit(batchSize)
-        // Use scoped to ensure connection is released after each batch
-        ZIO
-          .scoped:
-            query.build.query[A]
-          .map { items =>
-            if items.isEmpty then None
-            else
-              val nextCursor = items.lastOption.map(extractCursor)
-              val hasMore    = items.size == batchSize
-              if hasMore then Some((items, (nextCursor, false)))
-              else Some((items, (None, true))) // Mark done after emitting partial batch
-          }
+        query.build.query[A].map { items =>
+          if items.isEmpty then None
+          else
+            val nextCursor = items.lastOption.map(extractCursor)
+            val hasMore    = items.size == batchSize
+            if hasMore then Some((items, (nextCursor, false)))
+            else Some((items, (None, true))) // Mark done after emitting partial batch
+        }
     }
 end PagedStreamOps
 
@@ -153,7 +145,7 @@ final case class Sort[T](
       case NullOrder.First   => " nulls first"
       case NullOrder.Last    => " nulls last"
       case NullOrder.Default => ""
-    SqlFragment(s"${column.sql}$orderStr$nullStr", Seq.empty)
+    SqlFragment.text(s"${column.sql}$orderStr$nullStr")
 end Sort
 
 /** Type-safe seek specification for cursor-based pagination
@@ -182,7 +174,7 @@ final case class Seek[T: Encoder](
       case SeekDir.Gt => ">"
       case SeekDir.Lt => "<"
     val encoder = summon[Encoder[T]]
-    SqlFragment(s"${column.sql} $op ?", Seq(encoder(value)))
+    SqlFragment.text(s"${column.sql} $op ").append(SqlFragment.param(encoder.encode(value)))
 
   /** Generate a Sort from this seek specification */
   def toSort: Sort[T] = Sort(column, sortOrder, nullOrder)

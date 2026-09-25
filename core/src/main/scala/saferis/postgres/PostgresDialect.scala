@@ -1,13 +1,13 @@
 package saferis.postgres
 
 import saferis.*
-
-import java.sql.Types
+import zio.Trace
+import zio.ZIO
 
 // Export PostgresDialect with its singleton type so all capability intersections are satisfied
 given PostgresDialect.type = PostgresDialect
 
-/** PostgreSQL dialect implementation providing PostgreSQL-specific type mappings and SQL generation */
+/** PostgreSQL dialect implementation providing PostgreSQL-specific type mappings, SQL generation, and catalog reads. */
 object PostgresDialect
     extends Dialect
     with ReturningSupport
@@ -17,52 +17,38 @@ object PostgresDialect
     with JsonSupport
     with ArraySupport
     with WindowFunctionSupport
-    with CommonTableExpressionSupport:
+    with CommonTableExpressionSupport
+    with SchemaIntrospectionSupport:
 
-  val name: String = "PostgreSQL"
+  val name: DialectName = DialectName("PostgreSQL")
 
-  def columnType(jdbcType: Int): String = jdbcType match
-    case Types.VARCHAR     => s"varchar($DefaultVarcharLength)"
-    case Types.CHAR        => "char"
-    case Types.LONGVARCHAR => "text"
-    case Types.CLOB        => "text"
+  def introspectTable(tableName: TableName)(using Trace): ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
+    PostgresCatalog.introspect(tableName)
 
-    case Types.SMALLINT => "smallint"
-    case Types.INTEGER  => "integer"
-    case Types.BIGINT   => "bigint"
-
-    case Types.FLOAT   => "real"
-    case Types.DOUBLE  => "double precision"
-    case Types.REAL    => "real"
-    case Types.DECIMAL => "numeric"
-    case Types.NUMERIC => "numeric"
-
-    case Types.BOOLEAN => "boolean"
-    case Types.BIT     => "boolean"
-
-    case Types.DATE                    => "date"
-    case Types.TIME                    => "time"
-    case Types.TIMESTAMP               => "timestamp"
-    case Types.TIMESTAMP_WITH_TIMEZONE => "timestamptz"
-
-    case Types.BINARY        => "bytea"
-    case Types.VARBINARY     => "bytea"
-    case Types.LONGVARBINARY => "bytea"
-    case Types.BLOB          => "bytea"
-
-    case Types.DATALINK => "text"  // URLs stored as text in PostgreSQL
-    case Types.ARRAY    => "array"
-    case Types.STRUCT   => "jsonb"
-    case Types.OTHER    => "jsonb" // Fallback - UUID and other types override columnType
-
-    // Fallback to JDBC standard name for unknown types
-    case other =>
-      try java.sql.JDBCType.valueOf(other).getName.toLowerCase
-      catch case _: IllegalArgumentException => "text"
+  def columnType(tpe: SqlType): ColumnType = ColumnType:
+    tpe match
+      case SqlType.Bool           => "boolean"
+      case SqlType.Int2           => "smallint"
+      case SqlType.Int4           => "integer"
+      case SqlType.Int8           => "bigint"
+      case SqlType.Float4         => "real"
+      case SqlType.Float8         => "double precision"
+      case SqlType.Numeric        => "numeric"
+      case SqlType.VarChar        => s"varchar($DefaultVarcharLength)"
+      case SqlType.Text           => "text"
+      case SqlType.Bytea          => "bytea"
+      case SqlType.Date           => "date"
+      case SqlType.Time           => "time"
+      case SqlType.Timestamp      => "timestamp"
+      case SqlType.Timestamptz    => "timestamptz"
+      case SqlType.Jsonb          => "jsonb"
+      case SqlType.Uuid           => "uuid"
+      case SqlType.Array(element) => s"${columnType(element)}[]"
+      case SqlType.Other(_)       => "text"
 
   // === PostgreSQL-specific Auto-increment and Primary Key Support ===
 
-  def autoIncrementClause(isGenerated: Boolean, isPrimaryKey: Boolean, hasCompoundKey: Boolean): String =
+  def autoIncrementClause(isGenerated: Boolean, isPrimaryKey: Boolean, hasCompoundKey: Boolean): SqlText = SqlText:
     if isGenerated && isPrimaryKey && !hasCompoundKey then " generated always as identity primary key"
     else if isGenerated then " generated always as identity"
     else if isPrimaryKey && !hasCompoundKey then " primary key"
@@ -73,41 +59,47 @@ object PostgresDialect
   override def identifierQuote: String = "\""
 
   // === UpsertSupport implementation ===
-  def upsertSql(tableName: String, insertColumns: String, conflictColumns: Seq[String], updateColumns: String): String =
-    s"insert into $tableName $insertColumns on conflict (${conflictColumns.mkString(", ")}) do update set $updateColumns"
+  def upsertSql(
+      tableName: SqlText,
+      insertColumns: SqlText,
+      conflictColumns: Seq[SqlText],
+      updateColumns: SqlText,
+  ): SqlText =
+    SqlText(
+      s"insert into $tableName $insertColumns on conflict (${conflictColumns.mkString(", ")}) do update set $updateColumns"
+    )
 
-  def upsertDoNothingSql(tableName: String, insertColumns: String, conflictColumns: Seq[String]): String =
-    s"insert into $tableName $insertColumns on conflict (${conflictColumns.mkString(", ")}) do nothing"
+  def upsertDoNothingSql(tableName: SqlText, insertColumns: SqlText, conflictColumns: Seq[SqlText]): SqlText =
+    SqlText(s"insert into $tableName $insertColumns on conflict (${conflictColumns.mkString(", ")}) do nothing")
 
   // === JsonSupport implementation ===
-  def jsonType: String = "jsonb"
+  def jsonType: ColumnType = ColumnType("jsonb")
 
-  def jsonExtractSql(columnName: String, fieldPath: String): String =
+  def jsonExtractSql(column: SqlText, fieldPath: String): SqlText =
     val escaped = fieldPath.replace("'", "''")
-    s"$columnName->>'$escaped'"
+    SqlText(s"$column->>'$escaped'")
 
-  def jsonContainsSql(columnName: String, jsonValue: String): String =
+  def jsonContainsSql(column: SqlText, jsonValue: JsonText): SqlText =
     val escaped = jsonValue.replace("'", "''")
-    s"$columnName @> '$escaped'"
+    SqlText(s"$column @> '$escaped'")
 
-  // Note: We use function equivalents instead of ? / ?| / ?& operators because
-  // the ? character is interpreted as a JDBC parameter placeholder in PreparedStatements
-  def jsonHasKeySql(columnName: String, key: String): String =
+  // Function equivalents of ? / ?| / ?&. The operators stay out of generated SQL.
+  def jsonHasKeySql(column: SqlText, key: String): SqlText =
     val escaped = key.replace("'", "''")
-    s"jsonb_exists($columnName, '$escaped')"
+    SqlText(s"jsonb_exists($column, '$escaped')")
 
-  def jsonHasAnyKeySql(columnName: String, keys: Seq[String]): String =
+  def jsonHasAnyKeySql(column: SqlText, keys: Seq[String]): SqlText =
     val keysArray = keys.map(k => s"'${k.replace("'", "''")}'").mkString(", ")
-    s"jsonb_exists_any($columnName, array[$keysArray])"
+    SqlText(s"jsonb_exists_any($column, array[$keysArray])")
 
-  def jsonHasAllKeysSql(columnName: String, keys: Seq[String]): String =
+  def jsonHasAllKeysSql(column: SqlText, keys: Seq[String]): SqlText =
     val keysArray = keys.map(k => s"'${k.replace("'", "''")}'").mkString(", ")
-    s"jsonb_exists_all($columnName, array[$keysArray])"
+    SqlText(s"jsonb_exists_all($column, array[$keysArray])")
 
   // === ArraySupport implementation ===
-  def arrayType(elementType: String): String = s"$elementType[]"
+  def arrayType(elementType: ColumnType): ColumnType = ColumnType(s"$elementType[]")
 
-  def arrayContainsSql(columnName: String, value: String): String =
-    s"$value = ANY($columnName)"
+  def arrayContainsSql(column: SqlText, value: SqlText): SqlText =
+    SqlText(s"$value = ANY($column)")
 
 end PostgresDialect

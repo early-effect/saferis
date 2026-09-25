@@ -1,56 +1,66 @@
 package saferis.docs
 
 import saferis.*
+import saferis.jdbc.*
+import saferis.postgres.jdbc.PostgresJdbc
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.*
 import zio.test.*
-
-import java.sql.SQLException
 
 object RetryableErrors extends SaferisDocSpecSuite:
 
   @tableName("retryable_errors_users")
   case class User(@generated @key id: Int, name: String) derives Table
 
+  private def worthRetry(error: SaferisError): Boolean = error match
+    case _: SaferisError.ConnectionLost | _: SaferisError.Deadlock | _: SaferisError.SerializationFailure |
+        _: SaferisError.Retryable =>
+      true
+    case _ => false
+
   def doc = page("Retryable Errors")(
-    md"""Some database failures are transient and worth retrying; connection blips, deadlocks, serialization failures, transport errors on HTTP-tunnelled drivers (Databricks, Snowflake). Saferis classifies such errors as `SaferisError.Retryable` so that a `ZIO.retry` policy can target exactly those cases without your code grokking JDBC error codes.""",
-    section("The default classifier")(
-      md"""Every Dialect ships a default classifier (`Dialect.retryClassifier`) that recognizes standard transient SQLState classes:
+    md"""Some database failures are transient and worth retrying: connection loss, deadlocks, serialization failures, and vendor transport errors. Those are distinct cases. A vendor hook does not rename them.""",
+    section("Named transient states")(
+      md"""`SqlState.classify` maps the standard codes before it consults a vendor hook:
 
-- `08xxx`: connection exception (the driver lost or could not establish a connection)
-- `40001`: serialization failure
-- `40P01`: deadlock detected
+- `08xxx`: `ConnectionLost`
+- `40001`: `SerializationFailure`
+- `40P01`: `Deadlock`
+- `57014`, or a driver statement timeout: `Timeout`
+- `23505`: `UniqueViolation` (message `unique violation`)
+- `42xxx`: `SyntaxError`, even when the vendor hook returns true
 
-If a thrown `SQLException` matches one of these, Saferis emits `SaferisError.Retryable` instead of the usual SQLState-based variant."""
+`SqlState.defaultRetryable` is true for class `08`, `40001`, and `40P01`. The JDBC session uses that as the default `JdbcSessionConfig.retry` hook, and the hook only fills codes that are not already named. A match becomes `Retryable`."""
     ),
     section("Driving retries with ZIO")(
       exampleValue {
-        def reportWithRetry(xa: Transactor) =
-          xa.run(sql"SELECT * FROM ${Table[User]}".query[User])
+        def reportWithRetry(session: SqlSession) =
+          (sql"SELECT * FROM ${Table[User]}"
+            .query[User])
             .retry(
-              Schedule.recurs(3) && Schedule.exponential(100.millis) && Schedule.recurWhile[SaferisError]:
-                case _: SaferisError.Retryable => true
-                case _                         => false
+              Schedule.recurs(3) && Schedule.exponential(100.millis) && Schedule.recurWhile[SaferisError](worthRetry)
             )
         reportWithRetry
       }.assert(_ => assertTrue(true))
     ),
-    section("Supplying a custom classifier")(
-      md"""Drivers that tunnel over HTTP (Databricks, Snowflake) can surface transport errors as vendor-specific codes that the standards-based default does not catch. Provide your own classifier on the Transactor; it replaces the dialect default:""",
+    section("Supplying a vendor hook")(
+      md"""Drivers that tunnel over HTTP (Databricks, Snowflake) can surface transport errors as vendor-specific codes. Put a hook on `JdbcSessionConfig.retry`. It does not replace the named states above:""",
       exampleValue {
-        // Treat Databricks vendor code 8000 (HTTP transport error) as transient.
-        val databricksClassifier: SaferisError.RetryClassifier =
-          case e: SQLException =>
-            e.getErrorCode == 8000 || SaferisError.defaultRetryClassifier(e)
-          case _ => false
+        val databricks: ServerError => Boolean =
+          e => e.vendorCode.contains(8000)
 
-        val xaLayer = Transactor.layer(retryClassifier = Some(databricksClassifier))
-        (databricksClassifier(new SQLException("http blip", "08000", 8000)), xaLayer)
+        val session = PostgresJdbc.layer(JdbcSessionConfig(retry = databricks))
+        val vendor  = SqlState.classify(
+          ServerError(None, "http blip", vendorCode = Some(8000)),
+          Some(SqlText("select 1")),
+          databricks,
+        )
+        (vendor, session)
       }.assert { case (classified, _) =>
-        assertTrue(classified)
+        assertTrue(classified.isInstanceOf[SaferisError.Retryable])
       },
-      md"""Composing with the default (as shown above) keeps the standard SQLState rules and adds your driver-specific quirks on top.""",
+      md"""Named states stay named. The hook only classifies what `SqlState.classify` would otherwise call `QueryError`.""",
     ),
     section("When *not* to retry")(
       md"""`SaferisError.Retryable` only signals that an error *might* be safe to retry; your application still owns the semantics:

@@ -23,8 +23,7 @@ trait WhereBuilderOps[Parent, T]:
   // === Literal comparison operators ===
 
   private def completeLiteral(operator: Operator, value: T)(using enc: Encoder[T]): Parent =
-    val write     = enc(value)
-    val condition = LiteralCondition(whereAlias, whereColumn, operator, write)
+    val condition = LiteralCondition(whereAlias, whereColumn, operator, enc.encode(value))
     val whereFrag = Condition.toSqlFragment(Vector(condition))
     addPredicate(whereFrag)
 
@@ -82,22 +81,25 @@ trait WhereBuilderOps[Parent, T]:
     * }}}
     */
   def inSubquery(subquery: SelectQuery[T]): Parent =
-    val subquerySql = subquery.build
-    val inSql       = s"${whereAlias.toSql}.${whereColumn.label} in (${subquerySql.sql})"
-    val whereFrag   = SqlFragment(inSql, subquerySql.writes)
+    val whereFrag =
+      SqlFragment
+        .text(s"${whereAlias.toSql}.${whereColumn.label} in (")
+        .append(subquery.build)
+        .append(SqlFragment.text(")"))
     addPredicate(whereFrag)
 
   /** NOT IN subquery - type-safe variant */
   def notInSubquery(subquery: SelectQuery[T]): Parent =
-    val subquerySql = subquery.build
-    val notInSql    = s"${whereAlias.toSql}.${whereColumn.label} not in (${subquerySql.sql})"
-    val whereFrag   = SqlFragment(notInSql, subquerySql.writes)
+    val whereFrag =
+      SqlFragment
+        .text(s"${whereAlias.toSql}.${whereColumn.label} not in (")
+        .append(subquery.build)
+        .append(SqlFragment.text(")"))
     addPredicate(whereFrag)
 
   // === Literal collection operators ===
 
-  /** IN literal — varargs form for inline values. Emits `col IN (?, ?, ?, ...)` with one bound parameter per distinct
-    * element. By construction at least one element is supplied, so this overload always produces valid SQL.
+  /** Varargs membership. At least one element is supplied.
     *
     * {{{
     *   Query[User].where(_.status).in("active", "pending")
@@ -105,35 +107,62 @@ trait WhereBuilderOps[Parent, T]:
     *
     * For runtime collections use [[inList]] instead. For subqueries use [[inSubquery]].
     */
-  def in(first: T, rest: T*)(using Encoder[T]): Parent =
+  def in(first: T, rest: T*)(using Encoder[T], Dialect): Parent =
     inList(first +: rest)
 
-  /** IN literal collection — accepts any `Iterable[T]` (`Seq`, `List`, `Set`, `LinkedHashSet`, etc.). Duplicates are
-    * removed (set semantics). Emits `col IN (?, ?, ?, ...)`.
+  /** Membership for any `Iterable[T]`. Duplicates are removed.
     *
-    * On empty (or degenerate-empty-after-dedupe) input the resulting fragment carries a
-    * [[FragmentIssue.EmptyCollection]] that surfaces as [[SaferisError.InvalidStatement]] at execution. No DB
-    * round-trip on failure.
+    * A dialect with [[ArraySupport]] (Postgres) binds one array parameter, `col = ANY($1)`, so the statement text is
+    * the same for every list length. Other dialects bind one parameter per value, `col in ($1, $2)`. An empty
+    * collection is false on every dialect.
     *
     * {{{
     *   Query[User].where(_.id).inList(runIds)
     * }}}
     */
-  def inList(values: Iterable[T])(using Encoder[T]): Parent =
-    val list      = Placeholder.listTagged(values, helper = "WhereBuilder.inList", origin = Placeholder.captureOrigin())
-    val inSql     = s"${whereAlias.toSql}.${whereColumn.label} in (${list.sql})"
-    val whereFrag = SqlFragment(inSql, list.writes, issues = list.issues)
-    addPredicate(whereFrag)
+  def inList(values: Iterable[T])(using Encoder[T], Dialect): Parent =
+    membership(Membership.In, values)
 
-  /** NOT IN literal — varargs form for inline values. */
-  def notIn(first: T, rest: T*)(using Encoder[T]): Parent =
+  /** Varargs exclusion. */
+  def notIn(first: T, rest: T*)(using Encoder[T], Dialect): Parent =
     notInList(first +: rest)
 
-  /** NOT IN literal collection — symmetric to [[inList]]. */
-  def notInList(values: Iterable[T])(using Encoder[T]): Parent =
-    val list = Placeholder.listTagged(values, helper = "WhereBuilder.notInList", origin = Placeholder.captureOrigin())
-    val notInSql  = s"${whereAlias.toSql}.${whereColumn.label} not in (${list.sql})"
-    val whereFrag = SqlFragment(notInSql, list.writes, issues = list.issues)
-    addPredicate(whereFrag)
+  /** Exclusion for any `Iterable[T]`: `col <> ALL($1)` or `col not in ($1, $2)`, per [[inList]]. An empty collection is
+    * true.
+    */
+  def notInList(values: Iterable[T])(using Encoder[T], Dialect): Parent =
+    membership(Membership.NotIn, values)
+
+  private enum Membership:
+    case In, NotIn
+
+  /** Membership ignores duplicates, so they are removed here and not in [[Placeholder.array]]. */
+  private def membership(kind: Membership, values: Iterable[T])(using encoder: Encoder[T], dialect: Dialect): Parent =
+    val distinct  = values.toSeq.distinct
+    val column    = s"${whereAlias.toSql}.${whereColumn.label}"
+    val predicate =
+      dialect match
+        case _: ArraySupport =>
+          val op = kind match
+            case Membership.In    => "= ANY("
+            case Membership.NotIn => "<> ALL("
+          SqlFragment
+            .text(s"$column $op")
+            .append(SqlFragment(Placeholder.array(distinct)))
+            .append(SqlFragment.text(")"))
+        case _ if distinct.isEmpty =>
+          kind match
+            case Membership.In    => SqlFragment.text("1 = 0")
+            case Membership.NotIn => SqlFragment.text("1 = 1")
+        case _ =>
+          val op = kind match
+            case Membership.In    => "in ("
+            case Membership.NotIn => "not in ("
+          SqlFragment
+            .text(s"$column $op")
+            .append(SqlFragment(Placeholder.join(distinct.map(value => Placeholder.param(encoder.encode(value))))))
+            .append(SqlFragment.text(")"))
+    addPredicate(predicate)
+  end membership
 
 end WhereBuilderOps

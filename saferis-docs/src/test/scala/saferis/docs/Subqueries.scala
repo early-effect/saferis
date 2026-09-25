@@ -1,7 +1,6 @@
 package saferis.docs
 
 import saferis.*
-import saferis.docs.DocsTransactor.xa
 import saferis.postgres.given
 import specular.*
 import specular.ziotest.DocSpecSuite
@@ -92,8 +91,14 @@ Query[SubUser].where(_.id).inSubquery(statuses).build.sql
 """).assert(errs => assertTrue(errs.nonEmpty)),
     ),
     section("IN Literal Collections")(
-      md"""For IN-clauses over runtime values (not subqueries), use `in` (varargs) for inline literals or `inList` for any
-`Iterable[T]`. Both work in the typed Query DSL and via the top-level `in(...)` helper inside `sql"..."` interpolation.""",
+      md"""For membership over runtime values (not subqueries), use `.in` / `.inList` on the query builder. The builder picks the form for the dialect: Postgres binds one array parameter (`id = ANY($$1)`), so the statement text is the same for every list length, and MySQL and SQLite bind one parameter per value (`id in ($$1, $$2)`).
+
+In a raw `sql` string, `in(...)` splices a parenthesized list and works on every dialect. On Postgres you can bind one array value instead with `array(...)` and write the operator yourself:
+
+```sql
+where id in ($$1, $$2, $$3)   -- in(ids)
+where id = any($$1)           -- array(ids), Postgres
+```""",
       exampleValue {
         // Varargs form — natural for inline literals
         Query[SubUser]
@@ -101,58 +106,34 @@ Query[SubUser].where(_.id).inSubquery(statuses).build.sql
           .in("Alice", "Bob")
           .build
           .sql
-      }.assert(sql => assertTrue(sql.toLowerCase.contains("in"))),
+      }.assert(sql => assertTrue(sql.toLowerCase.contains("any"))),
       exampleValue {
-        // Iterable form — for runtime collections (List, Set, Vector, LinkedHashSet, ranges, ...)
-        val ids = List(1, 2, 3, 3) // duplicates are removed automatically
+        // Iterable form. Duplicates are removed. One array parameter.
+        val ids = List(1, 2, 3, 3)
         Query[SubUser]
           .where(_.id)
           .inList(ids)
           .build
           .sql
-      }.assert(sql => assertTrue(sql.toLowerCase.contains("in"))),
+      }.assert(sql => assertTrue(sql.toLowerCase.contains("any"))),
       exampleValue {
-        // Same helpers in raw sql"..." interpolation:
         val ids = List(1, 2, 3)
-        val a   = sql"select * from sub_users where id in ${in(ids)}".sql
-        val b   = sql"select * from sub_users where name in ${in("Alice", "Bob")}".sql
+        sql"select * from sub_users where id in ${in(ids)}".sql
+      }.assert(sql => assertTrue(sql == "select * from sub_users where id in ($1, $2, $3)")),
+      exampleValue {
+        val ids = List(1, 2, 3)
+        val a   = sql"select * from sub_users where id = any(${array(ids)})".sql
+        val b   = sql"select * from sub_users where name = any(${array("Alice", "Bob")})".sql
         (a, b)
-      }.assert { case (a, b) => assertTrue(a.toLowerCase.contains("in") && b.toLowerCase.contains("in")) },
-      md"""`notIn` / `notInList` are symmetric. `inSubquery` / `notInSubquery` (renamed from `in`/`notIn` on `SelectQuery`) cover
+      }.assert { case (a, b) => assertTrue(a.toLowerCase.contains("any") && b.toLowerCase.contains("any")) },
+      md"""`in` removes duplicates, like `IN` itself. `array` keeps values as given, so the same helper can store an array column. `notIn` / `notInList` are symmetric. `inSubquery` / `notInSubquery` (renamed from `in`/`notIn` on `SelectQuery`) cover
 the subquery case shown above.""",
-      section("Empty collections fail at construction, not in the database")(
-        md"""An empty (or all-duplicates-collapse-to-empty) input would produce invalid SQL (`IN ()`) on every supported dialect.
-Saferis does **not** throw at the call site — instead the resulting fragment carries one
-`FragmentIssue.EmptyCollection` per offending helper. When the fragment is run, execution fails with
-`SaferisError.InvalidStatement(issues)` *before* any JDBC call.
-
-The recommended recovery pattern catches `InvalidStatement` and substitutes an empty result — no DB round-trip:""",
-        exampleZIO {
-          // Recovery pattern for possibly-empty collections — no DB round-trip on failure:
-          val ids2      = List.empty[Int]
-          val recovered =
-            xa.run(Query[SubUser].where(_.id).inList(ids2).query[SubUser])
-              .catchSome { case _: SaferisError.InvalidStatement => ZIO.succeed(Chunk.empty[SubUser]) }
-          recovered.either
-        }.assert {
-          case Right(rows) => assertTrue(rows.isEmpty)
-          case Left(err)   => assertTrue(false).label(err.toString)
-        },
-        md"""Without that recovery, running the empty-collection query fails with
-`SaferisError.InvalidStatement` — and crucially it fails *before* any JDBC call.
-The example below inspects the failure to confirm both facts (the output is shown
-beneath it):""",
-        exampleZIO {
-          // Empty collection → IN () would be invalid SQL → InvalidStatement at run time.
-          xa.run(Query[SubUser].where(_.id).inList(List.empty[Int]).query[SubUser]).either.map {
-            case Left(_: SaferisError.InvalidStatement) => "Failed with InvalidStatement (no JDBC call made)"
-            case Left(other)                            => s"Failed with ${other.getClass.getSimpleName}"
-            case Right(rows)                            => s"Unexpectedly succeeded with ${rows.size} rows"
-          }
-        }.assert(msg => assertTrue(msg.contains("InvalidStatement"))),
-        md"""If you want to surface issues independently of execution, call `fragment.validate` on any `SqlFragment` — it succeeds
-with the fragment if there are no issues, fails with `InvalidStatement(issues)` otherwise. Multiple offending splices
-in a single statement accumulate into the same `InvalidStatement`, so you fix them all at once.""",
+      section("Empty collections")(
+        md"""The query builder treats an empty collection as false for `inList` and true for `notInList` on every dialect: `= ANY('{}')` on Postgres, and a constant predicate elsewhere. A raw `in(...)` cannot rewrite the SQL around it, so an empty `in(...)` fails with `InvalidStatement` before a connection is checked out.""",
+        exampleValue {
+          val built = Query[SubUser].where(_.id).inList(List.empty[Int]).build
+          (built.sql.toLowerCase, built.issues.isEmpty)
+        }.assert { case (sql, clean) => assertTrue(sql.contains("= any($1)"), clean) },
       ),
     ),
     section("EXISTS Subqueries")(
