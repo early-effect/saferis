@@ -72,10 +72,10 @@ jobs:
           cache-key-suffix: cache-rehydrate
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: save
           cache-epoch: ""
       - name: cache-rehydrate
-        run: sbt 'compile'
+        run: sbt 'Test/compile'
   test:
     name: test
     runs-on: ubuntu-latest
@@ -97,7 +97,7 @@ jobs:
           cache-key-suffix: test
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: ""
       - name: Pre-pull Postgres image
         run: |
@@ -159,7 +159,7 @@ jobs:
           cache-key-suffix: fmt
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: ""
       - name: fmt
         run: |
@@ -189,7 +189,7 @@ jobs:
           cache-key-suffix: workflow-check
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: ""
       - name: workflow-check
         run: |
@@ -219,7 +219,7 @@ jobs:
           cache-key-suffix: advisories
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: ""
       - name: advisories
         run: |
@@ -307,7 +307,7 @@ jobs:
           cache-key-suffix: publish
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: ""
       - name: Import signing key
         run: |
@@ -346,7 +346,7 @@ jobs:
           cache-key-suffix: github-packages
           node-version: ""
           sbt-disk-cache: "false"
-          local-cache: "true"
+          cache-mode: restore
           cache-epoch: ""
       - name: github-packages
         run: sbt 'core/publish; coreJS/publish; coreNative/publish; postgres/publish; postgresJS/publish; postgresNative/publish; jdbc/publish; pgJS/publish; h2Jdbc/publish; mysqlJdbc/publish; postgresJdbc/publish; sqliteJdbc/publish'
