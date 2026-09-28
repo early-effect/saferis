@@ -18,8 +18,9 @@ final case class UniqueConstraintSpec[A](
     * @param fieldToLabel
     *   Function to convert field names to column labels (respects @label annotations)
     */
-  def toConstraintSql(fieldToLabel: String => ColumnName): SqlText =
+  def toConstraintSql(fieldToLabel: String => ColumnName)(using dialect: Dialect): SqlText =
     val columnLabels = columns.map(fieldToLabel)
-    val name         = constraintName.getOrElse(s"uq_${columnLabels.mkString("_")}")
-    SqlText(s"constraint $name unique (${columnLabels.mkString(", ")})")
+    val name         = constraintName.getOrElse(ConstraintName(s"uq_${columnLabels.mkString("_")}"))
+    val quotedCols   = columnLabels.map(dialect.escapeIdentifier).mkString(", ")
+    SqlText(s"constraint ${dialect.escapeIdentifier(name)} unique ($quotedCols)")
 end UniqueConstraintSpec

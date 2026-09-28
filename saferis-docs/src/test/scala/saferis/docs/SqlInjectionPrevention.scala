@@ -78,15 +78,15 @@ This compile-time enforcement means SQL injection via aliases is **impossible**.
 
 ## Runtime Identifiers with `Placeholder.identifier()`
 
-Sometimes you genuinely need runtime-determined identifiers, for example dynamic column names from configuration. For these cases, use `Placeholder.identifier()` which applies proper escaping:""",
+Sometimes you genuinely need runtime-determined identifiers, for example dynamic column names from configuration. Wrap the string in the name type, then pass it to `Placeholder.identifier`. The dialect quotes it when the statement is rendered:""",
     exampleValue {
-      val columnName = "name"
+      val columnName = ColumnName("name")
       sql"SELECT ${Placeholder.identifier(columnName)} FROM $users".show
-    }.assert(sql => assertTrue(sql == """SELECT "name" FROM sql_injection_users""")),
+    }.assert(sql => assertTrue(sql == """SELECT "name" FROM "sql_injection_users"""")),
     md"""The identifier is escaped using the dialect's quoting rules. For PostgreSQL, this means double-quote escaping:""",
-    exampleValue(PostgresDialect.escapeIdentifier("table"))
+    exampleValue(PostgresDialect.escapeIdentifier(TableName("table")))
       .assert(value => assertTrue(value == "\"table\"")),
-    exampleValue(PostgresDialect.escapeIdentifier("user\"input"))
+    exampleValue(PostgresDialect.escapeIdentifier(ColumnName("user\"input")))
       .assert(value => assertTrue(value == "\"user\"\"input\"")),
     md"""**Important**: While `Placeholder.identifier()` escapes properly, you should still validate runtime identifiers against an allowlist when possible. Escaping is a defense-in-depth measure, not a replacement for input validation.
 

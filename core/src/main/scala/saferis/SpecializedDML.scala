@@ -13,7 +13,9 @@ object SpecializedDML:
   )(using trace: Trace): ZIO[SqlSession, SaferisError, Option[A]] =
     val sql =
       SqlFragment
-        .text(s"insert into ${table.name} ")
+        .text("insert into ")
+        .append(SqlFragment.ident(table.name))
+        .append(SqlFragment.text(" "))
         .append(table.insertColumnsSql)
         .append(SqlFragment.text(" values "))
         .append(table.insertPlaceholdersSql(entity))
@@ -30,7 +32,9 @@ object SpecializedDML:
   )(using trace: Trace): ZIO[SqlSession, SaferisError, Option[A]] =
     val sql =
       SqlFragment
-        .text(s"update ${table.name} set ")
+        .text("update ")
+        .append(SqlFragment.ident(table.name))
+        .append(SqlFragment.text(" set "))
         .append(table.updateSetClause(entity))
         .append(table.updateWhereClause(entity))
         .append(SqlFragment.text(" returning "))
@@ -46,7 +50,8 @@ object SpecializedDML:
   )(using trace: Trace): ZIO[SqlSession, SaferisError, Option[A]] =
     val sql =
       SqlFragment
-        .text(s"delete from ${table.name}")
+        .text("delete from ")
+        .append(SqlFragment.ident(table.name))
         .append(table.updateWhereClause(entity))
         .append(SqlFragment.text(" returning "))
         .append(table.returningColumnsSql)
@@ -59,16 +64,19 @@ object SpecializedDML:
     * public API. The safe public path is the fluent `Upsert[A].values(...).onConflict(_.col)` DSL, which resolves
     * conflict columns from type-safe selectors. Kept `private[saferis]`.
     */
-  private[saferis] inline def upsert[A](entity: A, conflictColumns: Seq[String])(using
+  private[saferis] inline def upsert[A](entity: A, conflictColumns: Seq[ColumnName])(using
       table: Table[A]
-  )(using Dialect & UpsertSupport)(using trace: Trace): ZIO[SqlSession, SaferisError, Long] =
-    val sql =
+  )(using dialect: Dialect & UpsertSupport)(using trace: Trace): ZIO[SqlSession, SaferisError, Long] =
+    val conflicts = conflictColumns.map(dialect.escapeIdentifier).mkString(", ")
+    val sql       =
       SqlFragment
-        .text(s"insert into ${table.name} ")
+        .text("insert into ")
+        .append(SqlFragment.ident(table.name))
+        .append(SqlFragment.text(" "))
         .append(table.insertColumnsSql)
         .append(SqlFragment.text(" values "))
         .append(table.insertPlaceholdersSql(entity))
-        .append(SqlFragment.text(s" on conflict (${conflictColumns.mkString(", ")}) do update set "))
+        .append(SqlFragment.text(s" on conflict ($conflicts) do update set "))
         .append(table.updateSetClause(entity))
     sql.dml
   end upsert
@@ -82,15 +90,8 @@ object SpecializedDML:
       table: Table[A],
       dialect: Dialect & IndexIfNotExistsSupport,
   )(using trace: Trace): ZIO[SqlSession, SaferisError, Long] =
-    val tableName = table.name
-    // indexName and columnNames are caller-supplied strings, so escape them at this public trust boundary to
-    // prevent SQL injection. tableName comes from the compile-time @tableName/type name (not user input) and is
-    // left idiomatic. The underlying builder is also called internally with schema-derived labels, which must
-    // stay unquoted, so escaping belongs here rather than in the builder.
-    val safeIndexName   = dialect.escapeIdentifier(indexName)
-    val safeColumnNames = columnNames.map(dialect.escapeIdentifier)
-    val sql             =
-      SqlFragment.text(dialect.createIndexIfNotExistsSql(safeIndexName, tableName.sql, safeColumnNames, unique))
+    val sql =
+      SqlFragment.text(dialect.createIndexIfNotExistsSql(indexName, table.name, columnNames, unique))
     sql.dml
   end createIndexIfNotExists
 
@@ -122,9 +123,9 @@ object SpecializedDML:
     */
   private[saferis] def upsertSql[A](
       insertColumns: SqlText,
-      conflictColumns: Seq[SqlText],
+      conflictColumns: Seq[ColumnName],
       updateColumns: SqlText,
   )(using table: Table[A], dialect: Dialect & UpsertSupport): SqlText =
-    dialect.upsertSql(table.name.sql, insertColumns, conflictColumns, updateColumns)
+    dialect.upsertSql(table.name, insertColumns, conflictColumns, updateColumns)
 
 end SpecializedDML

@@ -68,13 +68,13 @@ final case class Schema[A](instance: Instance[A]):
       val autoIncrement = dialect.autoIncrementClause(col.isGenerated, col.isKey, hasCompoundKey)
       val nullClause    = if col.isNullable then "" else " not null"
       val defaultClause = col.defaultClause.map(" " + _).getOrElse("")
-      s"${col.label} ${col.columnType}$autoIncrement${nullClause}${defaultClause}"
+      s"${dialect.escapeIdentifier(col.label)} ${col.columnType}$autoIncrement${nullClause}${defaultClause}"
     }
 
     // Primary key constraint - only needed for compound keys
     // For single keys, autoIncrementClause already adds " primary key"
     val pkConstraint = Option.when(hasCompoundKey) {
-      s"primary key (${keyColumns.map(_.label).mkString(", ")})"
+      dialect.compoundPrimaryKeyClause(keyColumns.map(_.label))
     }
 
     // Unique constraints from Schema DSL
@@ -86,7 +86,12 @@ final case class Schema[A](instance: Instance[A]):
     // Combine all constraints
     val allConstraints = columnDefs ++ pkConstraint.toSeq ++ uniqueConstraintsSql ++ fkConstraints
     val createClause   = if ifNotExists then "create table if not exists" else "create table"
-    val createTableSql = s"$createClause $tableName (${allConstraints.mkString(", ")})"
+    val createTableSql =
+      SqlFragment
+        .text(s"$createClause ")
+        .append(SqlFragment.ident(tableName))
+        .append(SqlFragment.text(s" (${allConstraints.mkString(", ")})"))
+        .sql
 
     // Index creation statements
     val indexStatements = instance.indexes.map { spec =>
@@ -99,7 +104,7 @@ final case class Schema[A](instance: Instance[A]):
       val compoundIndexName = IndexName.compoundKey(tableName)
       dialect match
         case d: IndexIfNotExistsSupport =>
-          d.createIndexIfNotExistsSql(compoundIndexName.sql, tableName.sql, keyColumnNames.map(_.sql))
+          d.createIndexIfNotExistsSql(compoundIndexName, tableName, keyColumnNames)
         case _ =>
           dialect.createIndexSql(compoundIndexName, tableName, keyColumnNames, ifNotExists)
     }
@@ -1059,28 +1064,38 @@ extension [A, T](builder: InstanceWhereColumnBuilder[A, Json[T]])
       value: T
   )(using codec: zio.json.JsonCodec[T], dialect: Dialect & JsonSupport): InstanceWhereConditionBuilder[A] =
     val jsonValue = JsonText(codec.encoder.encodeJson(value, None).toString)
-    val condition = dialect.jsonContainsSql(builder.parent.instance.fieldToLabel(builder.columnName).sql, jsonValue)
+    val column    = builder.parent.instance.fieldToLabel(builder.columnName)
+    val condition = dialect.jsonContainsSql(dialect.escapeIdentifier(column), jsonValue)
     InstanceWhereConditionBuilder(builder.parent, builder.parent.conditions :+ condition, builder.operator)
 
   /** Check if JSON column has the specified key. PostgreSQL: `column ? 'key'` MySQL:
     * `JSON_CONTAINS_PATH(column, 'one', '$.key')`
     */
   def jsonHasKey(key: String)(using dialect: Dialect & JsonSupport): InstanceWhereConditionBuilder[A] =
-    val condition = dialect.jsonHasKeySql(builder.parent.instance.fieldToLabel(builder.columnName).sql, key)
+    val condition =
+      dialect.jsonHasKeySql(dialect.escapeIdentifier(builder.parent.instance.fieldToLabel(builder.columnName)), key)
     InstanceWhereConditionBuilder(builder.parent, builder.parent.conditions :+ condition, builder.operator)
 
   /** Check if JSON column has any of the specified keys. PostgreSQL: `column ?| array['key1', 'key2']` MySQL:
     * `JSON_CONTAINS_PATH(column, 'one', '$.key1', '$.key2')`
     */
   def jsonHasAnyKey(keys: Seq[String])(using dialect: Dialect & JsonSupport): InstanceWhereConditionBuilder[A] =
-    val condition = dialect.jsonHasAnyKeySql(builder.parent.instance.fieldToLabel(builder.columnName).sql, keys)
+    val condition =
+      dialect.jsonHasAnyKeySql(
+        dialect.escapeIdentifier(builder.parent.instance.fieldToLabel(builder.columnName)),
+        keys,
+      )
     InstanceWhereConditionBuilder(builder.parent, builder.parent.conditions :+ condition, builder.operator)
 
   /** Check if JSON column has all of the specified keys. PostgreSQL: `column ?& array['key1', 'key2']` MySQL:
     * `JSON_CONTAINS_PATH(column, 'all', '$.key1', '$.key2')`
     */
   def jsonHasAllKeys(keys: Seq[String])(using dialect: Dialect & JsonSupport): InstanceWhereConditionBuilder[A] =
-    val condition = dialect.jsonHasAllKeysSql(builder.parent.instance.fieldToLabel(builder.columnName).sql, keys)
+    val condition =
+      dialect.jsonHasAllKeysSql(
+        dialect.escapeIdentifier(builder.parent.instance.fieldToLabel(builder.columnName)),
+        keys,
+      )
     InstanceWhereConditionBuilder(builder.parent, builder.parent.conditions :+ condition, builder.operator)
 
   /** Start building a JSON path comparison. Usage: `.where(_.data).jsonPath("user.email").eql("test@example.com")`
@@ -1117,6 +1132,6 @@ final case class JsonPathBuilder[A](
   def isNotNull: InstanceWhereConditionBuilder[A] = where("is not null")
 
   private def where(predicate: String): InstanceWhereConditionBuilder[A] =
-    val condition = SqlText(s"${dialect.jsonExtractSql(columnName.sql, path)} $predicate")
+    val condition = SqlText(s"${dialect.jsonExtractSql(dialect.escapeIdentifier(columnName), path)} $predicate")
     InstanceWhereConditionBuilder(parent, parent.conditions :+ condition, operator)
 end JsonPathBuilder

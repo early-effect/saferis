@@ -18,10 +18,10 @@ object SparkDialectSpecs extends ZIOSpecDefault:
     test("Spark escapes identifiers with backticks") {
       val dialect = summon[Dialect]
       assertTrue(
-        dialect.escapeIdentifier("table_name") == "`table_name`" &&
-          dialect.escapeIdentifier("column-with-dash") == "`column-with-dash`" &&
-          dialect.escapeIdentifier("column with spaces") == "`column with spaces`" &&
-          dialect.escapeIdentifier("column`name") == "`column``name`"
+        dialect.escapeIdentifier(ColumnName("table_name")) == "`table_name`" &&
+          dialect.escapeIdentifier(ColumnName("column-with-dash")) == "`column-with-dash`" &&
+          dialect.escapeIdentifier(ColumnName("column with spaces")) == "`column with spaces`" &&
+          dialect.escapeIdentifier(ColumnName("column`name")) == "`column``name`"
       )
     },
     test("Spark type mappings") {
@@ -99,7 +99,7 @@ object SparkDialectSpecs extends ZIOSpecDefault:
     test("Identifiers vs Literals - the key distinction") {
       val dialect    = summon[Dialect]
       val encoder    = summon[Encoder[String]]
-      val columnName = "column-with-dash"
+      val columnName = ColumnName("column-with-dash")
 
       assertTrue(
         dialect.escapeIdentifier(columnName) == "`column-with-dash`" &&

@@ -22,14 +22,15 @@ import scala.quoted.*
   * {{{
   *   import saferis.Placeholder.identifier
   *   val userInput = request.getParameter("column")
-  *   sql"SELECT * FROM users ORDER BY \${identifier(userInput)}"  // Safely escaped
+  *   sql"SELECT * FROM users ORDER BY \${identifier(ColumnName(userInput))}"
   * }}}
   */
-final case class Alias private[saferis] (value: String):
-  /** Convert the alias to its SQL representation */
-  def toSql: SqlText = SqlText(value)
+final case class Alias private[saferis] (value: String)
 
 object Alias:
+  given SqlName[Alias] with
+    def text(alias: Alias): String = alias.value
+
   /** Create an alias from a string literal.
     *
     * This is a macro that enforces the argument is a compile-time string literal. This prevents SQL injection by

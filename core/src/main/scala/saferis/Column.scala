@@ -43,8 +43,11 @@ final case class Column[R](
 )(using readable: Decoder[R], writable: Encoder[R])
     extends Placeholder:
   type ColumnType = R
-  override val sql: SqlText       = SqlText(tableAlias.fold(label)(a => s"${a.value}.$label"))
-  val pieces: Chunk[SqlPiece]     = Chunk(SqlPiece.Text(sql))
+  private[saferis] val rawPieces: Chunk[SqlPiece] =
+    tableAlias match
+      case None        => Chunk(SqlPiece.Ident(label, false))
+      case Some(alias) =>
+        Chunk(SqlPiece.Ident(alias.value, false), SqlPiece.Text(SqlText(".")), SqlPiece.Ident(label, false))
   val issues: List[FragmentIssue] = Nil
 
   def sqlType: SqlType = writable.sqlType

@@ -20,7 +20,7 @@ object DataDefinitionLayer:
       val notNullClause = if !col.isNullable then " not null" else ""
       val defaultClause = col.defaultClause.map(d => s" $d").getOrElse("")
       val autoIncrement = dialect.autoIncrementClause(col.isGenerated, col.isKey, hasCompoundKey)
-      s"${col.label} $baseType$notNullClause$defaultClause$autoIncrement"
+      s"${dialect.escapeIdentifier(col.label)} $baseType$notNullClause$defaultClause$autoIncrement"
     }
 
     // Add compound primary key constraint if needed
@@ -32,7 +32,11 @@ object DataDefinitionLayer:
     val allConstraints = columnDefs ++ primaryKeyConstraint.toSeq
     val tableName      = table.name
     val createClause   = dialect.createTableClause(ifNotExists)
-    val sql            = SqlFragment.text(s"$createClause $tableName (${allConstraints.mkString(", ")})")
+    val sql            =
+      SqlFragment
+        .text(s"$createClause ")
+        .append(SqlFragment.ident(tableName))
+        .append(SqlFragment.text(s" (${allConstraints.mkString(", ")})"))
 
     for
       result <- sql.dml
@@ -72,7 +76,7 @@ object DataDefinitionLayer:
       val notNullClause = if !col.isNullable then " not null" else ""
       val defaultClause = col.defaultClause.map(d => s" $d").getOrElse("")
       val autoIncrement = dialect.autoIncrementClause(col.isGenerated, col.isKey, hasCompoundKey)
-      s"${col.label} $baseType$notNullClause$defaultClause$autoIncrement"
+      s"${dialect.escapeIdentifier(col.label)} $baseType$notNullClause$defaultClause$autoIncrement"
     }
 
     val primaryKeyConstraint = Option.when(hasCompoundKey) {
@@ -89,7 +93,11 @@ object DataDefinitionLayer:
     val allConstraints = columnDefs ++ primaryKeyConstraint.toSeq ++ uniqueConstraintsSql ++ foreignKeyConstraints
     val tableName      = instance.tableName
     val createClause   = dialect.createTableClause(ifNotExists)
-    val sql            = SqlFragment.text(s"$createClause $tableName (${allConstraints.mkString(", ")})")
+    val sql            =
+      SqlFragment
+        .text(s"$createClause ")
+        .append(SqlFragment.ident(tableName))
+        .append(SqlFragment.text(s" (${allConstraints.mkString(", ")})"))
 
     for
       result <- sql.dml
@@ -115,9 +123,9 @@ object DataDefinitionLayer:
           val indexName = spec.name.getOrElse(IndexName.default(tableName, columnLabels))
           SqlFragment.text(
             d.createIndexIfNotExistsSql(
-              indexName.sql,
-              tableName.sql,
-              columnLabels.map(_.sql),
+              indexName,
+              tableName,
+              columnLabels,
               unique = spec.unique,
               where = spec.where,
             )
@@ -139,7 +147,7 @@ object DataDefinitionLayer:
     SqlFragment.text:
       dialect match
         case d: IndexIfNotExistsSupport =>
-          d.createIndexIfNotExistsSql(indexName.sql, tableName.sql, keyColumnNames.map(_.sql))
+          d.createIndexIfNotExistsSql(indexName, tableName, keyColumnNames)
         case _ => dialect.createIndexSql(indexName, tableName, keyColumnNames, false)
   end compoundKeyIndexSql
 

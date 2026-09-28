@@ -322,7 +322,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           insert(CompoundKeyTable(1, 3, "2023-01-02"))
         // Verify data exists first
         queryResult <-
-          sql"select * from test_ddl_compound_key where userid = 1 and roleid = 2".queryOne[CompoundKeyTable]
+          sql"""select * from test_ddl_compound_key where "userId" = 1 and "roleId" = 2""".queryOne[CompoundKeyTable]
         // Try to insert duplicate compound key (should fail)
         duplicateAttempt <-
           insert(CompoundKeyTable(1, 2, "2023-01-03")).either
@@ -401,7 +401,8 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         _ <-
           insert(CreateIndexesTable(1, 2, "John"))
         queryResult <-
-          sql"select * from test_ddl_create_indexes where userid = 1 and roleid = 2".queryOne[CreateIndexesTable]
+          sql"""select * from test_ddl_create_indexes where "userId" = 1 and "roleId" = 2"""
+            .queryOne[CreateIndexesTable]
       yield assertTrue(indexResults.nonEmpty) &&
         assertTrue(queryResult.contains(CreateIndexesTable(1, 2, "John")))
       end for
@@ -430,7 +431,7 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         _ <-
           insert(IndexesSqlTable(1, 2, "John"))
         queryResult <-
-          sql"select * from test_ddl_indexes_sql where userid = 1 and roleid = 2".queryOne[IndexesSqlTable]
+          sql"""select * from test_ddl_indexes_sql where "userId" = 1 and "roleId" = 2""".queryOne[IndexesSqlTable]
       yield assertTrue(indexSql.nonEmpty) &&
         assertTrue(indexSql.contains("compound_key")) && // Should have compound key index
         assertTrue(queryResult.contains(IndexesSqlTable(1, 2, "John")))
@@ -456,12 +457,14 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           insertReturning(CompoundGeneratedTable(-1, 2, "Item 2"))
         // Try to insert with specific ID that would create duplicate compound key
         duplicateAttempt <-
-          sql"insert into test_ddl_compound_generated (id, categoryid, name) values (${inserted1.id}, ${inserted1.categoryId}, ${"Duplicate"})".insert.either
+          sql"""insert into test_ddl_compound_generated ("id", "categoryId", "name") overriding system value values (${inserted1.id}, ${inserted1.categoryId}, ${"Duplicate"})""".insert.either
       yield assertTrue(result >= 0) &&
         assertTrue(inserted1.id > 0) &&
         assertTrue(inserted2.id > 0) &&
         assertTrue(inserted1.id != inserted2.id) &&
-        assertTrue(duplicateAttempt.isLeft) // Should fail due to compound primary key constraint
+        assertTrue(duplicateAttempt match
+          case Left(_: SaferisError.UniqueViolation) => true
+          case _                                     => false)
       end for
 
     test("create table with unique constraint columns"):
@@ -637,9 +640,9 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         statusResult <-
           sql"select status from test_ddl_defaults where id = 1".queryOne[StatusResult]
         retryResult <-
-          sql"select retrycount from test_ddl_defaults where id = 1".queryOne[RetryCountResult]
+          sql"""select "retryCount" from test_ddl_defaults where id = 1""".queryOne[RetryCountResult]
         activeResult <-
-          sql"select isactive from test_ddl_defaults where id = 1".queryOne[IsActiveResult]
+          sql"""select "isActive" from test_ddl_defaults where id = 1""".queryOne[IsActiveResult]
       yield assertTrue(result >= 0) &&
         assertTrue(statusHasDefault) &&
         assertTrue(retryHasDefault) &&

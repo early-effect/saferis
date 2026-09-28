@@ -13,9 +13,9 @@ sealed trait Table[A]:
     val _ = Alias(alias) // Compile-time validation that alias is a string literal
     Macros.instanceOf[A](alias = Some(alias))
   private[saferis] def insertColumnsSql: SqlFragment =
-    SqlFragment.text(columns.filterNot(_.isGenerated).map(_.sql).mkString("(", ", ", ")"))
+    parenthesize(columns.filterNot(_.isGenerated).map(column => SqlFragment(column)))
   private[saferis] def returningColumnsSql: SqlFragment =
-    SqlFragment.text(columns.map(_.sql).mkString(", "))
+    joinFragments(columns.map(column => SqlFragment(column)))
   private[saferis] inline def insertPlaceholders(a: A): Seq[Placeholder] =
     Macros
       .columnPlaceholders(a)
@@ -40,7 +40,7 @@ sealed trait Table[A]:
         col.isGenerated || col.isKey
     val setClauses = placeholders.map: (name, placeholder) =>
       val column = columnMap(name)
-      SqlFragment.text(s"${column.sql} = ").append(SqlFragment(placeholder))
+      SqlFragment(column).append(SqlFragment.text(" = ")).append(SqlFragment(placeholder))
     if setClauses.isEmpty then SqlFragment.empty
     else setClauses.reduce((left, right) => left.append(SqlFragment.text(", ")).append(right))
   end updateSetClause
@@ -52,7 +52,7 @@ sealed trait Table[A]:
         columnMap(name).isKey
     val whereClauses = keyPlaceholders.map: (name, placeholder) =>
       val column = columnMap(name)
-      SqlFragment.text(s"${column.sql} = ").append(SqlFragment(placeholder))
+      SqlFragment(column).append(SqlFragment.text(" = ")).append(SqlFragment(placeholder))
     if whereClauses.nonEmpty then
       SqlFragment
         .text(" where ")
@@ -61,6 +61,15 @@ sealed trait Table[A]:
         )
     else SqlFragment.empty
   end updateWhereClause
+
+  private def parenthesize(columns: Seq[SqlFragment]): SqlFragment =
+    SqlFragment.text("(").append(joinFragments(columns)).append(SqlFragment.text(")"))
+
+  private def joinFragments(columns: Seq[SqlFragment]): SqlFragment =
+    columns.toList match
+      case Nil           => SqlFragment.empty
+      case first :: rest =>
+        rest.foldLeft(first)((acc, next) => acc.append(SqlFragment.text(", ")).append(next))
 
 end Table
 

@@ -3,16 +3,22 @@ package saferis
 import zio.Chunk
 import zio.Duration
 
-/** A hole in a SQL statement: text, parameters, or both, plus any construction issues. */
+/** A hole in a SQL statement: text, parameters, or both, plus any construction issues.
+  *
+  * `pieces` and `sql` quote `Ident` with the `Dialect` in scope. Postgres is the companion given when the caller does
+  * not name one.
+  */
 trait Placeholder:
-  def pieces: Chunk[SqlPiece]
+  /** Pieces before identifier quoting. */
+  private[saferis] def rawPieces: Chunk[SqlPiece]
+  def pieces(using dialect: Dialect): Chunk[SqlPiece] = SqlPieces.quote(rawPieces, dialect.identifierQuote)
   def issues: List[FragmentIssue]
-  def timeout: Option[Duration] = None
-  def sql: SqlText              = SqlPieces.postgres(pieces)
+  def timeout: Option[Duration]   = None
+  def sql(using Dialect): SqlText = SqlPieces.postgres(pieces, summon[Dialect].identifierQuote)
 
   final def ++(other: Placeholder): Placeholder =
     Placeholder.Derived(
-      SqlPieces.merge(pieces ++ other.pieces),
+      SqlPieces.merge(rawPieces ++ other.rawPieces),
       issues ++ other.issues,
       timeout.orElse(other.timeout),
     )
@@ -31,8 +37,8 @@ object Placeholder:
   def param(value: SqlValue): Placeholder =
     Derived(Chunk(SqlPiece.Param(value)), Nil, None)
 
-  def identifier(identifier: String)(using dialect: Dialect): Placeholder =
-    raw(dialect.escapeIdentifier(identifier))
+  def identifier[A](name: A)(using sqlName: SqlName[A]): Placeholder =
+    Derived(Chunk(SqlPiece.Ident(sqlName.text(name), sqlName.qualify)), Nil, None)
 
   def concat(placeholders: Placeholder*): Placeholder =
     if placeholders.isEmpty then Empty
@@ -91,10 +97,11 @@ object Placeholder:
     ps.toList.flatMap(_.issues)
 
   final private case class Derived(
-      pieces: Chunk[SqlPiece],
+      stored: Chunk[SqlPiece],
       issues: List[FragmentIssue],
       override val timeout: Option[Duration],
-  ) extends Placeholder
+  ) extends Placeholder:
+    private[saferis] def rawPieces: Chunk[SqlPiece] = stored
 
   given convertToPlaceholder[A](using encoder: Encoder[A]): Conversion[A, Placeholder] with
     def apply(a: A): Placeholder = param(encoder.encode(a))
@@ -103,20 +110,22 @@ object Placeholder:
     def apply(as: Seq[Placeholder]): Placeholder = concat(as*)
 
   final private[saferis] class RawSql(sqlText: String) extends Placeholder:
-    val pieces: Chunk[SqlPiece]     = if sqlText.isEmpty then Chunk.empty else Chunk(SqlPiece.Text(SqlText(sqlText)))
+    private[saferis] def rawPieces: Chunk[SqlPiece] =
+      if sqlText.isEmpty then Chunk.empty else Chunk(SqlPiece.Text(SqlText(sqlText)))
     val issues: List[FragmentIssue] = Nil
     override def toString: String   = s"RawSql($sqlText)"
 
   object Empty extends Placeholder:
-    val pieces: Chunk[SqlPiece]     = Chunk.empty
-    val issues: List[FragmentIssue] = Nil
-    override def toString: String   = "Placeholder.Empty"
+    private[saferis] def rawPieces: Chunk[SqlPiece] = Chunk.empty
+    val issues: List[FragmentIssue]                 = Nil
+    override def toString: String                   = "Placeholder.Empty"
 
-    def isEmpty(p: Placeholder): Boolean = p match
+    def isEmpty(p: Placeholder)(using Dialect): Boolean = p match
       case Empty => true
       case other =>
         other.pieces.forall:
           case SqlPiece.Text(t)  => t.trim.isEmpty
+          case _: SqlPiece.Ident => false
           case _: SqlPiece.Param => false
   end Empty
 end Placeholder

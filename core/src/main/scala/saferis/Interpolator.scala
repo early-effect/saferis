@@ -11,6 +11,7 @@ export Interpolator.sql
 export Interpolator.sqlEcho
 export Interpolator.in
 export Interpolator.array
+export Placeholder.identifier
 
 object Interpolator:
 
@@ -135,7 +136,14 @@ object Interpolator:
           // Use structural type to avoid cyclic macro dependency
           val ph = '{
             val inst = ${ expr }.asInstanceOf[TableInstance]
-            Placeholder.raw(inst.alias.fold(inst.tableName)(a => s"${inst.tableName} as ${a.value}"))
+            inst.alias match
+              case None        => Placeholder.identifier(TableName(inst.tableName))
+              case Some(alias) =>
+                Placeholder.concat(
+                  Placeholder.identifier(TableName(inst.tableName)),
+                  Placeholder.raw(" as "),
+                  Placeholder.identifier(alias),
+                )
           }
           val acc = '{ $builder.addOne($ph) }
           getPlaceHoldersExpr(rest, acc)

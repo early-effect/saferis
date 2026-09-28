@@ -23,7 +23,7 @@ object DefaultDialectSpecs extends ZIOSpecDefault:
       final case class TestTable(@key id: Int, name: String) derives Table
 
       val table = Table[TestTable]
-      assertTrue(toSql(table) == "test_default_dialect")
+      assertTrue(toSql(table) == "\"test_default_dialect\"")
     },
     test("Can generate compound key index SQL with default dialect") {
       @tableName("test_create_sql")

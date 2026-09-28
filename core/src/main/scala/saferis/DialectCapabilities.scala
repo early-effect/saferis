@@ -15,8 +15,8 @@ trait ReturningSupport:
     * @return
     *   SQL fragment for INSERT ... RETURNING
     */
-  def insertReturningSql(tableName: SqlText, insertColumns: SqlText, returningColumns: SqlText): SqlText =
-    SqlText(s"insert into $tableName $insertColumns returning $returningColumns")
+  def insertReturningSql(tableName: TableName, insertColumns: SqlText, returningColumns: SqlText): SqlText =
+    SqlText(s"insert into ${escapeIdentifier(tableName)} $insertColumns returning $returningColumns")
 
   /** Returns the SQL for an UPDATE statement with RETURNING clause.
     *
@@ -32,12 +32,12 @@ trait ReturningSupport:
     *   SQL fragment for UPDATE ... RETURNING
     */
   def updateReturningSql(
-      tableName: SqlText,
+      tableName: TableName,
       setClause: SqlText,
       whereClause: SqlText,
       returningColumns: SqlText,
   ): SqlText =
-    SqlText(s"update $tableName set $setClause where $whereClause returning $returningColumns")
+    SqlText(s"update ${escapeIdentifier(tableName)} set $setClause where $whereClause returning $returningColumns")
 
   /** Returns the SQL for a DELETE statement with RETURNING clause.
     *
@@ -50,8 +50,8 @@ trait ReturningSupport:
     * @return
     *   SQL fragment for DELETE ... RETURNING
     */
-  def deleteReturningSql(tableName: SqlText, whereClause: SqlText, returningColumns: SqlText): SqlText =
-    SqlText(s"delete from $tableName where $whereClause returning $returningColumns")
+  def deleteReturningSql(tableName: TableName, whereClause: SqlText, returningColumns: SqlText): SqlText =
+    SqlText(s"delete from ${escapeIdentifier(tableName)} where $whereClause returning $returningColumns")
 end ReturningSupport
 
 /** Trait for dialects that support IF NOT EXISTS in index creation */
@@ -74,17 +74,17 @@ trait IndexIfNotExistsSupport:
     *   SQL statement for creating the index with IF NOT EXISTS
     */
   def createIndexIfNotExistsSql(
-      indexName: SqlText,
-      tableName: SqlText,
-      columnNames: Seq[SqlText],
+      indexName: IndexName,
+      tableName: TableName,
+      columnNames: Seq[ColumnName],
       unique: Boolean = false,
       where: Option[SqlText] = None,
   ): SqlText =
     val uniqueClause = if unique then "unique " else ""
     val whereClause  = where.map(w => s" where $w").getOrElse("")
-    // nosemgrep: scala-security.scala.lang.security.audit.tainted-sql-string -- callers supply already-safe identifiers: the public SpecializedDML.createIndexIfNotExists escapes user input at the trust boundary, and internal callers pass compile-time schema-derived labels
+    val columns      = columnNames.map(escapeIdentifier).mkString(", ")
     SqlText(
-      s"create ${uniqueClause}index if not exists $indexName on $tableName (${columnNames.mkString(", ")})$whereClause"
+      s"create ${uniqueClause}index if not exists ${escapeIdentifier(indexName)} on ${escapeIdentifier(tableName)} ($columns)$whereClause"
     )
   end createIndexIfNotExistsSql
 end IndexIfNotExistsSupport
@@ -104,8 +104,10 @@ trait AdvancedAlterTableSupport:
     * @return
     *   SQL statement for renaming the column
     */
-  def renameColumnSql(tableName: SqlText, oldColumnName: SqlText, newColumnName: SqlText): SqlText =
-    SqlText(s"alter table $tableName rename column $oldColumnName to $newColumnName")
+  def renameColumnSql(tableName: TableName, oldColumnName: ColumnName, newColumnName: ColumnName): SqlText =
+    SqlText(
+      s"alter table ${escapeIdentifier(tableName)} rename column ${escapeIdentifier(oldColumnName)} to ${escapeIdentifier(newColumnName)}"
+    )
 
   /** Returns SQL for modifying a column type.
     *
@@ -118,8 +120,10 @@ trait AdvancedAlterTableSupport:
     * @return
     *   SQL statement for modifying the column type
     */
-  def modifyColumnTypeSql(tableName: SqlText, columnName: SqlText, newColumnType: ColumnType): SqlText =
-    SqlText(s"alter table $tableName alter column $columnName type $newColumnType")
+  def modifyColumnTypeSql(tableName: TableName, columnName: ColumnName, newColumnType: ColumnType): SqlText =
+    SqlText(
+      s"alter table ${escapeIdentifier(tableName)} alter column ${escapeIdentifier(columnName)} type $newColumnType"
+    )
 end AdvancedAlterTableSupport
 
 /** Trait for dialects that support UPSERT operations */
@@ -140,9 +144,9 @@ trait UpsertSupport:
     *   SQL statement for UPSERT
     */
   def upsertSql(
-      tableName: SqlText,
+      tableName: TableName,
       insertColumns: SqlText,
-      conflictColumns: Seq[SqlText],
+      conflictColumns: Seq[ColumnName],
       updateColumns: SqlText,
   ): SqlText
 
@@ -164,9 +168,9 @@ trait UpsertSupport:
     *   SQL statement for conditional UPSERT
     */
   def upsertWithWhereSql(
-      tableName: SqlText,
+      tableName: TableName,
       insertColumns: SqlText,
-      conflictColumns: Seq[SqlText],
+      conflictColumns: Seq[ColumnName],
       updateColumns: SqlText,
       conflictWhere: Option[SqlText],
   ): SqlText =
@@ -187,9 +191,9 @@ trait UpsertSupport:
     *   SQL statement for INSERT ... ON CONFLICT DO NOTHING
     */
   def upsertDoNothingSql(
-      tableName: SqlText,
+      tableName: TableName,
       insertColumns: SqlText,
-      conflictColumns: Seq[SqlText],
+      conflictColumns: Seq[ColumnName],
   ): SqlText
 
 end UpsertSupport

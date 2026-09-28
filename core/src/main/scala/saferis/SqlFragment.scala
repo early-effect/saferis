@@ -9,27 +9,29 @@ import zio.stream.ZStream
 
 /** A statement as text pieces and parameters, plus construction issues and an optional per-statement timeout. */
 final class SqlFragment private (
-    val pieces: Chunk[SqlPiece],
+    private val stored: Chunk[SqlPiece],
     val issues: List[FragmentIssue],
     override val timeout: Option[Duration],
 ) extends Placeholder:
 
-  /** Postgres inspection form (`$1`, `$2`). Not the text a driver sends. */
-  override def sql: SqlText = SqlPieces.postgres(pieces)
+  private[saferis] def rawPieces: Chunk[SqlPiece] = stored
 
-  def show: SqlText = SqlPieces.show(pieces)
+  /** `$1`, `$2`, with identifiers quoted for the dialect in scope. Not the text a JDBC driver sends. */
+  override def sql(using Dialect): SqlText = SqlPieces.postgres(stored, summon[Dialect].identifierQuote)
+
+  def show(using dialect: Dialect): SqlText = SqlPieces.show(stored, dialect.identifierQuote)
 
   def withTimeout(d: Duration): SqlFragment =
-    new SqlFragment(pieces, issues, Some(d))
+    new SqlFragment(stored, issues, Some(d))
 
   def stripMargin: SqlFragment = stripMargin('|')
 
   def stripMargin(marginChar: Char): SqlFragment =
-    new SqlFragment(SqlFragment.stripPieces(pieces, marginChar), issues, timeout)
+    new SqlFragment(SqlFragment.stripPieces(stored, marginChar), issues, timeout)
 
   def append(other: SqlFragment): SqlFragment =
     new SqlFragment(
-      SqlPieces.merge(pieces ++ other.pieces),
+      SqlPieces.merge(stored ++ other.stored),
       issues ++ other.issues,
       timeout.orElse(other.timeout),
     )
@@ -41,32 +43,36 @@ final class SqlFragment private (
     if all.isEmpty then ZIO.succeed(this)
     else ZIO.fail(SaferisError.InvalidStatement(all))
 
-  /** Fails with `InvalidStatement` before a connection is checked out. Timeout is this fragment, else the fiber ref. */
-  def toCommand(using Trace): IO[SaferisError, SqlCommand] =
+  /** Fails with `InvalidStatement` before a connection is checked out. Timeout is this fragment, else the fiber ref.
+    * The dialect's quote character is stored on the command so a driver quotes `Ident` the same way `sql` does.
+    */
+  def toCommand(using dialect: Dialect)(using Trace): IO[SaferisError, SqlCommand] =
     val all = allIssues
     if all.nonEmpty then ZIO.fail(SaferisError.InvalidStatement(all))
     else
       Saferis.timeoutFiberRef.get.map: aspect =>
-        SqlCommand(pieces, timeout.orElse(aspect))
+        SqlCommand(stored, timeout.orElse(aspect), dialect.identifierQuote)
 
   private def allIssues: List[FragmentIssue] =
-    issues ++ SqlPieces.arrayIssues(pieces)
+    issues ++ SqlPieces.arrayIssues(stored)
 
-  inline def query[E](using table: Table[E])(using Trace): ZIO[SqlSession, SaferisError, Chunk[E]] =
+  inline def query[E](using table: Table[E])(using Dialect)(using Trace): ZIO[SqlSession, SaferisError, Chunk[E]] =
     val read = SqlFragment.readTable[E]
     for
       command <- toCommand
       rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(read))
     yield rows
 
-  inline def queryOne[E](using table: Table[E])(using Trace): ZIO[SqlSession, SaferisError, Option[E]] =
+  inline def queryOne[E](using table: Table[E])(using Dialect)(using Trace): ZIO[SqlSession, SaferisError, Option[E]] =
     val read = SqlFragment.readTable[E]
     for
       command <- toCommand
       row     <- ZIO.serviceWithZIO[SqlSession](_.queryAtMostOne(command)(read))
     yield row
 
-  inline def queryValue[A](using decoder: RowDecoder[A])(using Trace): ZIO[SqlSession, SaferisError, Option[A]] =
+  inline def queryValue[A](using
+      decoder: RowDecoder[A]
+  )(using Dialect)(using Trace): ZIO[SqlSession, SaferisError, Option[A]] =
     val read: SqlRow => Either[SaferisError, A] = row =>
       decoder
         .decode(row)
@@ -80,18 +86,18 @@ final class SqlFragment private (
     yield row
   end queryValue
 
-  inline def queryStream[E](using table: Table[E])(using Trace): ZStream[SqlSession, SaferisError, E] =
+  inline def queryStream[E](using table: Table[E])(using Dialect)(using Trace): ZStream[SqlSession, SaferisError, E] =
     val read = SqlFragment.readTable[E]
     ZStream.unwrap:
       toCommand.map: command =>
         ZStream.serviceWithStream[SqlSession](_.stream(command)(read))
 
-  def update(using Trace): ZIO[SqlSession, SaferisError, Long]  = dml
-  def delete(using Trace): ZIO[SqlSession, SaferisError, Long]  = dml
-  def insert(using Trace): ZIO[SqlSession, SaferisError, Long]  = dml
-  def execute(using Trace): ZIO[SqlSession, SaferisError, Long] = dml
+  def update(using Dialect)(using Trace): ZIO[SqlSession, SaferisError, Long]  = dml
+  def delete(using Dialect)(using Trace): ZIO[SqlSession, SaferisError, Long]  = dml
+  def insert(using Dialect)(using Trace): ZIO[SqlSession, SaferisError, Long]  = dml
+  def execute(using Dialect)(using Trace): ZIO[SqlSession, SaferisError, Long] = dml
 
-  def dml(using Trace): ZIO[SqlSession, SaferisError, Long] =
+  def dml(using Dialect)(using Trace): ZIO[SqlSession, SaferisError, Long] =
     for
       command <- toCommand
       count   <- ZIO.serviceWithZIO[SqlSession](_.exec(command))
@@ -108,7 +114,25 @@ object SqlFragment:
     new SqlFragment(SqlPieces.merge(pieces), issues, timeout)
 
   def apply(placeholder: Placeholder): SqlFragment =
-    new SqlFragment(SqlPieces.merge(placeholder.pieces), placeholder.issues, placeholder.timeout)
+    new SqlFragment(SqlPieces.merge(placeholder.rawPieces), placeholder.issues, placeholder.timeout)
+
+  def ident[A](name: A)(using sqlName: SqlName[A]): SqlFragment =
+    one(SqlPiece.Ident(sqlName.text(name), sqlName.qualify))
+
+  /** `alias.column`, or just the column when there is no alias. */
+  def columnRef(alias: Option[Alias], column: ColumnName): SqlFragment =
+    alias match
+      case None    => ident(column)
+      case Some(a) => ident(a).append(text(".")).append(ident(column))
+
+  /** `table` or `table as alias`. */
+  def tableRef(name: TableName, alias: Option[Alias]): SqlFragment =
+    alias match
+      case None    => ident(name)
+      case Some(a) => ident(name).append(text(" as ")).append(ident(a))
+
+  private def one(piece: SqlPiece): SqlFragment =
+    new SqlFragment(Chunk(piece), Nil, None)
 
   val empty: SqlFragment = new SqlFragment(Chunk.empty, Nil, None)
 
@@ -128,7 +152,7 @@ object SqlFragment:
     var i                         = 0
     while i < holders.length do
       if i < decoded.length then b += SqlPiece.Text(SqlText(decoded(i)))
-      b ++= holders(i).pieces
+      b ++= holders(i).rawPieces
       issues ++= holders(i).issues
       timeout = timeout.orElse(holders(i).timeout)
       i += 1
@@ -185,6 +209,12 @@ object SqlFragment:
     pieces.foreach:
       case SqlPiece.Text(text) =>
         text.foreach(onChar)
+      case ident: SqlPiece.Ident =>
+        if atLineStart then
+          commitLeading()
+          atLineStart = false
+        flush()
+        out += ident
       case param: SqlPiece.Param =>
         if atLineStart then
           commitLeading()

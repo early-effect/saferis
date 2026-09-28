@@ -119,14 +119,14 @@ object MacroSpecs extends ZIOSpecDefault:
       test("toSql extractor function works"):
         val instance = Table[ReservedNames]
         assertTrue(
-          toSql(instance) == "reserved_names"
+          toSql(instance) == "\"reserved_names\""
         )
 
       test("aliased via 'as' extension method"):
         val instance = Table[ReservedNames]
         val aliased  = instance as "rn"
         assertTrue(
-          toSql(aliased) == "reserved_names as rn"
+          toSql(aliased) == "\"reserved_names\" as \"rn\""
         ),
   )
 end MacroSpecs

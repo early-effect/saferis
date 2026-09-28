@@ -36,13 +36,13 @@ final case class SetClause(columnLabel: String, value: SqlValue)
   */
 final case class ReturningQuery[A: Table](fragment: SqlFragment):
   /** Execute query and return all matching rows */
-  inline def query(using Trace): ZIO[SqlSession, SaferisError, Chunk[A]] = fragment.query[A]
+  inline def query(using Dialect)(using Trace): ZIO[SqlSession, SaferisError, Chunk[A]] = fragment.query[A]
 
   /** Execute query and return the first row (if any) */
-  inline def queryOne(using Trace): ZIO[SqlSession, SaferisError, Option[A]] = fragment.queryOne[A]
+  inline def queryOne(using Dialect)(using Trace): ZIO[SqlSession, SaferisError, Option[A]] = fragment.queryOne[A]
 
   /** Execute query and stream all matching rows lazily */
-  inline def queryStream(using Trace): ZStream[SqlSession, SaferisError, A] = fragment.queryStream[A]
+  inline def queryStream(using Dialect)(using Trace): ZStream[SqlSession, SaferisError, A] = fragment.queryStream[A]
 
   /** Get the underlying SQL fragment */
   def build: SqlFragment = fragment
@@ -78,10 +78,19 @@ final case class Insert[A: Table](
   /** Build the INSERT SQL fragment */
   def build: SqlFragment =
     require(values.nonEmpty, "INSERT requires at least one value")
-    val columns = values.map(_.columnLabel).mkString(", ")
+    val columns = values.map(clause => SqlFragment.ident(ColumnName(clause.columnLabel)))
+    val cols    = columns.reduce((left, right) => left.append(SqlFragment.text(", ")).append(right))
     val params  = values.map(clause => SqlFragment.param(clause.value))
     val body    = params.reduce((left, right) => left.append(SqlFragment.text(", ")).append(right))
-    SqlFragment.text(s"insert into $tableName ($columns) values (").append(body).append(SqlFragment.text(")"))
+    SqlFragment
+      .text("insert into ")
+      .append(SqlFragment.ident(TableName(tableName)))
+      .append(SqlFragment.text(" ("))
+      .append(cols)
+      .append(SqlFragment.text(") values ("))
+      .append(body)
+      .append(SqlFragment.text(")"))
+  end build
 
   /** Build INSERT with RETURNING clause (for dialects that support it) */
   def returning: SqlFragment =
@@ -192,9 +201,16 @@ final case class UpdateReady[A: Table](
   def build: SqlFragment =
     require(setClauses.nonEmpty, "UPDATE requires at least one SET clause")
     val sets = setClauses.map: clause =>
-      SqlFragment.text(s"${clause.columnLabel} = ").append(SqlFragment.param(clause.value))
+      SqlFragment
+        .ident(ColumnName(clause.columnLabel))
+        .append(SqlFragment.text(" = "))
+        .append(SqlFragment.param(clause.value))
     val setFrag = sets.reduce((left, right) => left.append(SqlFragment.text(", ")).append(right))
-    var result  = SqlFragment.text(s"update $tableName set ").append(setFrag)
+    var result  = SqlFragment
+      .text("update ")
+      .append(SqlFragment.ident(TableName(tableName)))
+      .append(SqlFragment.text(" set "))
+      .append(setFrag)
 
     if wherePredicates.nonEmpty then
       val whereJoined = Placeholder.join(wherePredicates, " and ")
@@ -356,7 +372,7 @@ final case class DeleteReady[A: Table](
 
   /** Build the DELETE SQL fragment */
   def build: SqlFragment =
-    var result = SqlFragment.text(s"delete from $tableName")
+    var result = SqlFragment.text("delete from ").append(SqlFragment.ident(TableName(tableName)))
 
     if wherePredicates.nonEmpty then
       val whereJoined = Placeholder.join(wherePredicates, " and ")

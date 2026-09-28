@@ -1,7 +1,5 @@
 package saferis
 
-import zio.Chunk
-
 /** Internal representation of a condition in ON or WHERE clauses. */
 sealed trait Condition:
   def toFragment: SqlFragment
@@ -15,9 +13,10 @@ final case class BinaryCondition(
     rightColumn: Column[?],
 ) extends Condition:
   def toFragment: SqlFragment =
-    SqlFragment.text(
-      s"${leftAlias.toSql}.${leftColumn.label} ${operator.sql} ${rightAlias.toSql}.${rightColumn.label}"
-    )
+    SqlFragment
+      .columnRef(Some(leftAlias), leftColumn.label)
+      .append(SqlFragment.text(s" ${operator.sql} "))
+      .append(SqlFragment.columnRef(Some(rightAlias), rightColumn.label))
 end BinaryCondition
 
 /** Unary condition: column IS NULL / IS NOT NULL */
@@ -27,7 +26,7 @@ final case class UnaryCondition(
     operator: Operator,
 ) extends Condition:
   def toFragment: SqlFragment =
-    SqlFragment.text(s"${alias.toSql}.${column.label} ${operator.sql}")
+    SqlFragment.columnRef(Some(alias), column.label).append(SqlFragment.text(s" ${operator.sql}"))
 
 /** Literal condition: column op parameter. The value is a `Param` piece, never interpolated text. */
 final case class LiteralCondition(
@@ -37,12 +36,10 @@ final case class LiteralCondition(
     value: SqlValue,
 ) extends Condition:
   def toFragment: SqlFragment =
-    SqlFragment(
-      Chunk(
-        SqlPiece.Text(SqlText(s"${alias.toSql}.${column.label} ${operator.sql} ")),
-        SqlPiece.Param(value),
-      )
-    )
+    SqlFragment
+      .columnRef(Some(alias), column.label)
+      .append(SqlFragment.text(s" ${operator.sql} "))
+      .append(SqlFragment.param(value))
 end LiteralCondition
 
 /** Condition comparing a column to the EXCLUDED pseudo-table (for upsert WHERE clauses). */
@@ -53,7 +50,11 @@ final case class ExcludedCondition(
     excludedColumn: Column[?],
 ) extends Condition:
   def toFragment: SqlFragment =
-    SqlFragment.text(s"${alias.toSql}.${column.label} ${operator.sql} excluded.${excludedColumn.label}")
+    SqlFragment
+      .columnRef(Some(alias), column.label)
+      .append(SqlFragment.text(s" ${operator.sql} excluded."))
+      .append(SqlFragment.ident(excludedColumn.label))
+end ExcludedCondition
 
 object Condition:
   def toSqlFragment(conditions: Seq[Condition]): SqlFragment =

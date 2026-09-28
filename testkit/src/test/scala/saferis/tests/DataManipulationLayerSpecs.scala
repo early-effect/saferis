@@ -283,10 +283,10 @@ object DataManipulationLayerSpecs:
           sql"drop table if exists test_dml_compound_key".dml
         _ <-
           sql"""create table test_dml_compound_key (
-                  userid integer not null,
-                  roleid integer not null,
-                  grantedAt varchar(255) not null,
-                  primary key (userid, roleid)
+                  "userId" integer not null,
+                  "roleId" integer not null,
+                  "grantedAt" varchar(255) not null,
+                  primary key ("userId", "roleId")
                 )""".dml
         // Insert test data
         record1 = CompoundKeyTable(1, 2, "2023-01-01")
@@ -304,7 +304,7 @@ object DataManipulationLayerSpecs:
           delete(CompoundKeyTable(1, 3, "2023-01-02"))
         // Verify operations
         queryResult <-
-          sql"select * from test_dml_compound_key where userid = 1 and roleid = 2".queryOne[CompoundKeyTable]
+          sql"""select * from test_dml_compound_key where "userId" = 1 and "roleId" = 2""".queryOne[CompoundKeyTable]
         countResult <-
           sql"select count(*) as count from test_dml_compound_key".queryOne[CountResult]
       yield assertTrue(updateResult == 1) &&

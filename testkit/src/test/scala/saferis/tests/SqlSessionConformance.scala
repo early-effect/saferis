@@ -21,6 +21,7 @@ object SqlSessionConformance:
     zio.test.suite("conformance")(
       TransactionConformance.conformance,
       PortableDmlConformance.conformance,
+      IdentifierConformance.conformance,
       SchemaConformance.conformance.whenZIO(has(Capability.Catalog)),
       postgresSql.whenZIO(has(Capability.PostgresSql)),
     )

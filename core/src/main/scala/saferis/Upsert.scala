@@ -26,10 +26,17 @@ package saferis
   * }}}
   */
 object Upsert:
+  private[saferis] def insertHead(tableName: String): SqlFragment =
+    SqlFragment.text("insert into ").append(SqlFragment.ident(TableName(tableName))).append(SqlFragment.text(" "))
+
+  private[saferis] def conflicts(columns: Seq[String])(using dialect: Dialect): String =
+    columns.map(column => dialect.escapeIdentifier(ColumnName(column))).mkString(", ")
+
   /** Create an Upsert builder for a table type */
   inline def apply[A: Table]: UpsertBuilder[A] =
     val table = summon[Table[A]]
     UpsertBuilder(table.name, table.columnMap, table.columns.toVector)
+end Upsert
 
 // ============================================================================
 // UpsertBuilder - Entry point (needs .values())
@@ -115,14 +122,13 @@ final case class UpsertDoNothingReady[A: Table](
 ):
   /** Build the INSERT ... ON CONFLICT DO NOTHING SQL */
   transparent inline def build(using (Dialect & UpsertSupport)): SqlFragment =
-    val table     = summon[Table[A]]
-    val conflicts = conflictColumns.mkString(", ")
-    SqlFragment
-      .text(s"insert into $tableName ")
+    val table = summon[Table[A]]
+    Upsert
+      .insertHead(tableName)
       .append(table.insertColumnsSql)
       .append(SqlFragment.text(" values "))
       .append(table.insertPlaceholdersSql(entity))
-      .append(SqlFragment.text(s" on conflict ($conflicts) do nothing"))
+      .append(SqlFragment.text(s" on conflict (${Upsert.conflicts(conflictColumns)}) do nothing"))
   end build
 end UpsertDoNothingReady
 
@@ -148,14 +154,13 @@ final case class UpsertActionReady[A: Table](
 
   /** Build without WHERE clause */
   transparent inline def build(using (Dialect & UpsertSupport)): SqlFragment =
-    val table     = summon[Table[A]]
-    val conflicts = conflictColumns.mkString(", ")
-    SqlFragment
-      .text(s"insert into $tableName ")
+    val table = summon[Table[A]]
+    Upsert
+      .insertHead(tableName)
       .append(table.insertColumnsSql)
       .append(SqlFragment.text(" values "))
       .append(table.insertPlaceholdersSql(entity))
-      .append(SqlFragment.text(s" on conflict ($conflicts) do update set "))
+      .append(SqlFragment.text(s" on conflict (${Upsert.conflicts(conflictColumns)}) do update set "))
       .append(updateColumns)
   end build
 
@@ -249,15 +254,14 @@ final case class UpsertWhereReady[A: Table](
 
   /** Build the complete upsert SQL */
   transparent inline def build(using (Dialect & UpsertSupport)): SqlFragment =
-    val table     = summon[Table[A]]
-    val conflicts = action.conflictColumns.mkString(", ")
-    val base      =
-      SqlFragment
-        .text(s"insert into ${action.tableName} ")
+    val table = summon[Table[A]]
+    val base  =
+      Upsert
+        .insertHead(action.tableName)
         .append(table.insertColumnsSql)
         .append(SqlFragment.text(" values "))
         .append(table.insertPlaceholdersSql(action.entity))
-        .append(SqlFragment.text(s" on conflict ($conflicts) do update set "))
+        .append(SqlFragment.text(s" on conflict (${Upsert.conflicts(action.conflictColumns)}) do update set "))
         .append(action.updateColumns)
     if wherePredicates.isEmpty then base
     else

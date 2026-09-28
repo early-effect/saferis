@@ -29,10 +29,10 @@ object UpsertSpecs extends ZIOSpecDefault:
           .onConflict(_.instanceId)
           .doUpdateAll
           .build
-        assertTrue(frag.sql.contains("insert into upsert_locks")) &&
-        assertTrue(frag.sql.contains("on conflict (instance_id)")) &&
+        assertTrue(frag.sql.contains("insert into \"upsert_locks\"")) &&
+        assertTrue(frag.sql.contains("on conflict (\"instance_id\")")) &&
         assertTrue(frag.sql.contains("do update set")) &&
-        assertTrue(frag.sql.contains("node_id = $5"))
+        assertTrue(frag.sql.contains("\"node_id\" = $5"))
       ,
       test("doNothing generates correct SQL"):
         val now    = Instant.now()
@@ -42,8 +42,8 @@ object UpsertSpecs extends ZIOSpecDefault:
           .onConflict(_.instanceId)
           .doNothing
           .build
-        assertTrue(frag.sql.contains("insert into upsert_locks")) &&
-        assertTrue(frag.sql.contains("on conflict (instance_id)")) &&
+        assertTrue(frag.sql.contains("insert into \"upsert_locks\"")) &&
+        assertTrue(frag.sql.contains("on conflict (\"instance_id\")")) &&
         assertTrue(frag.sql.contains("do nothing"))
       ,
       test("compound conflict columns"):
@@ -55,7 +55,7 @@ object UpsertSpecs extends ZIOSpecDefault:
           .and(_.nodeId)
           .doUpdateAll
           .build
-        assertTrue(frag.sql.contains("on conflict (instance_id, node_id)")),
+        assertTrue(frag.sql.contains("on conflict (\"instance_id\", \"node_id\")")),
     ),
     suite("Conditional Upsert")(
       test("WHERE clause on conflict"):
@@ -68,10 +68,10 @@ object UpsertSpecs extends ZIOSpecDefault:
           .where(_.expiresAt)
           .lt(now)
           .build
-        assertTrue(frag.sql.contains("on conflict (instance_id)")) &&
+        assertTrue(frag.sql.contains("on conflict (\"instance_id\")")) &&
         assertTrue(frag.sql.contains("do update set")) &&
         assertTrue(frag.sql.contains("where")) &&
-        assertTrue(frag.sql.contains("expires_at < $8"))
+        assertTrue(frag.sql.contains("\"expires_at\" < $8"))
       ,
       test("OR condition with eqExcluded"):
         val now    = Instant.now()
@@ -86,9 +86,9 @@ object UpsertSpecs extends ZIOSpecDefault:
           .eqExcluded
           .build
         assertTrue(frag.sql.contains("where")) &&
-        assertTrue(frag.sql.contains("expires_at < $8")) &&
+        assertTrue(frag.sql.contains("\"expires_at\" < $8")) &&
         assertTrue(frag.sql.contains(" or ")) &&
-        assertTrue(frag.sql.contains("node_id = excluded.node_id"))
+        assertTrue(frag.sql.contains("\"node_id\" = excluded.\"node_id\""))
       ,
       test("RETURNING clause"):
         val now    = Instant.now()

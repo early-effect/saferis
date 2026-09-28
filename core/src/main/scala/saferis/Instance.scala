@@ -45,11 +45,11 @@ final case class Instance[A](
     columns.map(c => (c.name: String) -> c.label).toMap
 
   /** Get foreign key constraint SQL - use via `foreignKeyConstraints(instance)` */
-  private[saferis] def foreignKeyConstraints: Seq[SqlText] =
+  private[saferis] def foreignKeyConstraints(using Dialect): Seq[SqlText] =
     foreignKeys.map(_.toConstraintSql(fieldToLabel)).toSeq
 
   /** Get unique constraint SQL - use via `uniqueConstraints(instance)` */
-  private[saferis] def uniqueConstraintsSql: Seq[SqlText] =
+  private[saferis] def uniqueConstraintsSql(using Dialect): Seq[SqlText] =
     uniqueConstraints.map(_.toConstraintSql(fieldToLabel)).toSeq
 
   /** Column access via field name - the ONLY public method besides applyDynamic */
@@ -116,10 +116,12 @@ final case class Instance[A](
     Macros.extractColumn(this, selector)
 
   final private[saferis] class TypedFragment(val fragment: SqlFragment):
-    def sql                                                                    = fragment.sql
-    inline def query(using Trace): ZIO[SqlSession, SaferisError, Chunk[A]]     = fragment.query[A]
-    inline def queryOne(using Trace): ZIO[SqlSession, SaferisError, Option[A]] = fragment.queryOne[A]
-    inline def queryStream(using Trace): ZStream[SqlSession, SaferisError, A]  =
+    def sql(using Dialect): SqlText                                                       = fragment.sql
+    inline def query(using Dialect)(using Trace): ZIO[SqlSession, SaferisError, Chunk[A]] =
+      fragment.query[A]
+    inline def queryOne(using Dialect)(using Trace): ZIO[SqlSession, SaferisError, Option[A]] =
+      fragment.queryOne[A]
+    inline def queryStream(using Dialect)(using Trace): ZStream[SqlSession, SaferisError, A] =
       fragment.queryStream[A]
 end Instance
 

@@ -31,7 +31,7 @@ object MutationSpecs extends ZIOSpecDefault:
     suite("Insert")(
       test("single value generates correct SQL"):
         val frag = Insert[TestUser].value(_.name, "Alice").build
-        assertTrue(frag.sql == "insert into test_mutation (name) values ($1)") &&
+        assertTrue(frag.sql == "insert into \"test_mutation\" (\"name\") values ($1)") &&
         assertTrue(frag.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 1)
       ,
       test("multiple values generates correct SQL"):
@@ -40,7 +40,7 @@ object MutationSpecs extends ZIOSpecDefault:
           .value(_.age, 30)
           .value(_.status, "active")
           .build
-        assertTrue(frag.sql == "insert into test_mutation (name, age, status) values ($1, $2, $3)") &&
+        assertTrue(frag.sql == "insert into \"test_mutation\" (\"name\", \"age\", \"status\") values ($1, $2, $3)") &&
         assertTrue(frag.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 3)
       ,
       test("returning appends RETURNING clause"):
@@ -54,7 +54,7 @@ object MutationSpecs extends ZIOSpecDefault:
           .where(_.id)
           .eq(1)
           .build
-        assertTrue(frag.sql.contains("update test_mutation set name = $1")) &&
+        assertTrue(frag.sql.contains("update \"test_mutation\" set \"name\" = $1")) &&
         assertTrue(frag.sql.contains("where")) &&
         assertTrue(frag.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 2) // name + id
       ,
@@ -65,7 +65,7 @@ object MutationSpecs extends ZIOSpecDefault:
           .where(_.id)
           .eq(1)
           .build
-        assertTrue(frag.sql.contains("update test_mutation set name = $1, age = $2")) &&
+        assertTrue(frag.sql.contains("update \"test_mutation\" set \"name\" = $1, \"age\" = $2")) &&
         assertTrue(frag.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 3) // name + age + id
       ,
       test("multiple where clauses AND together"):
@@ -84,7 +84,7 @@ object MutationSpecs extends ZIOSpecDefault:
           .set(_.status, "inactive")
           .all
           .build
-        assertTrue(frag.sql == "update test_mutation set status = $1") &&
+        assertTrue(frag.sql == "update \"test_mutation\" set \"status\" = $1") &&
         assertTrue(!frag.sql.contains("where"))
       ,
       test("returning appends RETURNING clause"):
@@ -101,7 +101,7 @@ object MutationSpecs extends ZIOSpecDefault:
           .where(_.id)
           .eq(1)
           .build
-        assertTrue(frag.sql.contains("delete from test_mutation")) &&
+        assertTrue(frag.sql.contains("delete from \"test_mutation\"")) &&
         assertTrue(frag.sql.contains("where"))
       ,
       test("multiple where clauses AND together"):
@@ -115,7 +115,7 @@ object MutationSpecs extends ZIOSpecDefault:
       ,
       test(".all allows building without where"):
         val frag = Delete[TestUser].all.build
-        assertTrue(frag.sql == "delete from test_mutation") &&
+        assertTrue(frag.sql == "delete from \"test_mutation\"") &&
         assertTrue(!frag.sql.contains("where"))
       ,
       test("returning appends RETURNING clause"):
@@ -186,8 +186,8 @@ object MutationSpecs extends ZIOSpecDefault:
         .build
       // Should use "sequence_nr" in SET and "instance_id" in WHERE
       assertTrue(
-        frag.sql.contains("set sequence_nr"),
-        frag.sql.contains("instance_id ="),
+        frag.sql.contains("set \"sequence_nr\""),
+        frag.sql.contains("\"instance_id\" ="),
         !frag.sql.contains("sequenceNr"),
         !frag.sql.contains("instanceId"),
       )
@@ -199,7 +199,7 @@ object MutationSpecs extends ZIOSpecDefault:
         .build
       // Should use "instance_id" (from @label)
       assertTrue(
-        frag.sql.contains("instance_id ="),
+        frag.sql.contains("\"instance_id\" ="),
         !frag.sql.contains("instanceId"),
       ),
   )

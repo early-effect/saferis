@@ -8,8 +8,8 @@ package saferis
   *   toSql(users)  // "users" or "users as u" if aliased
   * }}}
   */
-def toSql[A](instance: Instance[A]): String =
-  instance.alias.fold(instance.tableName)(a => s"${instance.tableName} as ${a.value}")
+def toSql[A](instance: Instance[A])(using Dialect): SqlText =
+  SqlFragment.tableRef(instance.tableName, instance.alias).sql
 
 /** Create an aliased version of a table instance (function style).
   *
@@ -35,11 +35,11 @@ def unaliased[A: Table](instance: Instance[A]): Instance[A] =
   instance.copy(alias = None, columns = newColumns)
 
 /** Get foreign key constraint SQL for a table. */
-def foreignKeyConstraints[A](instance: Instance[A]): Seq[String] =
+def foreignKeyConstraints[A](instance: Instance[A])(using Dialect): Seq[String] =
   instance.foreignKeyConstraints
 
 /** Get unique constraint SQL for a table. */
-def uniqueConstraints[A](instance: Instance[A]): Seq[String] =
+def uniqueConstraints[A](instance: Instance[A])(using Dialect): Seq[String] =
   instance.uniqueConstraintsSql
 
 /** Extension methods for Instance - fluent API */

@@ -41,6 +41,8 @@ private[saferis] object CatalogRows:
   )
 
   def run[A](fragment: SqlFragment)(read: SqlRow => Either[SaferisError, A])(using
+      Dialect
+  )(using
       Trace
   ): ZIO[SqlSession, SaferisError, Chunk[A]] =
     fragment.toCommand.flatMap: command =>

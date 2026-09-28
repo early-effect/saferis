@@ -60,17 +60,20 @@ object PostgresDialect
 
   // === UpsertSupport implementation ===
   def upsertSql(
-      tableName: SqlText,
+      tableName: TableName,
       insertColumns: SqlText,
-      conflictColumns: Seq[SqlText],
+      conflictColumns: Seq[ColumnName],
       updateColumns: SqlText,
   ): SqlText =
+    val conflicts = conflictColumns.map(escapeIdentifier).mkString(", ")
     SqlText(
-      s"insert into $tableName $insertColumns on conflict (${conflictColumns.mkString(", ")}) do update set $updateColumns"
+      s"insert into ${escapeIdentifier(tableName)} $insertColumns on conflict ($conflicts) do update set $updateColumns"
     )
+  end upsertSql
 
-  def upsertDoNothingSql(tableName: SqlText, insertColumns: SqlText, conflictColumns: Seq[SqlText]): SqlText =
-    SqlText(s"insert into $tableName $insertColumns on conflict (${conflictColumns.mkString(", ")}) do nothing")
+  def upsertDoNothingSql(tableName: TableName, insertColumns: SqlText, conflictColumns: Seq[ColumnName]): SqlText =
+    val conflicts = conflictColumns.map(escapeIdentifier).mkString(", ")
+    SqlText(s"insert into ${escapeIdentifier(tableName)} $insertColumns on conflict ($conflicts) do nothing")
 
   // === JsonSupport implementation ===
   def jsonType: ColumnType = ColumnType("jsonb")

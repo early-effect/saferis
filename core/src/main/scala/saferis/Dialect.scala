@@ -47,7 +47,7 @@ trait Dialect:
     *   SQL constraint clause
     */
   def compoundPrimaryKeyClause(columnNames: Seq[ColumnName]): SqlText =
-    SqlText(s"primary key (${columnNames.mkString(", ")})")
+    SqlText(s"primary key (${columnNames.map(escapeIdentifier).mkString(", ")})")
 
   // === Index Creation ===
 
@@ -201,13 +201,25 @@ trait Dialect:
     * @return
     *   Escaped identifier
     */
-  def escapeIdentifier(identifier: String): SqlText =
-    val escaped = identifier.replace(identifierQuote, identifierQuote + identifierQuote)
-    SqlText(s"$identifierQuote$escaped$identifierQuote")
+  def escapeIdentifier[A](name: A)(using sqlName: SqlName[A]): SqlText =
+    Dialect.quote(identifierQuote, sqlName.text(name), sqlName.qualify)
 
 end Dialect
 
 object Dialect:
+  /** Wrap `name` in `identifierQuote`, doubling any quote already inside it.
+    *
+    * When `qualify` is set, a dot separates identifiers (`schema.table` becomes `"schema"."table"`).
+    */
+  def quote(identifierQuote: String, name: String, qualify: Boolean = false): SqlText =
+    if qualify && name.contains('.') then
+      SqlText(name.split("\\.", -1).map(part => quoteOne(identifierQuote, part)).mkString("."))
+    else SqlText(quoteOne(identifierQuote, name))
+
+  private def quoteOne(identifierQuote: String, name: String): String =
+    val escaped = name.replace(identifierQuote, identifierQuote + identifierQuote)
+    s"$identifierQuote$escaped$identifierQuote"
+
   /** Default PostgreSQL dialect - provided as a low priority given. This allows users to work with Postgres out of the
     * box with just `import saferis.*` Users can override this by providing their own given Dialect with higher
     * priority.

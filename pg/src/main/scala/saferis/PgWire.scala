@@ -117,8 +117,8 @@ private[pg] object PgWire:
   def parameters(pieces: Chunk[SqlPiece]): js.Array[js.Any] =
     val values = js.Array[js.Any]()
     pieces.foreach:
-      case SqlPiece.Text(_)      => ()
-      case SqlPiece.Param(value) =>
+      case SqlPiece.Text(_) | SqlPiece.Ident(_, _) => ()
+      case SqlPiece.Param(value)                   =>
         val _ = values.push(bind(value))
     values
 

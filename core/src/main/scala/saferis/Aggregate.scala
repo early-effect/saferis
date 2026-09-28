@@ -43,7 +43,8 @@ sealed trait AggregateExpr[T]:
 
 /** Aggregate function applied to a column */
 final case class ColumnAggregate[T](function: AggregateFunction, column: Column[T]) extends AggregateExpr[T]:
-  def toFragment: SqlFragment = SqlFragment.text(s"${function.sql}(${column.label})")
+  def toFragment: SqlFragment =
+    SqlFragment.text(s"${function.sql}(").append(SqlFragment(column)).append(SqlFragment.text(")"))
 
   /** Wrap the aggregate in COALESCE with a default value */
   def coalesce(default: T)(using enc: Encoder[T]): CoalesceExpr[T] =
@@ -97,15 +98,19 @@ def countAll: CountAll.type = CountAll
   * Created by calling `.selectAggregate(...)` on a Query1Ready.
   */
 final case class AggregateQuery[A, T](
-    tableName: String,
+    tableName: TableName,
     tableAlias: Option[Alias],
     wherePredicates: Vector[SqlFragment],
     aggregate: AggregateExpr[T],
 ):
   /** Build the SELECT aggregate SQL */
   def build: SqlFragment =
-    val fromClause = tableAlias.fold(tableName)(a => s"$tableName as ${a.value}")
-    val head = SqlFragment.text(s"select ").append(aggregate.toFragment).append(SqlFragment.text(s" from $fromClause"))
+    val head =
+      SqlFragment
+        .text("select ")
+        .append(aggregate.toFragment)
+        .append(SqlFragment.text(" from "))
+        .append(SqlFragment.tableRef(tableName, tableAlias))
     if wherePredicates.isEmpty then head
     else
       val whereJoined = Placeholder.join(wherePredicates, " and ")
@@ -113,6 +118,6 @@ final case class AggregateQuery[A, T](
   end build
 
   /** Execute and return the aggregate value */
-  inline def queryValue[R](using RowDecoder[R], Trace): ZIO[SqlSession, SaferisError, Option[R]] =
+  inline def queryValue[R](using RowDecoder[R], Dialect)(using Trace): ZIO[SqlSession, SaferisError, Option[R]] =
     build.queryValue[R]
 end AggregateQuery

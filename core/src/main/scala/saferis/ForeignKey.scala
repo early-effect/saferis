@@ -55,15 +55,19 @@ final case class ForeignKeySpec[From, To](
     * @param fromFieldToLabel
     *   Function to convert source table field names to column labels (respects @label annotations)
     */
-  def toConstraintSql(fromFieldToLabel: String => ColumnName): SqlText =
-    val constraintClause = constraintName.fold("")(n => s"constraint $n ")
-    val fromColsSql      = fromColumns.map(fromFieldToLabel).mkString(", ")
+  def toConstraintSql(fromFieldToLabel: String => ColumnName)(using dialect: Dialect): SqlText =
+    val constraintClause = constraintName.fold("")(n => s"constraint ${dialect.escapeIdentifier(n)} ")
+    val fromColsSql      = fromColumns.map(name => dialect.escapeIdentifier(fromFieldToLabel(name))).mkString(", ")
     // Use toColumnMap if available, otherwise use field name directly
-    val toColsSql      = toColumns.map(fn => toColumnMap.get(fn).fold(fn: String)(_.label)).mkString(", ")
+    val toColsSql = toColumns
+      .map: fn =>
+        val label = toColumnMap.get(fn).fold(ColumnName(fn))(_.label)
+        dialect.escapeIdentifier(label)
+      .mkString(", ")
     val onDeleteClause = if onDelete == ForeignKeyAction.NoAction then "" else s" on delete ${onDelete.toSql}"
     val onUpdateClause = if onUpdate == ForeignKeyAction.NoAction then "" else s" on update ${onUpdate.toSql}"
     SqlText(
-      s"${constraintClause}foreign key ($fromColsSql) references $toTable ($toColsSql)$onDeleteClause$onUpdateClause"
+      s"${constraintClause}foreign key ($fromColsSql) references ${dialect.escapeIdentifier(toTable)} ($toColsSql)$onDeleteClause$onUpdateClause"
     )
   end toConstraintSql
 end ForeignKeySpec

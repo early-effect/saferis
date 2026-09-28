@@ -44,8 +44,8 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
         .sql
 
       assertTrue(
-        sql.contains("foreign key (userId) references fk_int_users (id)"),
-        sql.contains("foreign key (productId) references fk_int_products (id)"),
+        sql.contains("""foreign key ("userId") references "fk_int_users" ("id")"""),
+        sql.contains("""foreign key ("productId") references "fk_int_products" ("id")"""),
       )
     },
     test("createTable with Instance includes ON DELETE actions") {
@@ -82,7 +82,7 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
         .ddl(ifNotExists = false)
         .sql
 
-      assertTrue(sql.contains("constraint fk_order_user foreign key"))
+      assertTrue(sql.contains("""constraint "fk_order_user" foreign key"""))
     },
     test("FK constraint prevents insert when parent doesn't exist") {
       val orders = Schema[Order]
@@ -103,8 +103,13 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
         // Create child table with FK
         _ <- (createTable(orders))
         // Try to insert order with non-existent user (should fail)
-        result <- (sql"insert into fk_int_orders (userId, productId, amount) values (999, 1, 100.00)".insert).either
-      yield assertTrue(result.isLeft)
+        result <-
+          (sql"""insert into fk_int_orders ("userId", "productId", amount) values (999, 1, 100.00)""".insert).either
+      yield assertTrue(
+        result match
+          case Left(SaferisError.ConstraintViolation(SqlState.ForeignKeyViolation, _, _, _)) => true
+          case _                                                                             => false
+      )
       end for
     },
     test("FK constraint allows insert when parent exists") {
@@ -129,7 +134,8 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
         _ <- (sql"insert into fk_int_users (name, email) values ('Alice', 'alice@test.com')".insert)
         _ <- (sql"insert into fk_int_products (name, price) values ('Widget', 9.99)".insert)
         // Insert order referencing existing parents (should succeed)
-        result <- (sql"insert into fk_int_orders (userId, productId, amount) values (1, 1, 100.00)".insert).either
+        result <-
+          (sql"""insert into fk_int_orders ("userId", "productId", amount) values (1, 1, 100.00)""".insert).either
       yield assertTrue(result.isRight)
       end for
     },
@@ -155,7 +161,7 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
         _ <- (sql"insert into fk_int_users (name, email) values ('Alice', 'alice@test.com')".insert)
         _ <- (sql"insert into fk_int_products (name, price) values ('Widget', 9.99)".insert)
         // Insert order
-        _ <- (sql"insert into fk_int_orders (userId, productId, amount) values (1, 1, 100.00)".insert)
+        _ <- (sql"""insert into fk_int_orders ("userId", "productId", amount) values (1, 1, 100.00)""".insert)
         // Verify order exists
         countBefore <- (sql"select count(*) as count from fk_int_orders".queryOne[CountResult])
         // Delete user (should cascade to orders)
@@ -225,7 +231,7 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
         _ <- (sql"insert into fk_int_users (name, email) values ('Charlie', 'charlie@test.com')".insert)
         _ <- (sql"insert into fk_int_products (name, price) values ('Gadget', 19.99)".insert)
         // Insert order
-        _ <- (sql"insert into fk_int_orders (userId, productId, amount) values (1, 1, 75.00)".insert)
+        _ <- (sql"""insert into fk_int_orders ("userId", "productId", amount) values (1, 1, 75.00)""".insert)
         // Try to delete user (should fail due to RESTRICT)
         result <- (sql"delete from fk_int_users where id = 1".delete).either
       yield assertTrue(result.isLeft)
@@ -251,13 +257,15 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
         _ <- (insert(OrderDetail(1, 1, "SKU-001")))
         // Insert item referencing the detail (should succeed)
         insertResult <-
-          (sql"insert into fk_int_order_items (orderId, lineNum, price) values (1, 1, 25.00)".insert).either
+          (sql"""insert into fk_int_order_items ("orderId", "lineNum", price) values (1, 1, 25.00)""".insert).either
         // Try to insert item with non-existent compound key (should fail)
         failResult <-
-          (sql"insert into fk_int_order_items (orderId, lineNum, price) values (999, 999, 10.00)".insert).either
+          (sql"""insert into fk_int_order_items ("orderId", "lineNum", price) values (999, 999, 10.00)""".insert).either
       yield assertTrue(
         insertResult.isRight,
-        failResult.isLeft,
+        failResult match
+          case Left(SaferisError.ConstraintViolation(SqlState.ForeignKeyViolation, _, _, _)) => true
+          case _                                                                             => false,
       )
       end for
     },

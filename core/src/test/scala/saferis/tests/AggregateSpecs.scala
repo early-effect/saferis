@@ -42,7 +42,8 @@ object AggregateSpecs extends ZIOSpecDefault:
           .build
         // Verify @label is respected - should use "sequence_nr" not "sequenceNr"
         assertTrue(
-          frag.sql.contains("select max(sequence_nr) from aggregate_test"),
+          frag.sql.contains("max(\"aggregate_test_ref_1\".\"sequence_nr\")"),
+          frag.sql.contains("from \"aggregate_test\""),
           frag.sql.contains("where"),
           frag.sql.contains("instance_id"),
           !frag.sql.contains("sequenceNr"),
@@ -55,7 +56,7 @@ object AggregateSpecs extends ZIOSpecDefault:
           .eq("test-1")
           .selectAggregate(_.sequenceNr)(_.min)
           .build
-        assertTrue(frag.sql.contains("select min(sequence_nr) from aggregate_test"))
+        assertTrue(frag.sql.contains("min(\"aggregate_test_ref_1\".\"sequence_nr\")"))
       ,
       test("sum generates correct SQL"):
         val frag = Query[EventRow]
@@ -63,7 +64,7 @@ object AggregateSpecs extends ZIOSpecDefault:
           .eq("test-1")
           .selectAggregate(_.amount)(_.sum)
           .build
-        assertTrue(frag.sql.contains("select sum(amount) from aggregate_test"))
+        assertTrue(frag.sql.contains("sum(\"aggregate_test_ref_1\".\"amount\")"))
       ,
       test("count generates correct SQL"):
         val frag = Query[EventRow]
@@ -71,7 +72,7 @@ object AggregateSpecs extends ZIOSpecDefault:
           .eq("test-1")
           .selectAggregate(_.sequenceNr)(_.count)
           .build
-        assertTrue(frag.sql.contains("select count(sequence_nr) from aggregate_test"))
+        assertTrue(frag.sql.contains("count(\"aggregate_test_ref_1\".\"sequence_nr\")"))
       ,
       test("countAll generates correct SQL"):
         val frag = Query[EventRow]
@@ -79,7 +80,7 @@ object AggregateSpecs extends ZIOSpecDefault:
           .eq("test-1")
           .selectAggregate(countAll)
           .build
-        assertTrue(frag.sql.contains("select count(*) from aggregate_test")),
+        assertTrue(frag.sql.contains("select count(*) from \"aggregate_test\"")),
     ),
     suite("COALESCE")(
       test("max with coalesce generates correct SQL"):
@@ -88,7 +89,7 @@ object AggregateSpecs extends ZIOSpecDefault:
           .eq("test-1")
           .selectAggregate(_.sequenceNr)(_.max.coalesce(0L))
           .build
-        assertTrue(frag.sql.contains("select coalesce(max(sequence_nr), $1) from aggregate_test")) &&
+        assertTrue(frag.sql.contains("coalesce(max(\"aggregate_test_ref_1\".\"sequence_nr\"), $1)")) &&
         assertTrue(frag.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 2) // instanceId + default value
       ,
       test("sum with coalesce generates correct SQL"):
@@ -97,7 +98,7 @@ object AggregateSpecs extends ZIOSpecDefault:
           .eq("test-1")
           .selectAggregate(_.amount)(_.sum.coalesce(BigDecimal(0)))
           .build
-        assertTrue(frag.sql.contains("select coalesce(sum(amount), $1) from aggregate_test")),
+        assertTrue(frag.sql.contains("coalesce(sum(\"aggregate_test_ref_1\".\"amount\"), $1)")),
     ),
   )
 
@@ -135,7 +136,7 @@ object AggregateSpecs extends ZIOSpecDefault:
         .build
       // Should use "sequence_nr" (from @label), not "sequencenr" (lowercased field name)
       assertTrue(
-        frag.sql.contains("max(sequence_nr)"),
+        frag.sql.contains("max(\"generic_aggregate_test_ref_1\".\"sequence_nr\")"),
         !frag.sql.contains("sequencenr"),
         !frag.sql.contains("sequenceNr"),
       )

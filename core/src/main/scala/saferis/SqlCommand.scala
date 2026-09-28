@@ -3,30 +3,41 @@ package saferis
 import zio.Chunk
 import zio.Duration
 
-/** One piece of a statement. Text is caller SQL. Param is one bound value. Nothing scans the text for placeholders. */
+/** One piece of a statement. `Text` is caller SQL. `Ident` is a name, quoted when the statement is rendered. `Param` is
+  * one bound value. Nothing scans the text for placeholders.
+  */
 enum SqlPiece:
   case Text(text: SqlText)
+  case Ident(name: String, qualify: Boolean)
   case Param(value: SqlValue)
 
-/** A validated statement. No issue list: invalid fragments never become a command. */
+/** A validated statement. No issue list: invalid fragments never become a command.
+  *
+  * `identifierQuote` is the dialect's quote character, captured when the fragment became a command.
+  */
 final class SqlCommand private (
     val pieces: Chunk[SqlPiece],
     val timeout: Option[Duration],
+    identifierQuote: String,
 ):
   /** The statement a driver sends. `placeholder` spells parameter `n` (one-based) of type `SqlType`. */
   def render(placeholder: (Int, SqlType) => String): SqlText =
-    SqlPieces.render(pieces, placeholder)
+    SqlPieces.render(pieces, placeholder, identifierQuote)
 
-  /** `$n` text with no casts and no bound values. The same string for every driver. */
-  def inspection: SqlText = SqlPieces.postgres(pieces)
+  /** `$n` text with no casts and no bound values. Identifiers use the quote captured with the command. */
+  def inspection: SqlText = SqlPieces.postgres(pieces, identifierQuote)
 
   def withTimeout(timeout: Option[Duration]): SqlCommand =
-    new SqlCommand(pieces, timeout)
+    new SqlCommand(pieces, timeout, identifierQuote)
 end SqlCommand
 
 object SqlCommand:
-  private[saferis] def apply(pieces: Chunk[SqlPiece], timeout: Option[Duration]): SqlCommand =
-    new SqlCommand(pieces, timeout)
+  private[saferis] def apply(
+      pieces: Chunk[SqlPiece],
+      timeout: Option[Duration],
+      identifierQuote: String = "\"",
+  ): SqlCommand =
+    new SqlCommand(pieces, timeout, identifierQuote)
 
 private[saferis] object SqlPieces:
   def merge(pieces: Iterable[SqlPiece]): Chunk[SqlPiece] =
@@ -39,6 +50,9 @@ private[saferis] object SqlPieces:
     pieces.foreach:
       case SqlPiece.Text(t) =>
         text.append(t)
+      case ident: SqlPiece.Ident =>
+        flush()
+        b += ident
       case param: SqlPiece.Param =>
         flush()
         b += param
@@ -46,12 +60,21 @@ private[saferis] object SqlPieces:
     b.result()
   end merge
 
-  def render(pieces: Chunk[SqlPiece], placeholder: (Int, SqlType) => String): SqlText =
+  /** Replace every `Ident` with its quoted text. Already-quoted `Text` is left alone. */
+  def quote(pieces: Chunk[SqlPiece], identifierQuote: String): Chunk[SqlPiece] =
+    merge:
+      pieces.map:
+        case SqlPiece.Ident(name, qualify) => SqlPiece.Text(Dialect.quote(identifierQuote, name, qualify))
+        case other                         => other
+
+  def render(pieces: Chunk[SqlPiece], placeholder: (Int, SqlType) => String, identifierQuote: String): SqlText =
     val sb = new StringBuilder
-    pieces.foldLeft(1): (n, piece) =>
+    quote(pieces, identifierQuote).foldLeft(1): (n, piece) =>
       piece match
         case SqlPiece.Text(t) =>
           sb.append(t)
+          n
+        case SqlPiece.Ident(_, _) =>
           n
         case SqlPiece.Param(value) =>
           sb.append(placeholder(n, value.sqlType))
@@ -59,10 +82,11 @@ private[saferis] object SqlPieces:
     SqlText(sb.toString)
   end render
 
-  def show(pieces: Chunk[SqlPiece]): SqlText =
+  def show(pieces: Chunk[SqlPiece], identifierQuote: String): SqlText =
     val sb = new StringBuilder
-    pieces.foreach:
+    quote(pieces, identifierQuote).foreach:
       case SqlPiece.Text(t)      => sb.append(t)
+      case SqlPiece.Ident(_, _)  => ()
       case SqlPiece.Param(value) => sb.append(SqlValue.literal(value))
     SqlText(sb.toString)
 
@@ -75,6 +99,6 @@ private[saferis] object SqlPieces:
       .flatMap((value, index) => SqlValue.malformed(value).map(FragmentIssue.MalformedArray(index + 1, _)))
 
   /** Postgres inspection form. The first parameter is `$1`. */
-  def postgres(pieces: Chunk[SqlPiece]): SqlText =
-    render(pieces, (n, _) => s"$$$n")
+  def postgres(pieces: Chunk[SqlPiece], identifierQuote: String): SqlText =
+    render(pieces, (n, _) => s"$$$n", identifierQuote)
 end SqlPieces

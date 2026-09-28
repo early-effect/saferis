@@ -60,7 +60,7 @@ object PagedStreamOps:
       extractCursor: A => K,
       pageSize: Int,
       startAfter: Option[K],
-  )(using enc: Encoder[K], trace: Trace): ZStream[SqlSession, SaferisError, Page[A, K]] =
+  )(using Dialect)(using enc: Encoder[K], trace: Trace): ZStream[SqlSession, SaferisError, Page[A, K]] =
     ZStream.unfoldZIO((startAfter, 0, false)) { case (cursor, pageNum, done) =>
       if done then ZIO.succeed(None) // We've already emitted the last page
       else
@@ -88,7 +88,7 @@ object PagedStreamOps:
       extractCursor: A => K,
       batchSize: Int,
       startAfter: Option[K],
-  )(using enc: Encoder[K], trace: Trace): ZStream[SqlSession, SaferisError, A] =
+  )(using Dialect)(using enc: Encoder[K], trace: Trace): ZStream[SqlSession, SaferisError, A] =
     ZStream.unfoldChunkZIO((startAfter, false)) { case (cursor, done) =>
       if done then ZIO.succeed(None) // We've already emitted the last batch
       else
@@ -145,7 +145,7 @@ final case class Sort[T](
       case NullOrder.First   => " nulls first"
       case NullOrder.Last    => " nulls last"
       case NullOrder.Default => ""
-    SqlFragment.text(s"${column.sql}$orderStr$nullStr")
+    SqlFragment(column).append(SqlFragment.text(s"$orderStr$nullStr"))
 end Sort
 
 /** Type-safe seek specification for cursor-based pagination
@@ -174,7 +174,7 @@ final case class Seek[T: Encoder](
       case SeekDir.Gt => ">"
       case SeekDir.Lt => "<"
     val encoder = summon[Encoder[T]]
-    SqlFragment.text(s"${column.sql} $op ").append(SqlFragment.param(encoder.encode(value)))
+    SqlFragment(column).append(SqlFragment.text(s" $op ")).append(SqlFragment.param(encoder.encode(value)))
 
   /** Generate a Sort from this seek specification */
   def toSort: Sort[T] = Sort(column, sortOrder, nullOrder)

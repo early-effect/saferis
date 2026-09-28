@@ -34,7 +34,7 @@ object QuerySpecs extends ZIOSpecDefault:
         val q   = Query[User].all
         val sql = q.build.sql
         assertTrue(
-          sql == "select * from users as users_ref_1"
+          sql == "select * from \"users\" as \"users_ref_1\""
         )
       },
       test("where with SqlFragment") {
@@ -49,7 +49,7 @@ object QuerySpecs extends ZIOSpecDefault:
         val sql = q.build.sql
         assertTrue(
           sql.contains("where"),
-          sql.contains("name ="),
+          sql.contains("\"name\" ="),
         )
       },
       test("orderBy adds sort clause") {
@@ -57,7 +57,7 @@ object QuerySpecs extends ZIOSpecDefault:
         val q     = Query[User].orderBy(users.name.asc).all
         val sql   = q.build.sql
         assertTrue(
-          sql.contains("order by name asc")
+          sql.contains("order by \"name\" asc")
         )
       },
       test("limit and offset") {
@@ -73,8 +73,8 @@ object QuerySpecs extends ZIOSpecDefault:
         val q     = Query[User].seekAfter(users.id, 100)
         val sql   = q.build.sql
         assertTrue(
-          sql.contains("where id > $1"),
-          sql.contains("order by id asc"),
+          sql.contains("where \"id\" > $1"),
+          sql.contains("order by \"id\" asc"),
         )
       },
     ),
@@ -88,9 +88,9 @@ object QuerySpecs extends ZIOSpecDefault:
           .all
         val sql = q.build.sql
         assertTrue(
-          sql.contains("select * from users as users_ref_1"),
-          sql.contains("inner join orders as orders_ref_1"),
-          sql.contains("on users_ref_1.id = orders_ref_1.userId"),
+          sql.contains("select * from \"users\" as \"users_ref_1\""),
+          sql.contains("inner join \"orders\" as \"orders_ref_1\""),
+          sql.contains("on \"users_ref_1\".\"id\" = \"orders_ref_1\".\"userId\""),
         )
       },
       test("leftJoin generates correct SQL") {
@@ -102,7 +102,7 @@ object QuerySpecs extends ZIOSpecDefault:
           .all
         val sql = q.build.sql
         assertTrue(
-          sql.contains("left join orders as orders_ref_1")
+          sql.contains("left join \"orders\" as \"orders_ref_1\"")
         )
       },
       test("rightJoin generates correct SQL") {
@@ -114,7 +114,7 @@ object QuerySpecs extends ZIOSpecDefault:
           .all
         val sql = q.build.sql
         assertTrue(
-          sql.contains("right join orders as orders_ref_1")
+          sql.contains("right join \"orders\" as \"orders_ref_1\"")
         )
       },
       test("fullJoin generates correct SQL") {
@@ -126,7 +126,7 @@ object QuerySpecs extends ZIOSpecDefault:
           .all
         val sql = q.build.sql
         assertTrue(
-          sql.contains("full join orders as orders_ref_1")
+          sql.contains("full join \"orders\" as \"orders_ref_1\"")
         )
       },
       test("join with where clause") {
@@ -138,7 +138,7 @@ object QuerySpecs extends ZIOSpecDefault:
           .eq("Alice")
         val sql = q.build.sql
         assertTrue(
-          sql.contains("inner join orders as orders_ref_1"),
+          sql.contains("inner join \"orders\" as \"orders_ref_1\""),
           sql.contains("where"),
         )
       },
@@ -165,8 +165,8 @@ object QuerySpecs extends ZIOSpecDefault:
           .seekAfter(users.id, 100)
         val sql = q.build.sql
         assertTrue(
-          sql.contains("where id > $1"),
-          sql.contains("order by id asc"),
+          sql.contains("where \"id\" > $1"),
+          sql.contains("order by \"id\" asc"),
         )
       },
     ),
@@ -183,10 +183,10 @@ object QuerySpecs extends ZIOSpecDefault:
           .all
         val sql = q.build.sql
         assertTrue(
-          sql.contains("inner join orders as orders_ref_1"),
-          sql.contains("inner join order_items as order_items_ref_1"),
-          sql.contains("on users_ref_1.id = orders_ref_1.userId"),
-          sql.contains("on orders_ref_1.id = order_items_ref_1.orderId"),
+          sql.contains("inner join \"orders\" as \"orders_ref_1\""),
+          sql.contains("inner join \"order_items\" as \"order_items_ref_1\""),
+          sql.contains("on \"users_ref_1\".\"id\" = \"orders_ref_1\".\"userId\""),
+          sql.contains("on \"orders_ref_1\".\"id\" = \"order_items_ref_1\".\"orderId\""),
         )
       }
     ),
@@ -200,7 +200,7 @@ object QuerySpecs extends ZIOSpecDefault:
           .all
         val sql = q.build.sql
         assertTrue(
-          sql.contains("on users_ref_1.id <> orders_ref_1.userId")
+          sql.contains("on \"users_ref_1\".\"id\" <> \"orders_ref_1\".\"userId\"")
         )
       },
       test("lt generates <") {
@@ -212,7 +212,7 @@ object QuerySpecs extends ZIOSpecDefault:
           .all
         val sql = q.build.sql
         assertTrue(
-          sql.contains("on users_ref_1.id < orders_ref_1.userId")
+          sql.contains("on \"users_ref_1\".\"id\" < \"orders_ref_1\".\"userId\"")
         )
       },
       test("lte generates <=") {
@@ -224,7 +224,7 @@ object QuerySpecs extends ZIOSpecDefault:
           .all
         val sql = q.build.sql
         assertTrue(
-          sql.contains("on users_ref_1.id <= orders_ref_1.userId")
+          sql.contains("on \"users_ref_1\".\"id\" <= \"orders_ref_1\".\"userId\"")
         )
       },
       test("gt generates >") {
@@ -236,7 +236,7 @@ object QuerySpecs extends ZIOSpecDefault:
           .all
         val sql = q.build.sql
         assertTrue(
-          sql.contains("on users_ref_1.id > orders_ref_1.userId")
+          sql.contains("on \"users_ref_1\".\"id\" > \"orders_ref_1\".\"userId\"")
         )
       },
       test("gte generates >=") {
@@ -248,7 +248,7 @@ object QuerySpecs extends ZIOSpecDefault:
           .all
         val sql = q.build.sql
         assertTrue(
-          sql.contains("on users_ref_1.id >= orders_ref_1.userId")
+          sql.contains("on \"users_ref_1\".\"id\" >= \"orders_ref_1\".\"userId\"")
         )
       },
     ),
@@ -285,7 +285,7 @@ object QuerySpecs extends ZIOSpecDefault:
         val q        = Query[User].where(_.id).inSubquery(subquery)
         val sql      = q.build.sql
         assertTrue(
-          sql.contains("in (select userId from orders as orders_ref_1)")
+          sql.contains("in (select \"userId\" from \"orders\" as \"orders_ref_1\")")
         )
       },
       test("IN subquery with where clause") {
@@ -293,8 +293,8 @@ object QuerySpecs extends ZIOSpecDefault:
         val q        = Query[User].where(_.id).inSubquery(subquery)
         val sql      = q.build.sql
         assertTrue(
-          sql.contains("in (select userId from orders as orders_ref_1 where"),
-          sql.contains("status ="),
+          sql.contains("in (select \"userId\" from \"orders\" as \"orders_ref_1\" where"),
+          sql.contains("\"status\" ="),
         )
       },
       test("NOT IN subquery") {
@@ -302,7 +302,7 @@ object QuerySpecs extends ZIOSpecDefault:
         val q        = Query[User].where(_.id).notInSubquery(subquery)
         val sql      = q.build.sql
         assertTrue(
-          sql.contains("not in (select userId from orders as orders_ref_1)")
+          sql.contains("not in (select \"userId\" from \"orders\" as \"orders_ref_1\")")
         )
       },
       test("inList is one array parameter") {
@@ -374,7 +374,7 @@ object QuerySpecs extends ZIOSpecDefault:
       test("inList mixed with other where predicates preserves parameter order") {
         val q = Query[User].where(_.name).eq("Bob").where(_.id).inList(List(1, 2, 3)).build
         assertTrue(
-          q.sql.contains("name = $1"),
+          q.sql.contains("\"name\" = $1"),
           q.sql.contains("= ANY($2)"),
           q.pieces.count(_.isInstanceOf[SqlPiece.Param]) == 2,
         )
@@ -438,7 +438,7 @@ object QuerySpecs extends ZIOSpecDefault:
         val q   = Query[User].select(_.id)
         val sql = q.build.sql
         assertTrue(
-          sql.startsWith("select id from users")
+          sql.startsWith("select \"id\" from \"users\"")
         )
       },
     ),
@@ -448,7 +448,7 @@ object QuerySpecs extends ZIOSpecDefault:
         val q        = Query[User].whereExists(subquery)
         val sql      = q.build.sql
         assertTrue(
-          sql.contains("exists (select * from orders as orders_ref_1)")
+          sql.contains("exists (select * from \"orders\" as \"orders_ref_1\")")
         )
       },
       test("EXISTS subquery with where clause") {
@@ -456,7 +456,7 @@ object QuerySpecs extends ZIOSpecDefault:
         val q        = Query[User].whereExists(subquery)
         val sql      = q.build.sql
         assertTrue(
-          sql.contains("exists (select * from orders as orders_ref_1 where")
+          sql.contains("exists (select * from \"orders\" as \"orders_ref_1\" where")
         )
       },
       test("NOT EXISTS subquery") {
@@ -464,7 +464,7 @@ object QuerySpecs extends ZIOSpecDefault:
         val q        = Query[User].whereNotExists(subquery)
         val sql      = q.build.sql
         assertTrue(
-          sql.contains("not exists (select * from orders as orders_ref_1)")
+          sql.contains("not exists (select * from \"orders\" as \"orders_ref_1\")")
         )
       },
       test("correlated EXISTS using sql interpolation") {
@@ -474,7 +474,7 @@ object QuerySpecs extends ZIOSpecDefault:
         val sql      = q.build.sql
         assertTrue(
           sql.contains("exists"),
-          sql.contains("userId = id"),
+          sql.contains("userId = \"id\""),
         )
       },
     ),
@@ -492,7 +492,7 @@ object QuerySpecs extends ZIOSpecDefault:
         // SelectQuery wraps the original query
         val sql = subquery.build.sql
         assertTrue(
-          sql.contains("select * from orders as orders_ref_1"),
+          sql.contains("select * from \"orders\" as \"orders_ref_1\""),
           sql.contains("where"),
         )
       },
@@ -508,8 +508,8 @@ object QuerySpecs extends ZIOSpecDefault:
         val q   = Query.from(subquery, "paid_summary").all
         val sql = q.build.sql
         assertTrue(
-          sql.contains("select * from (select * from orders as orders_ref_1 where"),
-          sql.contains(") as paid_summary"),
+          sql.contains("select * from (select * from \"orders\" as \"orders_ref_1\" where"),
+          sql.contains(") as \"paid_summary\""),
         )
       },
       test("derived table with where clause") {
@@ -528,9 +528,9 @@ object QuerySpecs extends ZIOSpecDefault:
 
         val sql = q.build.sql
         assertTrue(
-          sql.contains("(select * from orders as orders_ref_1 where"),
-          sql.contains(") as high_value"),
-          sql.contains("high_value.userId >"),
+          sql.contains("(select * from \"orders\" as \"orders_ref_1\" where"),
+          sql.contains(") as \"high_value\""),
+          sql.contains("\"high_value\".\"userId\" >"),
         )
       },
       test("derived table with join") {
@@ -552,10 +552,10 @@ object QuerySpecs extends ZIOSpecDefault:
 
         val sql = q.build.sql
         assertTrue(
-          sql.contains("(select * from orders as orders_ref_1 where"),
-          sql.contains(") as totals"),
-          sql.contains("inner join users as users_ref_1"),
-          sql.contains("totals.userId = users_ref_1.id"),
+          sql.contains("(select * from \"orders\" as \"orders_ref_1\" where"),
+          sql.contains(") as \"totals\""),
+          sql.contains("inner join \"users\" as \"users_ref_1\""),
+          sql.contains("\"totals\".\"userId\" = \"users_ref_1\".\"id\""),
         )
       },
     ),
@@ -566,7 +566,7 @@ object QuerySpecs extends ZIOSpecDefault:
 
         val sql = Query[PrdFoo].all.build.sql
         assertTrue(
-          sql == "select * from prd.foo as foo_ref_1",
+          sql == "select * from \"prd\".\"foo\" as \"foo_ref_1\"",
           !sql.contains("prd.foo_ref_1"),
         )
       },
@@ -576,7 +576,7 @@ object QuerySpecs extends ZIOSpecDefault:
 
         val sql = Query[PrdFoo].where(_.name).eq("a").build.sql
         assertTrue(
-          sql.contains("foo_ref_1.name"),
+          sql.contains("\"foo_ref_1\".\"name\""),
           !sql.contains("prd.foo_ref_1"),
         )
       },
@@ -596,9 +596,9 @@ object QuerySpecs extends ZIOSpecDefault:
           .build
           .sql
         assertTrue(
-          sql.contains("from prd.user_acct as user_acct_ref_1"),
-          sql.contains("inner join staging.user_acct as user_acct_ref_2"),
-          sql.contains("user_acct_ref_1.id = user_acct_ref_2.id"),
+          sql.contains("from \"prd\".\"user_acct\" as \"user_acct_ref_1\""),
+          sql.contains("inner join \"staging\".\"user_acct\" as \"user_acct_ref_2\""),
+          sql.contains("\"user_acct_ref_1\".\"id\" = \"user_acct_ref_2\".\"id\""),
           !sql.contains("prd.user_acct_ref"),
           !sql.contains("staging.user_acct_ref"),
         )
@@ -610,8 +610,8 @@ object QuerySpecs extends ZIOSpecDefault:
         val isNullSql    = Query[PrdFoo].where(_.name).isNull().build.sql
         val isNotNullSql = Query[PrdFoo].where(_.name).isNotNull().build.sql
         assertTrue(
-          isNullSql.contains("foo_ref_1.name is null"),
-          isNotNullSql.contains("foo_ref_1.name is not null"),
+          isNullSql.contains("\"foo_ref_1\".\"name\" is null"),
+          isNotNullSql.contains("\"foo_ref_1\".\"name\" is not null"),
           !isNullSql.contains("prd.foo_ref_1"),
           !isNotNullSql.contains("prd.foo_ref_1"),
         )
@@ -638,7 +638,7 @@ object QuerySpecs extends ZIOSpecDefault:
         val sub = Query[PrdFoo].select(_.id)
         val sql = sub.build.sql
         assertTrue(
-          sql == "select id from prd.foo as foo_ref_1",
+          sql == "select \"id\" from \"prd\".\"foo\" as \"foo_ref_1\"",
           !sql.contains("prd.foo_ref_1"),
         )
       },
@@ -676,12 +676,12 @@ object QuerySpecs extends ZIOSpecDefault:
           .build
           .sql
         assertTrue(
-          sql.contains("from prd.aaa as aaa_ref_1"),
-          sql.contains("inner join prd.bbb as bbb_ref_1"),
+          sql.contains("from \"prd\".\"aaa\" as \"aaa_ref_1\""),
+          sql.contains("inner join \"prd\".\"bbb\" as \"bbb_ref_1\""),
           // staging.aaa shares the bare name "aaa" with prd.aaa, so its counter is 2
-          sql.contains("inner join staging.aaa as aaa_ref_2"),
-          sql.contains("aaa_ref_1.id = bbb_ref_1.aId"),
-          sql.contains("bbb_ref_1.id = aaa_ref_2.bId"),
+          sql.contains("inner join \"staging\".\"aaa\" as \"aaa_ref_2\""),
+          sql.contains("\"aaa_ref_1\".\"id\" = \"bbb_ref_1\".\"aId\""),
+          sql.contains("\"bbb_ref_1\".\"id\" = \"aaa_ref_2\".\"bId\""),
           !sql.contains("prd.aaa_ref"),
           !sql.contains("prd.bbb_ref"),
           !sql.contains("staging.aaa_ref"),
@@ -699,7 +699,7 @@ object QuerySpecs extends ZIOSpecDefault:
         assertTrue(
           !sql.contains("prd.foo_ref"),
           sql.contains("name"),
-          sql.contains("prd.foo"),
+          sql.contains("\"prd\".\"foo\""),
         )
       },
     ),

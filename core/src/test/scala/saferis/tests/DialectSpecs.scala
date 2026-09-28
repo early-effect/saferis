@@ -63,45 +63,47 @@ object DialectSpecs extends ZIOSpecDefault:
     test("PostgreSQL escapeIdentifier handles SQL injection attempts") {
       val pgDialect = summon[Dialect]
       // Test normal identifier
-      assertTrue(pgDialect.escapeIdentifier("my_column") == "\"my_column\"") &&
+      assertTrue(pgDialect.escapeIdentifier(ColumnName("my_column")) == "\"my_column\"") &&
       // Test identifier with embedded quotes - should double the quotes
-      assertTrue(pgDialect.escapeIdentifier("my\"column") == "\"my\"\"column\"") &&
+      assertTrue(pgDialect.escapeIdentifier(ColumnName("my\"column")) == "\"my\"\"column\"") &&
       // Test SQL injection attempt with DROP TABLE
-      assertTrue(pgDialect.escapeIdentifier("\"; DROP TABLE users--") == "\"\"\"; DROP TABLE users--\"") &&
+      assertTrue(pgDialect.escapeIdentifier(ColumnName("\"; DROP TABLE users--")) == "\"\"\"; DROP TABLE users--\"") &&
       // Test identifier with multiple quotes
-      assertTrue(pgDialect.escapeIdentifier("a\"b\"c") == "\"a\"\"b\"\"c\"") &&
+      assertTrue(pgDialect.escapeIdentifier(ColumnName("a\"b\"c")) == "\"a\"\"b\"\"c\"") &&
       // Test empty identifier
-      assertTrue(pgDialect.escapeIdentifier("") == "\"\"") &&
+      assertTrue(pgDialect.escapeIdentifier(ColumnName("")) == "\"\"") &&
       // Test identifier with spaces
-      assertTrue(pgDialect.escapeIdentifier("my column") == "\"my column\"")
+      assertTrue(pgDialect.escapeIdentifier(ColumnName("my column")) == "\"my column\"")
     },
     test("MySQL escapeIdentifier handles SQL injection attempts") {
       // Test normal identifier
-      assertTrue(MySQLDialect.escapeIdentifier("my_column") == "`my_column`") &&
+      assertTrue(MySQLDialect.escapeIdentifier(ColumnName("my_column")) == "`my_column`") &&
       // Test identifier with embedded backticks - should double the backticks
-      assertTrue(MySQLDialect.escapeIdentifier("my`column") == "`my``column`") &&
+      assertTrue(MySQLDialect.escapeIdentifier(ColumnName("my`column")) == "`my``column`") &&
       // Test SQL injection attempt with DROP TABLE
-      assertTrue(MySQLDialect.escapeIdentifier("`; DROP TABLE users--") == "```; DROP TABLE users--`") &&
+      assertTrue(MySQLDialect.escapeIdentifier(ColumnName("`; DROP TABLE users--")) == "```; DROP TABLE users--`") &&
       // Test identifier with multiple backticks
-      assertTrue(MySQLDialect.escapeIdentifier("a`b`c") == "`a``b``c`") &&
+      assertTrue(MySQLDialect.escapeIdentifier(ColumnName("a`b`c")) == "`a``b``c`") &&
       // Test empty identifier
-      assertTrue(MySQLDialect.escapeIdentifier("") == "``") &&
+      assertTrue(MySQLDialect.escapeIdentifier(ColumnName("")) == "``") &&
       // Test identifier with spaces
-      assertTrue(MySQLDialect.escapeIdentifier("my column") == "`my column`")
+      assertTrue(MySQLDialect.escapeIdentifier(ColumnName("my column")) == "`my column`")
     },
     test("SQLite escapeIdentifier handles SQL injection attempts") {
       // Test normal identifier
-      assertTrue(SQLiteDialect.escapeIdentifier("my_column") == "\"my_column\"") &&
+      assertTrue(SQLiteDialect.escapeIdentifier(ColumnName("my_column")) == "\"my_column\"") &&
       // Test identifier with embedded quotes - should double the quotes
-      assertTrue(SQLiteDialect.escapeIdentifier("my\"column") == "\"my\"\"column\"") &&
+      assertTrue(SQLiteDialect.escapeIdentifier(ColumnName("my\"column")) == "\"my\"\"column\"") &&
       // Test SQL injection attempt with DROP TABLE
-      assertTrue(SQLiteDialect.escapeIdentifier("\"; DROP TABLE users--") == "\"\"\"; DROP TABLE users--\"") &&
+      assertTrue(
+        SQLiteDialect.escapeIdentifier(ColumnName("\"; DROP TABLE users--")) == "\"\"\"; DROP TABLE users--\""
+      ) &&
       // Test identifier with multiple quotes
-      assertTrue(SQLiteDialect.escapeIdentifier("a\"b\"c") == "\"a\"\"b\"\"c\"") &&
+      assertTrue(SQLiteDialect.escapeIdentifier(ColumnName("a\"b\"c")) == "\"a\"\"b\"\"c\"") &&
       // Test empty identifier
-      assertTrue(SQLiteDialect.escapeIdentifier("") == "\"\"") &&
+      assertTrue(SQLiteDialect.escapeIdentifier(ColumnName("")) == "\"\"") &&
       // Test identifier with spaces
-      assertTrue(SQLiteDialect.escapeIdentifier("my column") == "\"my column\"")
+      assertTrue(SQLiteDialect.escapeIdentifier(ColumnName("my column")) == "\"my column\"")
     },
   )
 end DialectSpecs

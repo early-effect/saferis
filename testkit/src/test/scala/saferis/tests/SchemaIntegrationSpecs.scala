@@ -200,7 +200,7 @@ object SchemaIntegrationSpecs:
           )
           // Insert profile with JSON data
           jsonData = """{"email":"alice@test.com","verified":true,"role":"admin"}"""
-          _ <- (sql"INSERT INTO schema_int_profiles (userId, data) VALUES (1, $jsonData::jsonb)".insert)
+          _ <- (sql"INSERT INTO schema_int_profiles (\"userId\", data) VALUES (1, $jsonData::jsonb)".insert)
           // Verify data using SQL JSON extraction
           email <- (
             sql"SELECT data->>'email' as value FROM schema_int_profiles WHERE id = 1".queryOne[JsonFieldResult]
@@ -246,10 +246,10 @@ object SchemaIntegrationSpecs:
             sql"INSERT INTO schema_int_users (name, email, status, age) VALUES ('Alice', 'alice@test.com', 'active', 30)".insert
           )
           _ <- (
-            sql"INSERT INTO schema_int_profiles (userId, data) VALUES (1, '{\"email\":\"alice@test.com\",\"verified\":true,\"role\":\"admin\"}'::jsonb)".insert
+            sql"INSERT INTO schema_int_profiles (\"userId\", data) VALUES (1, '{\"email\":\"alice@test.com\",\"verified\":true,\"role\":\"admin\"}'::jsonb)".insert
           )
           _ <- (
-            sql"INSERT INTO schema_int_profiles (userId, data) VALUES (1, '{\"email\":\"bob@test.com\",\"verified\":false,\"role\":\"user\"}'::jsonb)".insert
+            sql"INSERT INTO schema_int_profiles (\"userId\", data) VALUES (1, '{\"email\":\"bob@test.com\",\"verified\":false,\"role\":\"user\"}'::jsonb)".insert
           )
           // Query using @> operator - verify count only since Json is opaque
           verifiedCount <- (
@@ -296,10 +296,10 @@ object SchemaIntegrationSpecs:
             sql"INSERT INTO schema_int_users (name, email, status, age) VALUES ('Alice', 'alice@test.com', 'active', 30)".insert
           )
           _ <- (
-            sql"INSERT INTO schema_int_profiles (userId, data) VALUES (1, '{\"email\":\"alice@test.com\",\"verified\":true,\"role\":\"admin\"}'::jsonb)".insert
+            sql"INSERT INTO schema_int_profiles (\"userId\", data) VALUES (1, '{\"email\":\"alice@test.com\",\"verified\":true,\"role\":\"admin\"}'::jsonb)".insert
           )
           _ <- (
-            sql"INSERT INTO schema_int_profiles (userId, data) VALUES (1, '{\"email\":\"bob@test.com\",\"verified\":false,\"role\":\"user\"}'::jsonb)".insert
+            sql"INSERT INTO schema_int_profiles (\"userId\", data) VALUES (1, '{\"email\":\"bob@test.com\",\"verified\":false,\"role\":\"user\"}'::jsonb)".insert
           )
           // Query using ->> operator for text extraction - verify count and extracted role
           adminCount <- (
@@ -548,7 +548,7 @@ object SchemaIntegrationSpecs:
             sql"INSERT INTO schema_int_users (name, email, status, age) VALUES ('Alice', 'alice@test.com', 'active', 30)".insert
           )
           _ <- (
-            sql"INSERT INTO schema_int_profiles (userId, data) VALUES (1, '{\"email\":\"a@b.com\",\"verified\":true,\"role\":\"user\"}'::jsonb)".insert
+            sql"INSERT INTO schema_int_profiles (\"userId\", data) VALUES (1, '{\"email\":\"a@b.com\",\"verified\":true,\"role\":\"user\"}'::jsonb)".insert
           )
           countBefore <- (sql"SELECT count(*) as count FROM schema_int_profiles".queryOne[CountResult])
           _           <- (sql"DELETE FROM schema_int_users WHERE id = 1".delete)

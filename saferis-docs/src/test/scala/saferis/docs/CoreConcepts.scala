@@ -111,8 +111,8 @@ Use multiple `@key` annotations to create a composite primary key:""",
 
 | Interpolated Type | Treatment | Example |
 |-------------------|-----------|---------|
-| Table instance | SQL identifier | `$$products` → `products` |
-| Column reference | SQL identifier | `$${products.name}` → `name` |
+| Table instance | Quoted identifier | `$$products` → `"products"` |
+| Column reference | Quoted identifier | `$${products.name}` → `"name"` |
 | Scalar values | Parameter | `$$minPrice` → `$$1` with a bound value |
 | `SqlFragment` | Embedded SQL | Nested fragments are spliced in |
 
@@ -132,7 +132,7 @@ See [SQL Injection Prevention](sql-injection-prevention.html) for the complete s
 | `SqlState` | A five-character SQLSTATE. `SqlState.parse` accepts one, and the constants (`SqlState.UniqueViolation`) name the ones Saferis classifies |
 | `DialectName` | A dialect's display name |
 
-`SqlText(...)`, `SqlFragment.text(...)`, and `Placeholder.raw(...)` are where a `String` becomes SQL. Pass them identifiers and keywords you wrote, never user data. A name's `.sql` splices it unquoted, and `Dialect.escapeIdentifier` quotes it.""",
+`SqlText(...)`, `SqlFragment.text(...)`, and `Placeholder.raw(...)` are where a `String` becomes SQL you already trust. Names do not take that path. A `TableName`, `ColumnName`, `IndexName`, `ConstraintName`, or `Alias` is an `Ident` piece, and the dialect quotes it when the statement is rendered. A dot in a table name separates schema and table (`"prd"."foo"`). `Placeholder.identifier(ColumnName(raw))` is the runtime hatch for a name that is not a literal.""",
       exampleValue {
         val index = IndexName("idx_products_sku")
         val sql   = summon[Dialect].createIndexSql(index, TableName("core_concepts_products"), Seq(ColumnName("sku")))

@@ -83,7 +83,8 @@ trait WhereBuilderOps[Parent, T]:
   def inSubquery(subquery: SelectQuery[T]): Parent =
     val whereFrag =
       SqlFragment
-        .text(s"${whereAlias.toSql}.${whereColumn.label} in (")
+        .columnRef(Some(whereAlias), whereColumn.label)
+        .append(SqlFragment.text(" in ("))
         .append(subquery.build)
         .append(SqlFragment.text(")"))
     addPredicate(whereFrag)
@@ -92,7 +93,8 @@ trait WhereBuilderOps[Parent, T]:
   def notInSubquery(subquery: SelectQuery[T]): Parent =
     val whereFrag =
       SqlFragment
-        .text(s"${whereAlias.toSql}.${whereColumn.label} not in (")
+        .columnRef(Some(whereAlias), whereColumn.label)
+        .append(SqlFragment.text(" not in ("))
         .append(subquery.build)
         .append(SqlFragment.text(")"))
     addPredicate(whereFrag)
@@ -139,15 +141,15 @@ trait WhereBuilderOps[Parent, T]:
   /** Membership ignores duplicates, so they are removed here and not in [[Placeholder.array]]. */
   private def membership(kind: Membership, values: Iterable[T])(using encoder: Encoder[T], dialect: Dialect): Parent =
     val distinct  = values.toSeq.distinct
-    val column    = s"${whereAlias.toSql}.${whereColumn.label}"
+    val column    = SqlFragment.columnRef(Some(whereAlias), whereColumn.label)
     val predicate =
       dialect match
         case _: ArraySupport =>
           val op = kind match
             case Membership.In    => "= ANY("
             case Membership.NotIn => "<> ALL("
-          SqlFragment
-            .text(s"$column $op")
+          column
+            .append(SqlFragment.text(s" $op"))
             .append(SqlFragment(Placeholder.array(distinct)))
             .append(SqlFragment.text(")"))
         case _ if distinct.isEmpty =>
@@ -158,8 +160,8 @@ trait WhereBuilderOps[Parent, T]:
           val op = kind match
             case Membership.In    => "in ("
             case Membership.NotIn => "not in ("
-          SqlFragment
-            .text(s"$column $op")
+          column
+            .append(SqlFragment.text(s" $op"))
             .append(SqlFragment(Placeholder.join(distinct.map(value => Placeholder.param(encoder.encode(value))))))
             .append(SqlFragment.text(")"))
     addPredicate(predicate)
