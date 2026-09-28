@@ -48,6 +48,33 @@ object H2ConformanceSpecs extends ZIOSpecDefault:
           _    <- insert(row)
           read <- sql"select * from h2_values where id = ${1}".queryOne[Row]
         yield assertTrue(read.contains(row))
+      ,
+      test("a decimal outside numeric(100000, 50000) fails at encode"):
+        val tooWide = BigDecimal(10).pow(50000)
+        val row     = Row(
+          1,
+          Json(Meta(Nil, 1)),
+          UUID.fromString("123e4567-e89b-12d3-a456-426614174000"),
+          LocalDateTime.parse("2024-01-02T03:04:05.123456"),
+          LocalTime.parse("13:14:15"),
+          Chunk.empty,
+          tooWide,
+        )
+        val stored = for
+          _    <- dropTable[Row](ifExists = true)
+          _    <- createTable[Row]()
+          exit <- insert(row).exit
+        yield exit
+        stored.map { exit =>
+          assertTrue(
+            exit match
+              case Exit.Failure(cause) =>
+                cause.failureOption match
+                  case Some(_: SaferisError.EncodingError) => true
+                  case _                                   => false
+              case Exit.Success(_) => false
+          )
+        },
     )
 
   /** H2 proves itself by providing its session and target to the common suite, with no Docker. */

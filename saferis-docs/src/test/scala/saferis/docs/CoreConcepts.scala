@@ -128,7 +128,7 @@ See [SQL Injection Prevention](sql-injection-prevention.html) for the complete s
 | `FieldName` | A case-class field, which `@label` can make differ from its column |
 | `TypeName`, `ColumnType` | A server type name (`int4`, `mood`) and a DDL spelling (`varchar(255)`) |
 | `SqlText` | SQL: a statement, clause, or rendered fragment. `fragment.sql`, every `Dialect` method, and the SQL on errors and on `SqlExecuted` |
-| `JsonText` | JSON document text, as `SqlValue.Jsonb` carries it |
+| `JsonText` | JSON document text, as `SqlValue.Json` carries it |
 | `SqlState` | A five-character SQLSTATE. `SqlState.parse` accepts one, and the constants (`SqlState.UniqueViolation`) name the ones Saferis classifies |
 | `DialectName` | A dialect's display name |
 

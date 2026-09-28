@@ -58,25 +58,27 @@ private object MySqlAdapter extends StandardJdbcAdapter:
   /** The session is UTC ([[MySqlJdbc.layer]]), so an instant binds as its UTC wall time. */
   override def bind(ps: PreparedStatement, index: Int, value: SqlValue): Either[SaferisError, Unit] =
     value match
-      case SqlValue.Timestamptz(v) => Right(ps.setObject(index, LocalDateTime.ofInstant(v, ZoneOffset.UTC)))
+      case SqlValue.TimestampTz(v) => Right(ps.setObject(index, LocalDateTime.ofInstant(v, ZoneOffset.UTC)))
+      case SqlValue.TimeTz(v)      => Right(ps.setString(index, v.toString))
       case other                   => super.bind(ps, index, other)
 
   override protected def jdbcType(tpe: SqlType): Int = tpe match
-    case SqlType.Timestamptz => Types.TIMESTAMP
+    case SqlType.TimestampTz => Types.TIMESTAMP
+    case SqlType.TimeTz      => Types.VARCHAR
     case other               => super.jdbcType(other)
 
   override def read(rs: ResultSet, column: JdbcColumn): Either[SaferisError, SqlValue] =
     val i = column.index
     column.typeName match
-      case "json"      => ref(SqlType.Jsonb, rs.getString(i))(json => SqlValue.Jsonb(JsonText(json)))(rs)
+      case "json"      => ref(SqlType.Json, rs.getString(i))(json => SqlValue.Json(JsonText(json)))(rs)
       case "timestamp" =>
-        ref(SqlType.Timestamptz, rs.getObject(i, classOf[LocalDateTime]))(v =>
-          SqlValue.Timestamptz(v.toInstant(ZoneOffset.UTC))
+        ref(SqlType.TimestampTz, rs.getObject(i, classOf[LocalDateTime]))(v =>
+          SqlValue.TimestampTz(v.toInstant(ZoneOffset.UTC))
         )(rs)
-      case "year" => cell(SqlType.Int2, rs.getShort(i))(SqlValue.Int2(_))(rs)
+      case "year" => cell(SqlType.SmallInt, rs.getShort(i))(SqlValue.SmallInt(_))(rs)
       case "tinyint unsigned" | "smallint unsigned" | "mediumint unsigned" =>
-        cell(SqlType.Int4, rs.getInt(i))(SqlValue.Int4(_))(rs)
-      case "int unsigned" | "integer unsigned" => cell(SqlType.Int8, rs.getLong(i))(SqlValue.Int8(_))(rs)
+        cell(SqlType.Integer, rs.getInt(i))(SqlValue.Integer(_))(rs)
+      case "int unsigned" | "integer unsigned" => cell(SqlType.BigInt, rs.getLong(i))(SqlValue.BigInt(_))(rs)
       case "bigint unsigned"                   =>
         ref(SqlType.Numeric, rs.getBigDecimal(i))(v => SqlValue.Numeric(BigDecimal(v)))(rs)
       case _ => super.read(rs, column)

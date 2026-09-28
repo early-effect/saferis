@@ -49,24 +49,25 @@ val pg = summon[Dialect]
 | SqlType | PostgreSQL | MySQL | SQLite | H2 |
 |---------|------------|-------|--------|----|
 | Bool | boolean | boolean | boolean | boolean |
-| Int2 | smallint | smallint | integer | smallint |
-| Int4 | integer | int | integer | integer |
-| Int8 | bigint | bigint | integer | bigint |
-| Float4 | real | float | real | real |
-| Float8 | double precision | double | double | double precision |
-| Numeric | numeric | decimal(65, 30) | numeric | numeric(1000, 100) |
+| SmallInt | smallint | smallint | integer | smallint |
+| Integer | integer | int | integer | integer |
+| BigInt | bigint | bigint | integer | bigint |
+| Real | real | float | real | real |
+| DoublePrecision | double precision | double | double | double precision |
+| Numeric | numeric | decimal(65, 30) | numeric | numeric(100000, 50000) |
 | VarChar | varchar(255) | varchar(255) | varchar(255) | varchar(255) |
 | Text | text | longtext | text | character large object |
-| Bytea | bytea | blob | blob | varbinary |
+| Binary | bytea | blob | blob | varbinary |
 | Date | date | date | date | date |
 | Time | time | time(6) | time | time(6) |
+| TimeTz | timetz | varchar(32) | timetz | time(6) with time zone |
 | Timestamp | timestamp | datetime(6) | timestamp | timestamp(6) |
-| Timestamptz | timestamptz | timestamp(6) | timestamptz | timestamp(6) with time zone |
-| Jsonb | jsonb | json | json | json |
+| TimestampTz | timestamptz | timestamp(6) | timestamptz | timestamp(6) with time zone |
+| Json | jsonb | json | json | json |
 | Uuid | uuid | char(36) | uuid | uuid |
 | Array(element) | element[] | json | text | element array |
 
-MySQL's bare `decimal` is `decimal(10,0)` and drops the fraction, so `Numeric` asks for the widest scale. MySQL's `datetime` is a local timestamp and `timestamp` an instant, so the two Scala types get different columns. Every SQLite integer is `integer`, so an integer primary key stays SQLite's rowid and autoincrements."""
+MySQL's bare `decimal` is `decimal(10,0)` and drops the fraction, so `Numeric` asks for the widest scale. H2 2.5 stores at most 100000 numeric digits (`Constants.MAX_NUMERIC_PRECISION`). `numeric(100000, 50000)` is H2's `TYPE_NUMERIC_FLOATING_POINT`: 50000 digits on each side of the decimal. A decimal outside that fails when H2 binds it, instead of being rounded. MySQL has no `timetz`, so `TimeTz` is ISO-8601 text in `varchar(32)`. SQLite declares `timetz` and reads that text back as `TimeTz`. MySQL's `datetime` is a local timestamp and `timestamp` an instant, so the two Scala types get different columns. Every SQLite integer is `integer`, so an integer primary key stays SQLite's rowid and autoincrements."""
     ),
     section("Auto-Increment Syntax")(
       md"""| Database | Syntax |

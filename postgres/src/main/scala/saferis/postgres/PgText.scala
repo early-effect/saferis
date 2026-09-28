@@ -12,6 +12,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.OffsetTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
@@ -101,39 +102,41 @@ object PgText:
 
   private def scalarType(oid: Int): Option[SqlType] = oid match
     case 16                    => Some(SqlType.Bool)
-    case 21                    => Some(SqlType.Int2)
-    case 23                    => Some(SqlType.Int4)
-    case 20                    => Some(SqlType.Int8)
-    case 700                   => Some(SqlType.Float4)
-    case 701                   => Some(SqlType.Float8)
+    case 21                    => Some(SqlType.SmallInt)
+    case 23                    => Some(SqlType.Integer)
+    case 20                    => Some(SqlType.BigInt)
+    case 700                   => Some(SqlType.Real)
+    case 701                   => Some(SqlType.DoublePrecision)
     case 1700                  => Some(SqlType.Numeric)
     case 1043 | 18 | 19 | 1042 => Some(SqlType.VarChar)
     case 25 | 705              => Some(SqlType.Text)
-    case 17                    => Some(SqlType.Bytea)
+    case 17                    => Some(SqlType.Binary)
     case 1082                  => Some(SqlType.Date)
-    case 1083 | 1266           => Some(SqlType.Time)
+    case 1083                  => Some(SqlType.Time)
+    case 1266                  => Some(SqlType.TimeTz)
     case 1114                  => Some(SqlType.Timestamp)
-    case 1184                  => Some(SqlType.Timestamptz)
-    case 114 | 3802            => Some(SqlType.Jsonb)
+    case 1184                  => Some(SqlType.TimestampTz)
+    case 114 | 3802            => Some(SqlType.Json)
     case 2950                  => Some(SqlType.Uuid)
     case _                     => None
 
   def oid(tpe: SqlType): Option[Int] = tpe match
     case SqlType.Bool                          => Some(16)
-    case SqlType.Int2                          => Some(21)
-    case SqlType.Int4                          => Some(23)
-    case SqlType.Int8                          => Some(20)
-    case SqlType.Float4                        => Some(700)
-    case SqlType.Float8                        => Some(701)
+    case SqlType.SmallInt                      => Some(21)
+    case SqlType.Integer                       => Some(23)
+    case SqlType.BigInt                        => Some(20)
+    case SqlType.Real                          => Some(700)
+    case SqlType.DoublePrecision               => Some(701)
     case SqlType.Numeric                       => Some(1700)
     case SqlType.VarChar                       => Some(1043)
     case SqlType.Text                          => Some(25)
-    case SqlType.Bytea                         => Some(17)
+    case SqlType.Binary                        => Some(17)
     case SqlType.Date                          => Some(1082)
     case SqlType.Time                          => Some(1083)
+    case SqlType.TimeTz                        => Some(1266)
     case SqlType.Timestamp                     => Some(1114)
-    case SqlType.Timestamptz                   => Some(1184)
-    case SqlType.Jsonb                         => Some(3802)
+    case SqlType.TimestampTz                   => Some(1184)
+    case SqlType.Json                          => Some(3802)
     case SqlType.Uuid                          => Some(2950)
     case SqlType.Array(_)                      => None
     case SqlType.Other(ServerType.Oid(id))     => Some(id)
@@ -142,24 +145,25 @@ object PgText:
 
   /** Cast name for `$n::cast`. `None` for [[SqlType.Other]]: an enum must not be cast to `text`. Arrays recurse. */
   def cast(tpe: SqlType): Option[TypeName] = tpe match
-    case SqlType.Bool           => Some(TypeName("boolean"))
-    case SqlType.Int2           => Some(TypeName("int2"))
-    case SqlType.Int4           => Some(TypeName("int4"))
-    case SqlType.Int8           => Some(TypeName("int8"))
-    case SqlType.Float4         => Some(TypeName("float4"))
-    case SqlType.Float8         => Some(TypeName("float8"))
-    case SqlType.Numeric        => Some(TypeName("numeric"))
-    case SqlType.VarChar        => Some(TypeName("varchar"))
-    case SqlType.Text           => Some(TypeName("text"))
-    case SqlType.Bytea          => Some(TypeName("bytea"))
-    case SqlType.Date           => Some(TypeName("date"))
-    case SqlType.Time           => Some(TypeName("time"))
-    case SqlType.Timestamp      => Some(TypeName("timestamp"))
-    case SqlType.Timestamptz    => Some(TypeName("timestamptz"))
-    case SqlType.Jsonb          => Some(TypeName("jsonb"))
-    case SqlType.Uuid           => Some(TypeName("uuid"))
-    case SqlType.Array(element) => cast(element).map(name => TypeName(s"$name[]"))
-    case SqlType.Other(_)       => None
+    case SqlType.Bool            => Some(TypeName("boolean"))
+    case SqlType.SmallInt        => Some(TypeName("int2"))
+    case SqlType.Integer         => Some(TypeName("int4"))
+    case SqlType.BigInt          => Some(TypeName("int8"))
+    case SqlType.Real            => Some(TypeName("float4"))
+    case SqlType.DoublePrecision => Some(TypeName("float8"))
+    case SqlType.Numeric         => Some(TypeName("numeric"))
+    case SqlType.VarChar         => Some(TypeName("varchar"))
+    case SqlType.Text            => Some(TypeName("text"))
+    case SqlType.Binary          => Some(TypeName("bytea"))
+    case SqlType.Date            => Some(TypeName("date"))
+    case SqlType.Time            => Some(TypeName("time"))
+    case SqlType.TimeTz          => Some(TypeName("timetz"))
+    case SqlType.Timestamp       => Some(TypeName("timestamp"))
+    case SqlType.TimestampTz     => Some(TypeName("timestamptz"))
+    case SqlType.Json            => Some(TypeName("jsonb"))
+    case SqlType.Uuid            => Some(TypeName("uuid"))
+    case SqlType.Array(element)  => cast(element).map(name => TypeName(s"$name[]"))
+    case SqlType.Other(_)        => None
 
   def typeLabel(oid: Int): TypeName =
     TypeName(sqlType(oid).fold(oid.toString)(_.productPrefix))
@@ -180,23 +184,23 @@ object PgText:
           case _   => bad(s"expected t or f, found $text")
       case 21 =>
         text.toShortOption match
-          case Some(v) => Right(SqlValue.Int2(v))
+          case Some(v) => Right(SqlValue.SmallInt(v))
           case None    => bad(s"not an int2: $text")
       case 23 =>
         text.toIntOption match
-          case Some(v) => Right(SqlValue.Int4(v))
+          case Some(v) => Right(SqlValue.Integer(v))
           case None    => bad(s"not an int4: $text")
       case 20 =>
         text.toLongOption match
-          case Some(v) => Right(SqlValue.Int8(v))
+          case Some(v) => Right(SqlValue.BigInt(v))
           case None    => bad(s"not an int8: $text")
       case 700 =>
         text.toFloatOption match
-          case Some(v) => Right(SqlValue.Float4(v))
+          case Some(v) => Right(SqlValue.Real(v))
           case None    => bad(s"not a float4: $text")
       case 701 =>
         text.toDoubleOption match
-          case Some(v) => Right(SqlValue.Float8(v))
+          case Some(v) => Right(SqlValue.DoublePrecision(v))
           case None    => bad(s"not a float8: $text")
       case 1700 =>
         numeric(text) match
@@ -205,8 +209,8 @@ object PgText:
       case 1043 | 18 | 19 | 1042 => Right(SqlValue.VarChar(text))
       case 25 | 705              => Right(SqlValue.Text(text))
       case 17                    =>
-        decodeBytea(text) match
-          case Right(bytes) => Right(SqlValue.Bytea(bytes))
+        decodeBinary(text) match
+          case Right(bytes) => Right(SqlValue.Binary(bytes))
           case Left(detail) => bad(detail)
       case 1082 =>
         parseDate(text) match
@@ -218,17 +222,17 @@ object PgText:
           case Left(detail) => bad(detail)
       case 1266 =>
         parseTimetz(text) match
-          case Right(v)     => Right(SqlValue.Time(v))
+          case Right(v)     => Right(SqlValue.TimeTz(v))
           case Left(detail) => bad(detail)
       case 1114 =>
         parseTimestamp(text) match
           case Right(v)     => Right(SqlValue.Timestamp(v))
           case Left(detail) => bad(detail)
       case 1184 =>
-        parseTimestamptz(text) match
-          case Right(v)     => Right(SqlValue.Timestamptz(v))
+        parseTimestampTz(text) match
+          case Right(v)     => Right(SqlValue.TimestampTz(v))
           case Left(detail) => bad(detail)
-      case 114 | 3802 => Right(SqlValue.Jsonb(JsonText(text)))
+      case 114 | 3802 => Right(SqlValue.Json(JsonText(text)))
       case 2950       =>
         uuid(text) match
           case Some(v) => Right(SqlValue.Uuid(v))
@@ -239,25 +243,26 @@ object PgText:
 
   /** `None` is SQL null. Null is not an empty string. */
   def encode(value: SqlValue): Option[String] = value match
-    case SqlValue.Null(_)          => None
-    case SqlValue.Bool(v)          => Some(if v then "t" else "f")
-    case SqlValue.Int2(v)          => Some(v.toString)
-    case SqlValue.Int4(v)          => Some(v.toString)
-    case SqlValue.Int8(v)          => Some(v.toString)
-    case SqlValue.Float4(v)        => Some(encodeFloat(v))
-    case SqlValue.Float8(v)        => Some(encodeDouble(v))
-    case SqlValue.Numeric(v)       => Some(v.underlying.toPlainString)
-    case SqlValue.VarChar(v)       => Some(v)
-    case SqlValue.Text(v)          => Some(v)
-    case SqlValue.Bytea(v)         => Some(encodeBytea(v))
-    case SqlValue.Date(v)          => Some(v.toString)
-    case SqlValue.Time(v)          => Some(formatTime(v))
-    case SqlValue.Timestamp(v)     => Some(formatTimestamp(v))
-    case SqlValue.Timestamptz(v)   => Some(s"${formatTimestamp(LocalDateTime.ofInstant(v, ZoneOffset.UTC))}+00")
-    case SqlValue.Jsonb(v)         => Some(v)
-    case SqlValue.Uuid(v)          => Some(v.toString)
-    case SqlValue.Other(_, text)   => Some(text)
-    case SqlValue.Array(_, values) => Some(encodeArray(values))
+    case SqlValue.Null(_)            => None
+    case SqlValue.Bool(v)            => Some(if v then "t" else "f")
+    case SqlValue.SmallInt(v)        => Some(v.toString)
+    case SqlValue.Integer(v)         => Some(v.toString)
+    case SqlValue.BigInt(v)          => Some(v.toString)
+    case SqlValue.Real(v)            => Some(encodeFloat(v))
+    case SqlValue.DoublePrecision(v) => Some(encodeDouble(v))
+    case SqlValue.Numeric(v)         => Some(v.underlying.toPlainString)
+    case SqlValue.VarChar(v)         => Some(v)
+    case SqlValue.Text(v)            => Some(v)
+    case SqlValue.Binary(v)          => Some(encodeBinary(v))
+    case SqlValue.Date(v)            => Some(v.toString)
+    case SqlValue.Time(v)            => Some(formatTime(v))
+    case SqlValue.TimeTz(v)          => Some(v.toString)
+    case SqlValue.Timestamp(v)       => Some(formatTimestamp(v))
+    case SqlValue.TimestampTz(v)     => Some(s"${formatTimestamp(LocalDateTime.ofInstant(v, ZoneOffset.UTC))}+00")
+    case SqlValue.Json(v)            => Some(v)
+    case SqlValue.Uuid(v)            => Some(v.toString)
+    case SqlValue.Other(_, text)     => Some(text)
+    case SqlValue.Array(_, values)   => Some(encodeArray(values))
 
   private def encodeArray(values: Chunk[SqlValue]): String =
     values.map(encodeMember).mkString("{", ",", "}")
@@ -450,7 +455,7 @@ object PgText:
     else if v.isInfinite then if v > 0.0 then "Infinity" else "-Infinity"
     else java.lang.Double.toString(v)
 
-  private def encodeBytea(bytes: Chunk[Byte]): String =
+  private def encodeBinary(bytes: Chunk[Byte]): String =
     val hex = bytes.map(b => f"${b & 0xff}%02x").mkString
     s"\\x$hex"
 
@@ -478,16 +483,20 @@ object PgText:
     splitFraction(text).flatMap: (head, nanos) =>
       parsed(timeFmt, head, LocalTime.from, "time").map(_.withNano(nanos))
 
-  private def parseTimetz(text: String): Either[String, LocalTime] =
+  private def parseTimetz(text: String): Either[String, OffsetTime] =
     text match
-      case zoneTail(body, _) => parseTime(body)
-      case other             => parseTime(other)
+      case zoneTail(body, offsetText) =>
+        for
+          offset <- parseOffset(offsetText)
+          local  <- parseTime(body)
+        yield local.atOffset(offset)
+      case _ => Left(s"not a timetz: $text")
 
   private def parseTimestamp(text: String): Either[String, LocalDateTime] =
     splitFraction(text).flatMap: (head, nanos) =>
       parsed(timestampFmt, head, LocalDateTime.from, "timestamp").map(_.withNano(nanos))
 
-  private def parseTimestamptz(text: String): Either[String, Instant] =
+  private def parseTimestampTz(text: String): Either[String, Instant] =
     text match
       case zoneTail(body, offsetText) =>
         for
@@ -530,7 +539,7 @@ object PgText:
     try Right(build(fmt.parse(text)))
     catch case _: DateTimeParseException => Left(s"not a $kind: $text")
 
-  private def decodeBytea(text: String): Either[String, Chunk[Byte]] =
+  private def decodeBinary(text: String): Either[String, Chunk[Byte]] =
     if text.startsWith("\\x") || text.startsWith("\\X") then decodeHex(text.substring(2))
     else decodeEscape(text)
 

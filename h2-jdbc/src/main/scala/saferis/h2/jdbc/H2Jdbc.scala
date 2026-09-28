@@ -1,6 +1,7 @@
 package saferis.h2.jdbc
 
 import saferis.*
+import saferis.h2.H2Dialect
 import saferis.jdbc.JdbcAdapter
 import saferis.jdbc.JdbcColumn
 import saferis.jdbc.JdbcSession
@@ -40,15 +41,17 @@ private object H2Adapter extends StandardJdbcAdapter:
   /** H2 reads UTF-8 bytes bound to a `json` column as JSON text. A bound string would become a JSON string. */
   override def bind(ps: PreparedStatement, index: Int, value: SqlValue): Either[SaferisError, Unit] =
     value match
-      case SqlValue.Jsonb(json) => Right(ps.setBytes(index, json.getBytes(StandardCharsets.UTF_8)))
-      case SqlValue.Uuid(uuid)  => Right(ps.setObject(index, uuid))
-      case other                => super.bind(ps, index, other)
+      case SqlValue.Json(json) => Right(ps.setBytes(index, json.getBytes(StandardCharsets.UTF_8)))
+      case SqlValue.Uuid(uuid) => Right(ps.setObject(index, uuid))
+      case SqlValue.Numeric(value) if !H2Dialect.fitsNumeric(value) =>
+        Left(SaferisError.EncodingError(index, s"$value is outside numeric(100000, 50000)"))
+      case other => super.bind(ps, index, other)
 
   override def read(rs: ResultSet, column: JdbcColumn): Either[SaferisError, SqlValue] =
     val i = column.index
     column.typeName match
       case "json" =>
-        ref(SqlType.Jsonb, rs.getBytes(i))(bytes => SqlValue.Jsonb(JsonText(String(bytes, StandardCharsets.UTF_8))))(rs)
+        ref(SqlType.Json, rs.getBytes(i))(bytes => SqlValue.Json(JsonText(String(bytes, StandardCharsets.UTF_8))))(rs)
       case "uuid" => ref(SqlType.Uuid, rs.getObject(i, classOf[UUID]))(SqlValue.Uuid(_))(rs)
       case _      => super.read(rs, column)
 end H2Adapter

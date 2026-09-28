@@ -21,6 +21,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.OffsetTime
 import java.util.Locale
 import java.util.UUID
 import javax.sql.DataSource
@@ -66,8 +67,9 @@ private object SqliteAdapter extends StandardJdbcAdapter:
       case SqlValue.Numeric(v)     => Right(ps.setString(index, v.bigDecimal.toPlainString))
       case SqlValue.Date(v)        => Right(ps.setString(index, v.toString))
       case SqlValue.Time(v)        => Right(ps.setString(index, v.toString))
+      case SqlValue.TimeTz(v)      => Right(ps.setString(index, v.toString))
       case SqlValue.Timestamp(v)   => Right(ps.setString(index, v.toString))
-      case SqlValue.Timestamptz(v) => Right(ps.setString(index, v.toString))
+      case SqlValue.TimestampTz(v) => Right(ps.setString(index, v.toString))
       case other                   => super.bind(ps, index, other)
 
   /** A column reads by the type it was declared with (see `SQLiteDialect.columnType`). An expression has no declared
@@ -79,21 +81,22 @@ private object SqliteAdapter extends StandardJdbcAdapter:
     declared(column.typeName) match
       case "boolean" | "bool" => cell(SqlType.Bool, rs.getBoolean(i))(SqlValue.Bool(_))(rs)
       case "integer" | "int" | "smallint" | "bigint" | "tinyint" | "mediumint" =>
-        cell(SqlType.Int8, rs.getLong(i))(SqlValue.Int8(_))(rs)
+        cell(SqlType.BigInt, rs.getLong(i))(SqlValue.BigInt(_))(rs)
       // SQLite stores every `real` as 8 bytes, so reading 4 would drop a Double's precision.
       case "real" | "double" | "double precision" | "float" =>
-        cell(SqlType.Float8, rs.getDouble(i))(SqlValue.Float8(_))(rs)
+        cell(SqlType.DoublePrecision, rs.getDouble(i))(SqlValue.DoublePrecision(_))(rs)
       case "numeric" | "decimal" => parsed(rs, column, SqlType.Numeric)(t => SqlValue.Numeric(BigDecimal(t)))
       case "varchar" | "char" | "character" | "nvarchar" =>
         ref(SqlType.VarChar, rs.getString(i))(SqlValue.VarChar(_))(rs)
       case "text" | "clob" => ref(SqlType.Text, rs.getString(i))(SqlValue.Text(_))(rs)
-      case "blob"          => ref(SqlType.Bytea, rs.getBytes(i))(bytes => SqlValue.Bytea(Chunk.fromArray(bytes)))(rs)
+      case "blob"          => ref(SqlType.Binary, rs.getBytes(i))(bytes => SqlValue.Binary(Chunk.fromArray(bytes)))(rs)
       case "date"          => parsed(rs, column, SqlType.Date)(t => SqlValue.Date(LocalDate.parse(t)))
       case "time"          => parsed(rs, column, SqlType.Time)(t => SqlValue.Time(LocalTime.parse(t)))
+      case "timetz"        => parsed(rs, column, SqlType.TimeTz)(t => SqlValue.TimeTz(OffsetTime.parse(t)))
       case "timestamp" | "datetime" =>
         parsed(rs, column, SqlType.Timestamp)(t => SqlValue.Timestamp(LocalDateTime.parse(t)))
-      case "timestamptz"    => parsed(rs, column, SqlType.Timestamptz)(t => SqlValue.Timestamptz(Instant.parse(t)))
-      case "json" | "jsonb" => ref(SqlType.Jsonb, rs.getString(i))(json => SqlValue.Jsonb(JsonText(json)))(rs)
+      case "timestamptz"    => parsed(rs, column, SqlType.TimestampTz)(t => SqlValue.TimestampTz(Instant.parse(t)))
+      case "json" | "jsonb" => ref(SqlType.Json, rs.getString(i))(json => SqlValue.Json(JsonText(json)))(rs)
       case "uuid"           => parsed(rs, column, SqlType.Uuid)(t => SqlValue.Uuid(UUID.fromString(t)))
       case _                => byStorageClass(rs, column)
     end match
@@ -107,11 +110,12 @@ private object SqliteAdapter extends StandardJdbcAdapter:
     val i = column.index
     column.jdbcType match
       case Types.INTEGER | Types.BIGINT | Types.SMALLINT | Types.TINYINT =>
-        cell(SqlType.Int8, rs.getLong(i))(SqlValue.Int8(_))(rs)
-      case Types.REAL | Types.FLOAT | Types.DOUBLE => cell(SqlType.Float8, rs.getDouble(i))(SqlValue.Float8(_))(rs)
-      case Types.VARCHAR | Types.CHAR              => ref(SqlType.Text, rs.getString(i))(SqlValue.Text(_))(rs)
-      case Types.BLOB | Types.BINARY               =>
-        ref(SqlType.Bytea, rs.getBytes(i))(bytes => SqlValue.Bytea(Chunk.fromArray(bytes)))(rs)
+        cell(SqlType.BigInt, rs.getLong(i))(SqlValue.BigInt(_))(rs)
+      case Types.REAL | Types.FLOAT | Types.DOUBLE =>
+        cell(SqlType.DoublePrecision, rs.getDouble(i))(SqlValue.DoublePrecision(_))(rs)
+      case Types.VARCHAR | Types.CHAR => ref(SqlType.Text, rs.getString(i))(SqlValue.Text(_))(rs)
+      case Types.BLOB | Types.BINARY  =>
+        ref(SqlType.Binary, rs.getBytes(i))(bytes => SqlValue.Binary(Chunk.fromArray(bytes)))(rs)
       case _ => other(rs, column)
   end byStorageClass
 

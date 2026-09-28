@@ -13,7 +13,7 @@ import java.time.Instant
 import scala.scalajs.js
 
 object PgSessionSpecs extends ZIOSpecDefault:
-  private val pastInt8    = 9223372036854775807L
+  private val pastBigInt  = 9223372036854775807L
   private val pastNumeric = BigDecimal("9223372036854775808.25")
   private val micros      = Instant.parse("2024-09-23T15:04:05.123456Z")
 
@@ -83,10 +83,10 @@ object PgSessionSpecs extends ZIOSpecDefault:
         for
           _        <- sql"drop table if exists pg_int8".dml
           _        <- sql"create table pg_int8 (n bigint)".dml
-          selected <- sql"select ${pastInt8}".queryValue[Long]
-          _        <- sql"insert into pg_int8 (n) values (${pastInt8})".dml
+          selected <- sql"select ${pastBigInt}".queryValue[Long]
+          _        <- sql"insert into pg_int8 (n) values (${pastBigInt})".dml
           stored   <- sql"select n from pg_int8".queryValue[Long]
-        yield assertTrue(selected.contains(pastInt8), stored.contains(pastInt8))
+        yield assertTrue(selected.contains(pastBigInt), stored.contains(pastBigInt))
       ,
       test("Numeric past 2^53-1 round-trips through $n::numeric"):
         for
@@ -118,8 +118,8 @@ object PgSessionSpecs extends ZIOSpecDefault:
           rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(row => Right(row)))
           row = rows.head
         yield assertTrue(
-          row.at(0) == Right(SqlValue.Jsonb(JsonText("null"))),
-          row.at(1) == Right(SqlValue.Null(SqlType.Jsonb)),
+          row.at(0) == Right(SqlValue.Json(JsonText("null"))),
+          row.at(1) == Right(SqlValue.Null(SqlType.Json)),
         )
       ,
       test("bpchar round-trips padded"):
@@ -134,7 +134,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
         for
           command <- sql"select ${1} as a, ${2} as a".toCommand
           rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(row => Right(row)))
-        yield assertTrue(rows.head.get(ColumnName("a")) == Right(SqlValue.Int4(1)))
+        yield assertTrue(rows.head.get(ColumnName("a")) == Right(SqlValue.Integer(1)))
       ,
       test("an unknown oid is Other and String reads its text"):
         for
@@ -155,10 +155,10 @@ object PgSessionSpecs extends ZIOSpecDefault:
             .left
             .map(err => SaferisError.DecodingError(ColumnName("value"), TypeName("Long"), err.detail))
         for
-          command <- sql"select ${pastInt8}".toCommand
+          command <- sql"select ${pastBigInt}".toCommand
           session <- ZIO.service[SqlSession]
           rows    <- session.stream(command)(read).runCollect
-        yield assertTrue(rows == Chunk(pastInt8))
+        yield assertTrue(rows == Chunk(pastBigInt))
       ,
       test("closing the stream scope releases the checkout") {
         val read: SqlRow => Either[SaferisError, Int] = row =>

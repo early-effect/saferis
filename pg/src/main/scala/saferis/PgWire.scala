@@ -210,15 +210,15 @@ private[pg] object PgWire:
           SaferisError.DecodingError(label, PgText.typeLabel(oid), detail)
 
   private def bind(value: SqlValue): js.Any = value match
-    case SqlValue.Null(_)          => jsNull
-    case SqlValue.Bool(v)          => js.Any.fromBoolean(v)
-    case SqlValue.Int2(v)          => js.Any.fromDouble(v.toDouble)
-    case SqlValue.Int4(v)          => js.Any.fromDouble(v.toDouble)
-    case SqlValue.Int8(v)          => v.toString
-    case SqlValue.Float4(v)        => js.Any.fromDouble(v.toDouble)
-    case SqlValue.Float8(v)        => js.Any.fromDouble(v)
-    case SqlValue.Array(_, values) => js.Array(values.map(bind)*)
-    case other                     =>
+    case SqlValue.Null(_)            => jsNull
+    case SqlValue.Bool(v)            => js.Any.fromBoolean(v)
+    case SqlValue.SmallInt(v)        => js.Any.fromDouble(v.toDouble)
+    case SqlValue.Integer(v)         => js.Any.fromDouble(v.toDouble)
+    case SqlValue.BigInt(v)          => v.toString
+    case SqlValue.Real(v)            => js.Any.fromDouble(v.toDouble)
+    case SqlValue.DoublePrecision(v) => js.Any.fromDouble(v)
+    case SqlValue.Array(_, values)   => js.Array(values.map(bind)*)
+    case other                       =>
       PgText.encode(other) match
         case Some(text) => text
         case None       => jsNull

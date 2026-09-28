@@ -225,7 +225,7 @@ object InterpolatorSpecs extends ZIOSpecDefault:
 
       test("an array whose encoder disagrees with its members fails at toCommand"):
         val lying: Encoder[Int] = new Encoder[Int]:
-          def sqlType: SqlType         = SqlType.Int4
+          def sqlType: SqlType         = SqlType.Integer
           def encode(a: Int): SqlValue = SqlValue.Text(a.toString)
         val frag = sql"select * from t where x = any(${array(List(1, 2))(using lying)})"
         for exit <- frag.toCommand.exit
@@ -238,7 +238,7 @@ object InterpolatorSpecs extends ZIOSpecDefault:
             case _ => false
 
       test("SqlValue.array rejects a nested member of the wrong type"):
-        val nested = SqlValue.array(SqlType.Int4, Chunk(SqlValue.Int4(1), SqlValue.Text("x")))
+        val nested = SqlValue.array(SqlType.Integer, Chunk(SqlValue.Integer(1), SqlValue.Text("x")))
         assertTrue(nested.isLeft)
 
       test("mixed splice keeps writes in argument order"):

@@ -58,7 +58,7 @@ private object PostgresAdapter extends StandardJdbcAdapter:
 
   override def bind(ps: PreparedStatement, index: Int, value: SqlValue): Either[SaferisError, Unit] =
     value match
-      case SqlValue.Jsonb(json) =>
+      case SqlValue.Json(json) =>
         val obj = new PGobject()
         obj.setType("jsonb")
         obj.setValue(json)
@@ -72,38 +72,38 @@ private object PostgresAdapter extends StandardJdbcAdapter:
       case other => super.bind(ps, index, other)
 
   override protected def jdbcType(tpe: SqlType): Int = tpe match
-    case SqlType.Bytea                => Types.BINARY
-    case SqlType.Jsonb | SqlType.Uuid => Types.OTHER
-    case other                        => super.jdbcType(other)
+    case SqlType.Binary              => Types.BINARY
+    case SqlType.Json | SqlType.Uuid => Types.OTHER
+    case other                       => super.jdbcType(other)
 
   override def read(rs: ResultSet, column: JdbcColumn): Either[SaferisError, SqlValue] =
     val i = column.index
     column.typeName match
       case "bool"                              => cell(SqlType.Bool, rs.getBoolean(i))(SqlValue.Bool(_))(rs)
-      case "int2" | "smallint" | "smallserial" => cell(SqlType.Int2, rs.getShort(i))(SqlValue.Int2(_))(rs)
-      case "int4" | "integer" | "serial"       => cell(SqlType.Int4, rs.getInt(i))(SqlValue.Int4(_))(rs)
-      case "int8" | "bigint" | "bigserial"     => cell(SqlType.Int8, rs.getLong(i))(SqlValue.Int8(_))(rs)
-      case "float4"                            => cell(SqlType.Float4, rs.getFloat(i))(SqlValue.Float4(_))(rs)
-      case "float8"                            => cell(SqlType.Float8, rs.getDouble(i))(SqlValue.Float8(_))(rs)
-      case "numeric"                           =>
+      case "int2" | "smallint" | "smallserial" => cell(SqlType.SmallInt, rs.getShort(i))(SqlValue.SmallInt(_))(rs)
+      case "int4" | "integer" | "serial"       => cell(SqlType.Integer, rs.getInt(i))(SqlValue.Integer(_))(rs)
+      case "int8" | "bigint" | "bigserial"     => cell(SqlType.BigInt, rs.getLong(i))(SqlValue.BigInt(_))(rs)
+      case "float4"                            => cell(SqlType.Real, rs.getFloat(i))(SqlValue.Real(_))(rs)
+      case "float8"  => cell(SqlType.DoublePrecision, rs.getDouble(i))(SqlValue.DoublePrecision(_))(rs)
+      case "numeric" =>
         ref(SqlType.Numeric, rs.getBigDecimal(i))(v => SqlValue.Numeric(BigDecimal(v)))(rs)
       case "varchar" | "bpchar" | "name" => ref(SqlType.VarChar, rs.getString(i))(SqlValue.VarChar(_))(rs)
       case "text" | "unknown"            => ref(SqlType.Text, rs.getString(i))(SqlValue.Text(_))(rs)
       case "bytea"                       =>
-        ref(SqlType.Bytea, rs.getBytes(i))(bytes => SqlValue.Bytea(Chunk.fromArray(bytes)))(rs)
+        ref(SqlType.Binary, rs.getBytes(i))(bytes => SqlValue.Binary(Chunk.fromArray(bytes)))(rs)
       case "date"   => ref(SqlType.Date, rs.getObject(i, classOf[LocalDate]))(SqlValue.Date(_))(rs)
       case "time"   => ref(SqlType.Time, rs.getObject(i, classOf[LocalTime]))(SqlValue.Time(_))(rs)
       case "timetz" =>
-        ref(SqlType.Time, rs.getObject(i, classOf[OffsetTime]))(v => SqlValue.Time(v.toLocalTime))(rs)
+        ref(SqlType.TimeTz, rs.getObject(i, classOf[OffsetTime]))(SqlValue.TimeTz(_))(rs)
       case "timestamp" =>
         ref(SqlType.Timestamp, rs.getObject(i, classOf[LocalDateTime]))(SqlValue.Timestamp(_))(rs)
       case "timestamptz" =>
-        ref(SqlType.Timestamptz, rs.getObject(i, classOf[OffsetDateTime]))(v => SqlValue.Timestamptz(v.toInstant))(rs)
+        ref(SqlType.TimestampTz, rs.getObject(i, classOf[OffsetDateTime]))(v => SqlValue.TimestampTz(v.toInstant))(rs)
       case "json" | "jsonb" =>
-        ref(SqlType.Jsonb, rs.getObject(i))(value =>
+        ref(SqlType.Json, rs.getObject(i))(value =>
           value match
-            case pg: PGobject => SqlValue.Jsonb(JsonText(Option(pg.getValue).getOrElse("")))
-            case other        => SqlValue.Jsonb(JsonText(other.toString))
+            case pg: PGobject => SqlValue.Json(JsonText(Option(pg.getValue).getOrElse("")))
+            case other        => SqlValue.Json(JsonText(other.toString))
         )(rs)
       case "uuid" => ref(SqlType.Uuid, rs.getObject(i, classOf[UUID]))(SqlValue.Uuid(_))(rs)
       case array if array.startsWith("_") || array.endsWith("[]") => readArray(rs, column)

@@ -9,6 +9,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.OffsetDateTime
+import java.time.OffsetTime
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import java.util.UUID
@@ -48,10 +49,10 @@ object Decoder:
     * Postgres, so the column width alone does not decide the Scala type.
     */
   private def integral(value: SqlValue): Option[Long] = value match
-    case SqlValue.Int2(v) => Some(v.toLong)
-    case SqlValue.Int4(v) => Some(v.toLong)
-    case SqlValue.Int8(v) => Some(v)
-    case _                => None
+    case SqlValue.SmallInt(v) => Some(v.toLong)
+    case SqlValue.Integer(v)  => Some(v.toLong)
+    case SqlValue.BigInt(v)   => Some(v)
+    case _                    => None
 
   private def fits(expected: String, value: SqlValue, min: Long, max: Long): Either[DecodeError, Long] =
     integral(value) match
@@ -81,16 +82,16 @@ object Decoder:
     */
   given float: Decoder[Float] with
     def decode(value: SqlValue): Either[DecodeError, Float] = value match
-      case SqlValue.Float4(v)                                       => Right(v)
-      case SqlValue.Float8(v) if v.isNaN || v.toFloat.toDouble == v => Right(v.toFloat)
-      case SqlValue.Float8(v)                                       => Left(DecodeError(s"$v is not exactly a float4"))
-      case other                                                    => reject("float4", other)
+      case SqlValue.Real(v)                                                  => Right(v)
+      case SqlValue.DoublePrecision(v) if v.isNaN || v.toFloat.toDouble == v => Right(v.toFloat)
+      case SqlValue.DoublePrecision(v) => Left(DecodeError(s"$v is not exactly a float4"))
+      case other                       => reject("float4", other)
 
   given double: Decoder[Double] with
     def decode(value: SqlValue): Either[DecodeError, Double] = value match
-      case SqlValue.Float8(v) => Right(v)
-      case SqlValue.Float4(v) => Right(v.toDouble)
-      case other              => reject("float8", other)
+      case SqlValue.DoublePrecision(v) => Right(v)
+      case SqlValue.Real(v)            => Right(v.toDouble)
+      case other                       => reject("float8", other)
 
   given bigDecimal: Decoder[BigDecimal] with
     def decode(value: SqlValue): Either[DecodeError, BigDecimal] = value match
@@ -104,12 +105,12 @@ object Decoder:
 
   given chunkByte: Decoder[Chunk[Byte]] with
     def decode(value: SqlValue): Either[DecodeError, Chunk[Byte]] = value match
-      case SqlValue.Bytea(v) => Right(v)
-      case other             => reject("bytea", other)
+      case SqlValue.Binary(v) => Right(v)
+      case other              => reject("bytea", other)
 
   given instant: Decoder[Instant] with
     def decode(value: SqlValue): Either[DecodeError, Instant] = value match
-      case SqlValue.Timestamptz(v) => Right(v)
+      case SqlValue.TimestampTz(v) => Right(v)
       case other                   => reject("timestamptz", other)
 
   given localDateTime: Decoder[LocalDateTime] with
@@ -127,14 +128,19 @@ object Decoder:
       case SqlValue.Time(v) => Right(v)
       case other            => reject("time", other)
 
+  given offsetTime: Decoder[OffsetTime] with
+    def decode(value: SqlValue): Either[DecodeError, OffsetTime] = value match
+      case SqlValue.TimeTz(v) => Right(v)
+      case other              => reject("timetz", other)
+
   given zonedDateTime: Decoder[ZonedDateTime] with
     def decode(value: SqlValue): Either[DecodeError, ZonedDateTime] = value match
-      case SqlValue.Timestamptz(v) => Right(ZonedDateTime.ofInstant(v, ZoneOffset.UTC))
+      case SqlValue.TimestampTz(v) => Right(ZonedDateTime.ofInstant(v, ZoneOffset.UTC))
       case other                   => reject("timestamptz", other)
 
   given offsetDateTime: Decoder[OffsetDateTime] with
     def decode(value: SqlValue): Either[DecodeError, OffsetDateTime] = value match
-      case SqlValue.Timestamptz(v) => Right(OffsetDateTime.ofInstant(v, ZoneOffset.UTC))
+      case SqlValue.TimestampTz(v) => Right(OffsetDateTime.ofInstant(v, ZoneOffset.UTC))
       case other                   => reject("timestamptz", other)
 
   given defaultUuidDecoder: Decoder[UUID] = postgres.uuidDecoder
@@ -151,7 +157,7 @@ object Decoder:
   def fromJsonCodec[T](using codec: zio.json.JsonCodec[T]): Decoder[T] =
     new Decoder[T]:
       def decode(value: SqlValue): Either[DecodeError, T] = value match
-        case SqlValue.Jsonb(json) =>
+        case SqlValue.Json(json) =>
           codec.decoder.decodeJson(json).left.map(e => DecodeError(s"Failed to decode JSON: $e"))
         case SqlValue.Null(_) => Left(DecodeError("null value"))
         case other            => Left(DecodeError(s"expected jsonb, found ${other.productPrefix}"))

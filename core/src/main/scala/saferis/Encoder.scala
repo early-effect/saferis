@@ -9,6 +9,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.OffsetDateTime
+import java.time.OffsetTime
 import java.time.ZonedDateTime
 import java.util.UUID
 
@@ -39,28 +40,28 @@ object Encoder:
     def encode(a: String): SqlValue = SqlValue.VarChar(a)
 
   given short: Encoder[Short] with
-    def sqlType: SqlType           = SqlType.Int2
-    def encode(a: Short): SqlValue = SqlValue.Int2(a)
+    def sqlType: SqlType           = SqlType.SmallInt
+    def encode(a: Short): SqlValue = SqlValue.SmallInt(a)
 
   given int: Encoder[Int] with
-    def sqlType: SqlType         = SqlType.Int4
-    def encode(a: Int): SqlValue = SqlValue.Int4(a)
+    def sqlType: SqlType         = SqlType.Integer
+    def encode(a: Int): SqlValue = SqlValue.Integer(a)
 
   given long: Encoder[Long] with
-    def sqlType: SqlType          = SqlType.Int8
-    def encode(a: Long): SqlValue = SqlValue.Int8(a)
+    def sqlType: SqlType          = SqlType.BigInt
+    def encode(a: Long): SqlValue = SqlValue.BigInt(a)
 
   given boolean: Encoder[Boolean] with
     def sqlType: SqlType             = SqlType.Bool
     def encode(a: Boolean): SqlValue = SqlValue.Bool(a)
 
   given float: Encoder[Float] with
-    def sqlType: SqlType           = SqlType.Float4
-    def encode(a: Float): SqlValue = SqlValue.Float4(a)
+    def sqlType: SqlType           = SqlType.Real
+    def encode(a: Float): SqlValue = SqlValue.Real(a)
 
   given double: Encoder[Double] with
-    def sqlType: SqlType            = SqlType.Float8
-    def encode(a: Double): SqlValue = SqlValue.Float8(a)
+    def sqlType: SqlType            = SqlType.DoublePrecision
+    def encode(a: Double): SqlValue = SqlValue.DoublePrecision(a)
 
   given bigDecimal: Encoder[BigDecimal] with
     def sqlType: SqlType                = SqlType.Numeric
@@ -71,12 +72,12 @@ object Encoder:
     def encode(a: BigInt): SqlValue = SqlValue.Numeric(BigDecimal(a))
 
   given chunkByte: Encoder[Chunk[Byte]] with
-    def sqlType: SqlType                 = SqlType.Bytea
-    def encode(a: Chunk[Byte]): SqlValue = SqlValue.Bytea(a)
+    def sqlType: SqlType                 = SqlType.Binary
+    def encode(a: Chunk[Byte]): SqlValue = SqlValue.Binary(a)
 
   given instant: Encoder[Instant] with
-    def sqlType: SqlType             = SqlType.Timestamptz
-    def encode(a: Instant): SqlValue = SqlValue.Timestamptz(a)
+    def sqlType: SqlType             = SqlType.TimestampTz
+    def encode(a: Instant): SqlValue = SqlValue.TimestampTz(a)
 
   given localDateTime: Encoder[LocalDateTime] with
     def sqlType: SqlType                   = SqlType.Timestamp
@@ -90,13 +91,17 @@ object Encoder:
     def sqlType: SqlType               = SqlType.Time
     def encode(a: LocalTime): SqlValue = SqlValue.Time(a)
 
+  given offsetTime: Encoder[OffsetTime] with
+    def sqlType: SqlType                = SqlType.TimeTz
+    def encode(a: OffsetTime): SqlValue = SqlValue.TimeTz(a)
+
   given zonedDateTime: Encoder[ZonedDateTime] with
-    def sqlType: SqlType                   = SqlType.Timestamptz
-    def encode(a: ZonedDateTime): SqlValue = SqlValue.Timestamptz(a.toInstant)
+    def sqlType: SqlType                   = SqlType.TimestampTz
+    def encode(a: ZonedDateTime): SqlValue = SqlValue.TimestampTz(a.toInstant)
 
   given offsetDateTime: Encoder[OffsetDateTime] with
-    def sqlType: SqlType                    = SqlType.Timestamptz
-    def encode(a: OffsetDateTime): SqlValue = SqlValue.Timestamptz(a.toInstant)
+    def sqlType: SqlType                    = SqlType.TimestampTz
+    def encode(a: OffsetDateTime): SqlValue = SqlValue.TimestampTz(a.toInstant)
 
   given defaultUuidEncoder: Encoder[UUID] = postgres.uuidEncoder
 
@@ -108,6 +113,6 @@ object Encoder:
     def encode(values: Chunk[A]): SqlValue = SqlValue.Array(element.sqlType, values.map(element.encode))
 
   def fromJsonCodec[T](using codec: zio.json.JsonCodec[T]): Encoder[T] = new Encoder[T]:
-    def sqlType: SqlType       = SqlType.Jsonb
-    def encode(a: T): SqlValue = SqlValue.Jsonb(JsonText(codec.encoder.encodeJson(a, None).toString))
+    def sqlType: SqlType       = SqlType.Json
+    def encode(a: T): SqlValue = SqlValue.Json(JsonText(codec.encoder.encodeJson(a, None).toString))
 end Encoder

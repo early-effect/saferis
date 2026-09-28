@@ -29,21 +29,22 @@ object SQLiteDialect
     */
   def columnType(tpe: SqlType): ColumnType = ColumnType:
     tpe match
-      case SqlType.Bool                               => "boolean"
-      case SqlType.Int2 | SqlType.Int4 | SqlType.Int8 => "integer"
-      case SqlType.Float4                             => "real"
-      case SqlType.Float8                             => "double"
-      case SqlType.Numeric                            => "numeric"
-      case SqlType.VarChar                            => s"varchar($DefaultVarcharLength)"
-      case SqlType.Text                               => "text"
-      case SqlType.Bytea                              => "blob"
-      case SqlType.Date                               => "date"
-      case SqlType.Time                               => "time"
-      case SqlType.Timestamp                          => "timestamp"
-      case SqlType.Timestamptz                        => "timestamptz"
-      case SqlType.Jsonb                              => "json"
-      case SqlType.Uuid                               => "uuid"
-      case SqlType.Array(_) | SqlType.Other(_)        => "text"
+      case SqlType.Bool                                        => "boolean"
+      case SqlType.SmallInt | SqlType.Integer | SqlType.BigInt => "integer"
+      case SqlType.Real                                        => "real"
+      case SqlType.DoublePrecision                             => "double"
+      case SqlType.Numeric                                     => "numeric"
+      case SqlType.VarChar                                     => s"varchar($DefaultVarcharLength)"
+      case SqlType.Text                                        => "text"
+      case SqlType.Binary                                      => "blob"
+      case SqlType.Date                                        => "date"
+      case SqlType.Time                                        => "time"
+      case SqlType.TimeTz                                      => "timetz"
+      case SqlType.Timestamp                                   => "timestamp"
+      case SqlType.TimestampTz                                 => "timestamptz"
+      case SqlType.Json                                        => "json"
+      case SqlType.Uuid                                        => "uuid"
+      case SqlType.Array(_) | SqlType.Other(_)                 => "text"
 
   // === Auto-increment Syntax ===
   override def autoIncrementClause(isGenerated: Boolean, isKey: Boolean, hasDefault: Boolean): SqlText = SqlText:

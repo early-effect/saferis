@@ -115,7 +115,7 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
       zio.stream.ZStream.unwrap:
         note(s"cursor:${command.inspection}").as:
           if failCursor then
-            zio.stream.ZStream.succeed(SqlRow(Chunk(ColumnName("n")), Chunk(SqlValue.Int4(1)))) ++
+            zio.stream.ZStream.succeed(SqlRow(Chunk(ColumnName("n")), Chunk(SqlValue.Integer(1)))) ++
               zio.stream.ZStream.fail(
                 SaferisError.QueryError(Some(SqlState.SyntaxError), "cursor failed", Some(command.inspection))
               )
