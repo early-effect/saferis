@@ -167,8 +167,8 @@ object StreamSpecs:
             // Intentionally invalid SQL to test error handling
             sql"SELECT * FORM invalid_syntax".queryStream[StreamItem].runDrain.flip
           isSyntaxError = error match
-            case SaferisError.SyntaxError(_, _, _) => true
-            case _                                 => false
+            case SaferisError.SyntaxError(_) => true
+            case _                           => false
         yield assertTrue(isSyntaxError)
       }
     ),

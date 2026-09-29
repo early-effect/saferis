@@ -235,15 +235,17 @@ private final class JdbcConnection(
 
   private def classifyThrowable(t: Throwable, sql: Option[SqlText]): SaferisError = t match
     case e: java.sql.SQLTimeoutException =>
+      val state = Option(e.getSQLState).flatMap(SqlState.parse)
       SqlState.classify(
-        ServerError(Some(SqlState.QueryCanceled), messageOf(e), None, Some(e.getErrorCode)),
+        ServerError(SqlCondition.Canceled, messageOf(e), state, Some(e.getErrorCode)),
         sql,
         config.retry,
       )
     case e: SQLException =>
       SqlState.classify(adapter.serverError(e), sql, config.retry)
-    case e: java.io.IOException => SaferisError.ConnectionLost(SqlState.ConnectionException, messageOf(e), sql)
-    case e                      => SaferisError.Unexpected(messageOf(e))
+    case e: java.io.IOException =>
+      SaferisError.ConnectionLost(ServerDetail(messageOf(e), sql, None, None, None))
+    case e => SaferisError.Unexpected(messageOf(e))
 
   /** Parameters bind in order. The first value the adapter refuses stops the bind. */
   private def bind(ps: PreparedStatement, pieces: Chunk[SqlPiece]): Either[SaferisError, Unit] =

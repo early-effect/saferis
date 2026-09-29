@@ -239,7 +239,7 @@ object InterpolatorSpecs extends ZIOSpecDefault:
 
       test("SqlValue.array rejects a nested member of the wrong type"):
         val nested = SqlValue.array(SqlType.Integer, Chunk(SqlValue.Integer(1), SqlValue.Text("x")))
-        assertTrue(nested.isLeft)
+        assertTrue(SqlValue.malformed(nested).isDefined)
 
       test("mixed splice keeps writes in argument order"):
         val name = "Bob"

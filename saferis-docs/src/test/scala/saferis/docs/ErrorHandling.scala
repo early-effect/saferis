@@ -23,16 +23,22 @@ object ErrorHandling extends SaferisDocSpecSuite:
     section("Error Categories")(
       md"""| Error Type | When It Occurs |
 |------------|----------------|
-| `UniqueViolation` | SQLSTATE `23505`. The message is `unique violation` |
-| `ConstraintViolation` | Other class `23` failures (foreign key, check, not null). `23514` says `check violation` |
-| `Deadlock` | SQLSTATE `40P01` |
-| `SerializationFailure` | SQLSTATE `40001` |
-| `SyntaxError` | Class `42` |
-| `DataError` | Class `22` |
-| `QueryError` | Other SQL execution errors, including `25P02` after a failed statement |
-| `Timeout` | Statement timeout, or SQLSTATE `57014`. See [Statement Timeouts](statement-timeouts.html) |
-| `Retryable` | Vendor code the session hook marked transient. See [Retryable Errors](retryable-errors.html) |
-| `ConnectionLost` | Class `08` |
+| `UniqueViolation` | Unique violation. Message and SQLSTATE stay as sent (`23505` on Postgres, `23000` on MySQL). |
+| `ForeignKeyViolation` | Foreign key (`23503` on Postgres). |
+| `NotNullViolation` | Not null (`23502` on Postgres). |
+| `CheckViolation` | Check (`23514` on Postgres). The message stays the server's sentence. |
+| `Deadlock` | The driver named a deadlock (Postgres `40P01`, MySQL errno 1213). |
+| `SerializationFailure` | `40001`, or SQLite busy and locked. |
+| `SyntaxError` | Class `42`. |
+| `UndefinedTable` | Postgres `42P01`. |
+| `UndefinedColumn` | Postgres `42703`. |
+| `DataError` | Class `22`. |
+| `Aborted` | The server reported an aborted transaction (Postgres `25P02`). |
+| `QueryError` | A server error with no named condition. |
+| `Timeout` | The driver canceled the statement, or Postgres `57014`. See [Statement Timeouts](statement-timeouts.html) |
+| `Shutdown` | Postgres `57P01`, `57P02`, or `57P03`. |
+| `Retryable` | `SqlCondition.Other` that the vendor hook marked transient. See [Retryable Errors](retryable-errors.html) |
+| `ConnectionLost` | Class `08`, or a socket failure. A socket has no SQLSTATE. |
 | `ConnectionError` | Cannot acquire a connection, or `configure` threw |
 | `DecodingError` | Cannot decode a column value to the expected Scala type |
 | `EncodingError` | Cannot encode a parameter value for the prepared statement |
@@ -41,20 +47,25 @@ object ErrorHandling extends SaferisDocSpecSuite:
 | `Unexpected` | Non-SQL errors (wrapped in Unexpected) |"""
     ),
     section("SQL Error Classification")(
-      md"""SQL errors are categorized by SQLSTATE. The cases do not carry a `Throwable`.
+      md"""The case is the condition. The message and the SQLSTATE are what the server sent. The cases do not carry a `Throwable`.
 
-| SQLSTATE | Error Type |
+| What the server sent | Error |
 |----------|------------|
 | `23505` | `UniqueViolation` |
-| `23514` | `ConstraintViolation` (`check violation`) |
-| other `23` | `ConstraintViolation` (server message kept) |
-| `40P01` | `Deadlock` |
+| `23503` | `ForeignKeyViolation` |
+| `23502` | `NotNullViolation` |
+| `23514` | `CheckViolation` |
 | `40001` | `SerializationFailure` |
-| `08` | `ConnectionLost` |
-| `42` | `SyntaxError` |
-| `22` | `DataError` |
-| `57014` | `Timeout` |
-| other | `QueryError`, or `Retryable` when the vendor hook matches |"""
+| class `08` | `ConnectionLost` |
+| class `42` | `SyntaxError` |
+| class `22` | `DataError` |
+| Postgres `40P01` | `Deadlock` |
+| Postgres `25P02` | `Aborted` |
+| Postgres `57014` | `Timeout` |
+| Postgres `42P01` | `UndefinedTable` |
+| Postgres `42703` | `UndefinedColumn` |
+| Postgres `57P01`, `57P02`, `57P03` | `Shutdown` |
+| other | `QueryError`, or `Retryable` when the vendor hook matches `SqlCondition.Other` |"""
     ),
     section("Pattern Matching on Errors")(
       md"""Use pattern matching for type-safe error handling:""",
@@ -89,8 +100,8 @@ object ErrorHandling extends SaferisDocSpecSuite:
           // Try to insert duplicate email
           result <- dml.insert(UniqueEmail(-1, "alice@example.com")).either
         yield result match
-          case Left(SaferisError.UniqueViolation(constraint, _, _)) =>
-            s"Unique violation: ${constraint.getOrElse("unknown")}"
+          case Left(SaferisError.UniqueViolation(detail)) =>
+            s"Unique violation: ${detail.constraint.getOrElse("unknown")}"
           case Left(error) =>
             s"Other error: ${error.message}"
           case Right(_) =>
@@ -119,15 +130,19 @@ shown below the snippet:""",
       md"""Drivers call `SqlState.classify`. Application code matches the case. There is no `fromThrowable`.""",
       exampleValue {
         val unique = SqlState.classify(
-          ServerError(Some(SqlState.UniqueViolation), "duplicate key", Some(ConstraintName("users_email_key"))),
+          ServerError(
+            SqlCondition.Unique(Some(ConstraintName("users_email_key"))),
+            "duplicate key",
+            Some(SqlState.UniqueViolation),
+          ),
           Some(SqlText("insert into users values ($1)")),
           _ => false,
         )
-        val other = SqlState.classify(ServerError(None, "something went wrong"), None, _ => false)
+        val other = SqlState.classify(ServerError(SqlCondition.Other, "something went wrong"), None, _ => false)
         (unique, other)
       }.assert {
-        case (SaferisError.UniqueViolation(constraint, "unique violation", _), _: SaferisError.QueryError) =>
-          assertTrue(constraint.contains("users_email_key"))
+        case (SaferisError.UniqueViolation(detail), _: SaferisError.QueryError) =>
+          assertTrue(detail.constraint.contains("users_email_key"), detail.message == "duplicate key")
         case other => assertTrue(false).label(s"unexpected: $other")
       },
     ),
@@ -136,11 +151,11 @@ shown below the snippet:""",
       exampleValue {
         def logError(error: SaferisError): String = error match
           case e: SaferisError.UniqueViolation =>
-            s"Unique ${e.constraint.getOrElse("constraint")} violated. SQL: ${e.sql.getOrElse("N/A")}"
-          case e: SaferisError.ConstraintViolation =>
-            s"Constraint ${e.sqlState} violated. SQL: ${e.sql.getOrElse("N/A")}"
+            s"Unique ${e.detail.constraint.getOrElse("constraint")} violated. SQL: ${e.detail.sql.getOrElse("N/A")}"
+          case e: SaferisError.ForeignKeyViolation =>
+            s"Foreign key violated. SQL: ${e.detail.sql.getOrElse("N/A")}"
           case e: SaferisError.SyntaxError =>
-            s"Syntax error: ${e.message}. SQL: ${e.sql.getOrElse("N/A")}"
+            s"Syntax error: ${e.message}. SQL: ${e.detail.sql.getOrElse("N/A")}"
           case e: SaferisError.DecodingError =>
             s"Failed to decode column '${e.columnName}' as ${e.expectedType}"
           case e: SaferisError.SchemaValidation =>
@@ -149,7 +164,11 @@ shown below the snippet:""",
             e.message
 
         val sample = SqlState.classify(
-          ServerError(Some(SqlState.UniqueViolation), "duplicate key", Some(ConstraintName("users_email_key"))),
+          ServerError(
+            SqlCondition.Unique(Some(ConstraintName("users_email_key"))),
+            "duplicate key",
+            Some(SqlState.UniqueViolation),
+          ),
           Some(SqlText("insert into users values ($1)")),
           _ => false,
         )

@@ -94,9 +94,8 @@ end SqlValue
 
 object SqlValue:
   /** Every member is `element` or `Null(element)`, nested arrays included. A mismatch is not an array. */
-  def array(element: SqlType, values: Chunk[SqlValue]): Either[String, SqlValue] =
-    val candidate = Array(element, values)
-    malformed(candidate).toLeft(candidate)
+  def array(element: SqlType, values: Chunk[SqlValue]): SqlValue =
+    Array(element, values)
 
   /** Why an array value breaks the member rule, or `None`. Scalars are never malformed. */
   private[saferis] def malformed(value: SqlValue): Option[String] = value match

@@ -51,7 +51,7 @@ object MyDialect extends Dialect:
   def autoIncrementClause(isGenerated: Boolean, isPrimaryKey: Boolean, hasCompoundKey: Boolean): SqlText = ...
 
 object MyAdapter extends StandardJdbcAdapter:
-  // Map vendor error codes to the SQLSTATEs Saferis classifies (23505 unique, 40P01 deadlock, ...).
+  // Name the condition from a code this driver reports. Leave the SQLSTATE and the message as the server sent them.
   override def serverError(e: SQLException): ServerError = ...
 
 val session = JdbcSession.layer(MyAdapter)

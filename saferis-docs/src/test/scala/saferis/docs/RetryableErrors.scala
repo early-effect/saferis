@@ -22,16 +22,16 @@ object RetryableErrors extends SaferisDocSpecSuite:
   def doc = page("Retryable Errors")(
     md"""Some database failures are transient and worth retrying: connection loss, deadlocks, serialization failures, and vendor transport errors. Those are distinct cases. A vendor hook does not rename them.""",
     section("Named transient states")(
-      md"""`SqlState.classify` maps the standard codes before it consults a vendor hook:
+      md"""`SqlState.classify` turns a `SqlCondition` into a case. The message and SQLSTATE stay the ones on the `ServerError`. A vendor hook does not rename a condition that already has a case:
 
-- `08xxx`: `ConnectionLost`
-- `40001`: `SerializationFailure`
-- `40P01`: `Deadlock`
-- `57014`, or a driver statement timeout: `Timeout`
-- `23505`: `UniqueViolation` (message `unique violation`)
-- `42xxx`: `SyntaxError`, even when the vendor hook returns true
+- `Connection` (class `08`): `ConnectionLost`
+- `Serialization` (`40001`): `SerializationFailure`
+- `Deadlock` (Postgres `40P01`, MySQL errno 1213): `Deadlock`
+- `Canceled` (a driver statement timeout, or Postgres `57014`): `Timeout`
+- `Unique` (`23505`): `UniqueViolation`. The message stays the server's sentence.
+- `Syntax` (class `42`): `SyntaxError`, even when the vendor hook returns true
 
-`SqlState.defaultRetryable` is true for class `08`, `40001`, and `40P01`. The JDBC session uses that as the default `JdbcSessionConfig.retry` hook, and the hook only fills codes that are not already named. A match becomes `Retryable`."""
+`SqlState.defaultRetryable` is true for `Connection`, `Serialization`, and `Deadlock`. The JDBC session uses that as the default `JdbcSessionConfig.retry` hook. The hook only fills `SqlCondition.Other`. A match becomes `Retryable`."""
     ),
     section("Driving retries with ZIO")(
       exampleValue {
@@ -52,7 +52,7 @@ object RetryableErrors extends SaferisDocSpecSuite:
 
         val session = PostgresJdbc.layer(JdbcSessionConfig(retry = databricks))
         val vendor  = SqlState.classify(
-          ServerError(None, "http blip", vendorCode = Some(8000)),
+          ServerError(SqlCondition.Other, "http blip", vendorCode = Some(8000)),
           Some(SqlText("select 1")),
           databricks,
         )

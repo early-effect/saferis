@@ -129,25 +129,21 @@ private object SqliteAdapter extends StandardJdbcAdapter:
         try Right(build(text))
         catch case NonFatal(e) => Left(SaferisError.DecodingError(column.label, column.typeName, e.getMessage))
 
-  /** SQLite has result codes, not SQLSTATEs. Map the ones `SqlState.classify` names. */
+  /** SQLite has result codes, not SQLSTATEs. The driver's SQLSTATE, if any, stays on the error. */
   override def serverError(e: SQLException): ServerError =
-    val base                = super.serverError(e)
-    def as(state: SqlState) = base.copy(sqlState = Some(state))
-    e match
+    val base      = super.serverError(e)
+    val condition = e match
       case sqlite: SQLiteException =>
         sqlite.getResultCode match
           case SQLiteErrorCode.SQLITE_CONSTRAINT_UNIQUE | SQLiteErrorCode.SQLITE_CONSTRAINT_PRIMARYKEY =>
-            as(SqlState.UniqueViolation)
-          case SQLiteErrorCode.SQLITE_CONSTRAINT_FOREIGNKEY                => as(SqlState.ForeignKeyViolation)
-          case SQLiteErrorCode.SQLITE_CONSTRAINT_NOTNULL                   => as(SqlState.NotNullViolation)
-          case SQLiteErrorCode.SQLITE_CONSTRAINT_CHECK                     => as(SqlState.CheckViolation)
-          case SQLiteErrorCode.SQLITE_BUSY | SQLiteErrorCode.SQLITE_LOCKED => as(SqlState.SerializationFailure)
-          case SQLiteErrorCode.SQLITE_INTERRUPT                            => as(SqlState.QueryCanceled)
-          case SQLiteErrorCode.SQLITE_ERROR if base.message.contains("syntax error")   => as(SqlState.SyntaxError)
-          case SQLiteErrorCode.SQLITE_ERROR if base.message.contains("no such table")  => as(SqlState.UndefinedTable)
-          case SQLiteErrorCode.SQLITE_ERROR if base.message.contains("no such column") => as(SqlState.UndefinedColumn)
-          case _                                                                       => base
-      case _ => base
-    end match
+            SqlCondition.Unique(None)
+          case SQLiteErrorCode.SQLITE_CONSTRAINT_FOREIGNKEY                => SqlCondition.ForeignKey(None)
+          case SQLiteErrorCode.SQLITE_CONSTRAINT_NOTNULL                   => SqlCondition.NotNull
+          case SQLiteErrorCode.SQLITE_CONSTRAINT_CHECK                     => SqlCondition.Check(None)
+          case SQLiteErrorCode.SQLITE_BUSY | SQLiteErrorCode.SQLITE_LOCKED => SqlCondition.Serialization
+          case SQLiteErrorCode.SQLITE_INTERRUPT                            => SqlCondition.Canceled
+          case _                                                           => SqlCondition.Other
+      case _ => base.condition
+    base.copy(condition = condition)
   end serverError
 end SqliteAdapter

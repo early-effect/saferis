@@ -75,17 +75,20 @@ object TransactionConformance:
           captured <- seen.get
           count    <- sql"select count(*) from conformance_abort".queryValue[Long]
           aborted = captured match
-            case Some(Left(SaferisError.QueryError(Some(SqlState.InFailedTransaction), _, _))) => true
-            case _                                                                             => false
+            case Some(Left(SaferisError.QueryError(detail))) => detail.sqlState == SqlState.parse("25P02")
+            case _                                           => false
+          // The first statement error, not the synthetic 25P02. SQLite's SQLITE_ERROR is QueryError.
           recorded = exit match
             case Exit.Failure(cause) =>
               cause.failureOption match
-                case Some(_: SaferisError.SyntaxError) => true
-                case _                                 => false
+                case Some(SaferisError.QueryError(detail)) =>
+                  detail.sqlState != SqlState.parse("25P02") && detail.message.nonEmpty
+                case Some(err) => err.message.nonEmpty
+                case None      => false
             case _ => false
         yield assertTrue(aborted, recorded, count.contains(0L))
       ,
-      test("a unique violation message is exactly unique violation"):
+      test("a unique violation keeps the server message"):
         for
           _    <- sql"drop table if exists conformance_uniq".dml
           _    <- sql"create table conformance_uniq (id integer primary key)".dml
@@ -95,8 +98,8 @@ object TransactionConformance:
           exit match
             case Exit.Failure(cause) =>
               cause.failureOption match
-                case Some(SaferisError.UniqueViolation(_, message, _)) => message == "unique violation"
-                case _                                                 => false
+                case Some(SaferisError.UniqueViolation(detail)) => detail.message.nonEmpty
+                case _                                          => false
             case _ => false
       ,
       test("catching a failed stream inside transact does not commit"):

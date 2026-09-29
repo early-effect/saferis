@@ -14,7 +14,7 @@ import java.time.LocalTime
 import java.util.UUID
 
 /** What MySQL does differently from the portable suite: JSON, `char(36)` UUIDs, `datetime`, unsigned integers, and
-  * vendor error codes mapped to the shared SQLSTATE vocabulary.
+  * errnos that name a condition while the Connector/J SQLSTATE and the server message stay.
   */
 object MySqlValueSpecs:
   final case class Meta(tags: List[String], version: Int) derives JsonCodec
@@ -64,7 +64,7 @@ object MySqlValueSpecs:
           read <- sql"select n from mysql_unsigned".queryValue[Long]
         yield assertTrue(read.contains(4294967295L))
       ,
-      test("a duplicate key is UniqueViolation, named by the key"):
+      test("a duplicate key is UniqueViolation, keeps 23000, and the message names the key"):
         for
           _ <- sql"drop table if exists mysql_uniq".dml
           _ <-
@@ -73,10 +73,11 @@ object MySqlValueSpecs:
           exit <- sql"insert into mysql_uniq (id, email) values (2, ${"a@b.c"})".dml.exit
         yield assertTrue:
           failure(exit) match
-            case Some(SaferisError.UniqueViolation(Some("uq_email"), "unique violation", _)) => true
-            case _                                                                           => false
+            case Some(SaferisError.UniqueViolation(detail)) =>
+              detail.sqlState.contains("23000") && detail.constraint.isEmpty && detail.message.contains("uq_email")
+            case _ => false
       ,
-      test("a missing parent is a 23503 constraint violation, named by the constraint"):
+      test("a missing parent is ForeignKeyViolation, and the message names the constraint"):
         for
           _ <- sql"drop table if exists mysql_child".dml
           _ <- sql"drop table if exists mysql_parent".dml
@@ -89,8 +90,9 @@ object MySqlValueSpecs:
           exit <- sql"insert into mysql_child (id, parent_id) values (1, 99)".dml.exit
         yield assertTrue:
           failure(exit) match
-            case Some(SaferisError.ConstraintViolation(SqlState.ForeignKeyViolation, Some("fk_child_parent"), _, _)) =>
-              true
+            case Some(SaferisError.ForeignKeyViolation(detail)) =>
+              detail.constraint.isEmpty && detail.sqlState.contains("23000") &&
+              detail.message.contains("fk_child_parent")
             case _ => false
       ,
       test("an array parameter is Unsupported on MySQL"):

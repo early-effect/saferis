@@ -39,9 +39,9 @@ trait JdbcAdapter:
 
   def read(rs: ResultSet, column: JdbcColumn): Either[SaferisError, SqlValue]
 
-  /** The fields `SqlState.classify` reads. Normalize vendor codes to these SQLSTATEs so every database classifies the
-    * same way: `23505` unique, `23503` foreign key, `23502` not null, `23514` check, `40P01` deadlock, `40001`
-    * serialization failure, `57014` canceled, `08xxx` connection, `42xxx` syntax. Keep the vendor code on `vendorCode`.
+  /** What the server reported. Set `condition` from a code this driver can name. Leave `message` and `sqlState` as the
+    * server sent them, and put a vendor number (MySQL errno, SQLite result code) on `vendorCode`. Do not rewrite a code
+    * into a Postgres SQLSTATE.
     */
   def serverError(e: SQLException): ServerError
 

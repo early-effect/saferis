@@ -7,35 +7,54 @@ sealed trait SaferisError:
   def message: String
 
 object SaferisError:
-  final case class UniqueViolation(
-      constraint: Option[ConstraintName],
-      message: String,
-      sql: Option[SqlText],
-  ) extends SaferisError
+  final case class UniqueViolation(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
 
-  final case class ConstraintViolation(
-      sqlState: SqlState,
-      constraint: Option[ConstraintName],
-      message: String,
-      sql: Option[SqlText],
-  ) extends SaferisError
+  final case class ForeignKeyViolation(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
 
-  final case class Deadlock(message: String, sql: Option[SqlText]) extends SaferisError
+  final case class NotNullViolation(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
 
-  final case class SerializationFailure(message: String, sql: Option[SqlText]) extends SaferisError
+  final case class CheckViolation(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
 
-  final case class ConnectionLost(sqlState: SqlState, message: String, sql: Option[SqlText]) extends SaferisError
+  final case class Deadlock(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
 
-  final case class Timeout(message: String, sql: Option[SqlText]) extends SaferisError
+  final case class SerializationFailure(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
 
-  final case class SyntaxError(sqlState: SqlState, message: String, sql: Option[SqlText]) extends SaferisError
+  final case class ConnectionLost(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
 
-  final case class DataError(sqlState: SqlState, message: String, sql: Option[SqlText]) extends SaferisError
+  final case class Timeout(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
 
-  final case class QueryError(sqlState: Option[SqlState], message: String, sql: Option[SqlText]) extends SaferisError
+  final case class Shutdown(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
 
-  /** Vendor extension only. Named retryable states stay their own cases. */
-  final case class Retryable(sqlState: Option[SqlState], message: String, sql: Option[SqlText]) extends SaferisError
+  final case class SyntaxError(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
+
+  final case class UndefinedTable(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
+
+  final case class UndefinedColumn(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
+
+  final case class DataError(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
+
+  final case class Aborted(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
+
+  final case class QueryError(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
+
+  /** Vendor extension only. Named retryable conditions stay their own cases. */
+  final case class Retryable(detail: ServerDetail) extends SaferisError:
+    def message: String = detail.message
 
   final case class ConnectionError(message: String) extends SaferisError
 

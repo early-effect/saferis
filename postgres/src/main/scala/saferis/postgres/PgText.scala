@@ -302,7 +302,9 @@ object PgText:
         .foldLeft[Either[String, Chunk[SqlValue]]](Right(Chunk.empty)):
           case (Left(err), _)       => Left(err)
           case (Right(acc), member) => decodeMember(element, elementType, nested, member).map(acc :+ _)
-        .flatMap(values => SqlValue.array(memberType, values))
+        .flatMap: values =>
+          val value = SqlValue.array(memberType, values)
+          SqlValue.malformed(value).toLeft(value)
 
   private def decodeMember(
       element: Int,

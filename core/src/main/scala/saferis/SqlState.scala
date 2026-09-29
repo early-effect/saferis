@@ -11,23 +11,16 @@ object SqlState:
   def parse(code: String): Option[SqlState] =
     Option.when(code.length == 5 && code.forall(c => c.isDigit || (c >= 'A' && c <= 'Z')))(code)
 
+  /** A code this library names. Callers outside the companion use [[parse]]. */
+  private[saferis] def code(raw: String): SqlState = raw
+
   val ConnectionException: SqlState  = "08000"
-  val ConnectionFailure: SqlState    = "08006"
   val DataException: SqlState        = "22000"
   val NotNullViolation: SqlState     = "23502"
   val ForeignKeyViolation: SqlState  = "23503"
   val UniqueViolation: SqlState      = "23505"
   val CheckViolation: SqlState       = "23514"
-  val InFailedTransaction: SqlState  = "25P02"
   val SerializationFailure: SqlState = "40001"
-  val Deadlock: SqlState             = "40P01"
-  val SyntaxError: SqlState          = "42601"
-  val UndefinedColumn: SqlState      = "42703"
-  val UndefinedTable: SqlState       = "42P01"
-  val QueryCanceled: SqlState        = "57014"
-  val AdminShutdown: SqlState        = "57P01"
-  val CrashShutdown: SqlState        = "57P02"
-  val CannotConnectNow: SqlState     = "57P03"
 
   extension (state: SqlState)
     /** The two-character class, `23` for every integrity violation. */
@@ -38,51 +31,45 @@ object SqlState:
     def isIntegrityViolation: Boolean  = sqlClass == "23"
     def isSyntaxOrAccessRule: Boolean  = sqlClass == "42"
 
-    /** The server is shutting down or not accepting connections, so the connection is dead. */
-    def isShutdown: Boolean = state == AdminShutdown || state == CrashShutdown || state == CannotConnectNow
   end extension
 
   def defaultRetryable(error: ServerError): Boolean =
-    error.sqlState.exists(state => state.isConnectionException || state == SerializationFailure || state == Deadlock)
+    error.condition match
+      case SqlCondition.Connection | SqlCondition.Serialization | SqlCondition.Deadlock => true
+      case _                                                                            => false
 
-  def defaultRetryable(sqlState: Option[SqlState]): Boolean =
-    defaultRetryable(ServerError(sqlState, ""))
-
-  /** One `SaferisError` for every driver. A timeout is `57014` before this is called. */
+  /** One `SaferisError` for every driver. The message and SQLSTATE are the ones on `error`. */
   def classify(
       error: ServerError,
       sql: Option[SqlText],
       retryable: ServerError => Boolean,
   ): SaferisError =
-    error.sqlState match
-      case Some(QueryCanceled) =>
-        SaferisError.Timeout(error.message, sql)
-      case Some(UniqueViolation) =>
-        SaferisError.UniqueViolation(error.constraint, "unique violation", sql)
-      case Some(Deadlock) =>
-        SaferisError.Deadlock(error.message, sql)
-      case Some(SerializationFailure) =>
-        SaferisError.SerializationFailure(error.message, sql)
-      case Some(state) if state.isConnectionException =>
-        SaferisError.ConnectionLost(state, error.message, sql)
-      case Some(CheckViolation) =>
-        SaferisError.ConstraintViolation(CheckViolation, error.constraint, "check violation", sql)
-      case Some(state) if state.isIntegrityViolation =>
-        SaferisError.ConstraintViolation(state, error.constraint, error.message, sql)
-      case Some(state) if state.isSyntaxOrAccessRule =>
-        SaferisError.SyntaxError(state, error.message, sql)
-      case Some(state) if state.isDataException =>
-        SaferisError.DataError(state, error.message, sql)
-      case _ if retryable(error) =>
-        SaferisError.Retryable(error.sqlState, error.message, sql)
-      case _ =>
-        SaferisError.QueryError(error.sqlState, error.message, sql)
+    val detail = ServerDetail(error.message, sql, error.sqlState, error.vendorCode, error.condition.named)
+    error.condition match
+      case SqlCondition.Unique(_)                 => SaferisError.UniqueViolation(detail)
+      case SqlCondition.ForeignKey(_)             => SaferisError.ForeignKeyViolation(detail)
+      case SqlCondition.NotNull                   => SaferisError.NotNullViolation(detail)
+      case SqlCondition.Check(_)                  => SaferisError.CheckViolation(detail)
+      case SqlCondition.Deadlock                  => SaferisError.Deadlock(detail)
+      case SqlCondition.Serialization             => SaferisError.SerializationFailure(detail)
+      case SqlCondition.Canceled                  => SaferisError.Timeout(detail)
+      case SqlCondition.Connection                => SaferisError.ConnectionLost(detail)
+      case SqlCondition.Shutdown                  => SaferisError.Shutdown(detail)
+      case SqlCondition.Syntax                    => SaferisError.SyntaxError(detail)
+      case SqlCondition.UndefinedTable            => SaferisError.UndefinedTable(detail)
+      case SqlCondition.UndefinedColumn           => SaferisError.UndefinedColumn(detail)
+      case SqlCondition.Data                      => SaferisError.DataError(detail)
+      case SqlCondition.Aborted                   => SaferisError.Aborted(detail)
+      case SqlCondition.Other if retryable(error) => SaferisError.Retryable(detail)
+      case SqlCondition.Other                     => SaferisError.QueryError(detail)
+    end match
+  end classify
 end SqlState
 
-/** Fields a driver can read off a server error before classification. Not a throwable. */
+/** What a driver read off a server error, before it becomes a [[SaferisError]]. Not a throwable. */
 final case class ServerError(
-    sqlState: Option[SqlState],
+    condition: SqlCondition,
     message: String,
-    constraint: Option[ConstraintName] = None,
+    sqlState: Option[SqlState] = None,
     vendorCode: Option[Int] = None,
 )

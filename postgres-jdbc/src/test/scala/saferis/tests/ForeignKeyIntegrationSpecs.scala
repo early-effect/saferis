@@ -107,8 +107,8 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
           (sql"""insert into fk_int_orders ("userId", "productId", amount) values (999, 1, 100.00)""".insert).either
       yield assertTrue(
         result match
-          case Left(SaferisError.ConstraintViolation(SqlState.ForeignKeyViolation, _, _, _)) => true
-          case _                                                                             => false
+          case Left(SaferisError.ForeignKeyViolation(_)) => true
+          case _                                         => false
       )
       end for
     },
@@ -264,8 +264,8 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
       yield assertTrue(
         insertResult.isRight,
         failResult match
-          case Left(SaferisError.ConstraintViolation(SqlState.ForeignKeyViolation, _, _, _)) => true
-          case _                                                                             => false,
+          case Left(SaferisError.ForeignKeyViolation(_)) => true
+          case _                                         => false,
       )
       end for
     },

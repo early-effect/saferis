@@ -14,7 +14,7 @@ import java.time.LocalTime
 import java.util.UUID
 
 /** What SQLite does differently from the portable suite: values without a native storage class, 64-bit integers,
-  * foreign keys that are on, and result codes mapped to the shared SQLSTATE vocabulary.
+  * foreign keys that are on, and result codes that name a condition while the server message stays.
   */
 object SqliteValueSpecs:
   final case class Meta(tags: List[String], version: Int) derives JsonCodec
@@ -58,7 +58,7 @@ object SqliteValueSpecs:
           read <- sql"select * from lite_values where id = ${1}".queryOne[Row]
         yield assertTrue(read.contains(row))
       ,
-      test("foreign keys are enforced, and a violation is a 23503 constraint violation"):
+      test("a foreign key violation is ForeignKeyViolation and keeps the server message"):
         for
           _ <- sql"drop table if exists lite_child".dml
           _ <- sql"drop table if exists lite_parent".dml
@@ -68,18 +68,18 @@ object SqliteValueSpecs:
           exit <- sql"insert into lite_child (id, parent_id) values (1, 99)".dml.exit
         yield assertTrue:
           failure(exit) match
-            case Some(SaferisError.ConstraintViolation(SqlState.ForeignKeyViolation, _, _, _)) => true
-            case _                                                                             => false
+            case Some(SaferisError.ForeignKeyViolation(detail)) => detail.message.nonEmpty
+            case _                                              => false
       ,
-      test("a not-null violation is 23502"):
+      test("a not-null violation is NotNullViolation and keeps the server message"):
         for
           _    <- sql"drop table if exists lite_not_null".dml
           _    <- sql"create table lite_not_null (id integer primary key, name text not null)".dml
           exit <- sql"insert into lite_not_null (id, name) values (1, null)".dml.exit
         yield assertTrue:
           failure(exit) match
-            case Some(SaferisError.ConstraintViolation(SqlState.NotNullViolation, _, _, _)) => true
-            case _                                                                          => false
+            case Some(SaferisError.NotNullViolation(detail)) => detail.message.nonEmpty
+            case _                                           => false
       ,
       test("a real column keeps a Double's precision and a Float's value"):
         for

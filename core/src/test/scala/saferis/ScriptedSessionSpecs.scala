@@ -27,8 +27,8 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
         aborted = exit match
           case Exit.Failure(cause) =>
             cause.failureOption match
-              case Some(SaferisError.QueryError(Some(SqlState.InFailedTransaction), _, sql)) =>
-                sql.exists(_.contains("later"))
+              case Some(SaferisError.QueryError(detail)) =>
+                detail.sqlState == SqlState.parse("25P02") && detail.sql.exists(_.contains("later"))
               case _ => false
           case _ => false
       yield assertTrue(
@@ -53,8 +53,9 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
         failed = exit match
           case Exit.Failure(cause) =>
             cause.failureOption match
-              case Some(SaferisError.QueryError(Some(SqlState.SerializationFailure), _, _)) => true
-              case _                                                                        => false
+              case Some(SaferisError.QueryError(detail)) =>
+                detail.sqlState.contains(SqlState.SerializationFailure)
+              case _ => false
           case _ => false
       yield assertTrue(failed, calls.contains("commit"))
     ,
@@ -100,7 +101,11 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
       note(s"exec:${command.inspection}") *>
         ZIO
           .when(command.inspection.contains("boom"))(
-            ZIO.fail(SaferisError.SyntaxError(SqlState.SyntaxError, "boom", Some(command.inspection)))
+            ZIO.fail(
+              SaferisError.SyntaxError(
+                ServerDetail("boom", Some(command.inspection), SqlState.parse("42601"), None, None)
+              )
+            )
           )
           .unit
           .as(1L)
@@ -117,7 +122,9 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
           if failCursor then
             zio.stream.ZStream.succeed(SqlRow(Chunk(ColumnName("n")), Chunk(SqlValue.Integer(1)))) ++
               zio.stream.ZStream.fail(
-                SaferisError.QueryError(Some(SqlState.SyntaxError), "cursor failed", Some(command.inspection))
+                SaferisError.QueryError(
+                  ServerDetail("cursor failed", Some(command.inspection), SqlState.parse("42000"), None, None)
+                )
               )
           else zio.stream.ZStream.empty
 
@@ -128,7 +135,11 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
       note("commit") *>
         ZIO
           .when(failCommit)(
-            ZIO.fail(SaferisError.QueryError(Some(SqlState.SerializationFailure), "commit failed", None))
+            ZIO.fail(
+              SaferisError.QueryError(
+                ServerDetail("commit failed", None, Some(SqlState.SerializationFailure), None, None)
+              )
+            )
           )
           .unit
 

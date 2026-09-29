@@ -102,9 +102,9 @@ object PgTextSpecs extends ZIOSpecDefault:
         def backInt(value: SqlValue) =
           PgText.encode(value).flatMap(text => PgText.decode(1007, text).toOption)
         assertTrue(
-          textArray.exists(value => back(value).contains(value)),
-          intArray.exists(value => backInt(value).contains(value)),
-          SqlValue.array(SqlType.Integer, Chunk(SqlValue.Text("x"))).isLeft,
+          back(textArray).contains(textArray),
+          backInt(intArray).contains(intArray),
+          SqlValue.malformed(SqlValue.array(SqlType.Integer, Chunk(SqlValue.Text("x")))).isDefined,
         ),
   )
 end PgTextSpecs

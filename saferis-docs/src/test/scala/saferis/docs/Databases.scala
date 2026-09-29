@@ -15,7 +15,7 @@ object Databases extends SaferisDocSpecSuite:
 | SQLite | `saferis-sqlite-jdbc` | `SqliteJdbc.layer()` | `import saferis.sqlite.given` |
 | H2 | `saferis-h2-jdbc` | `H2Jdbc.layer()` | `import saferis.h2.given` |
 
-Each adapter maps its driver's errors to the same SQLSTATEs, so `SaferisError.UniqueViolation`, `Deadlock`, and the rest mean the same thing everywhere. Every shipped adapter runs one conformance suite, provided as a layer, and so does a database you bring (see [Getting Started](getting-started.html)).
+Each adapter names a `SqlCondition` from a code the server actually sent. The SQLSTATE and the message stay as the server sent them, so `UniqueViolation` means a unique violation on every database without inventing a Postgres code for MySQL or SQLite. Every shipped adapter runs one conformance suite, provided as a layer, and so does a database you bring (see [Getting Started](getting-started.html)).
 
 This page says what each adapter does that the others do not.""",
     section("PostgreSQL")(
@@ -23,14 +23,14 @@ This page says what each adapter does that the others do not.""",
 - **Arrays, enums, `jsonb`, `RETURNING`, and upsert** are available. The query builder's `.inList` binds one array parameter, `= ANY($$1)`.
 - **`Schema.verify`** reads `information_schema` and `pg_catalog`.
 - **Node** always sets `DateStyle=ISO`, which its decoding depends on; a `DateStyle` in `PgConnectionConfig.parameters` is replaced. The pool turns on TCP keepalive, so a peer that vanished fails a `COMMIT` instead of hanging it. npm `pg@8.16.3` and `pg-cursor@2.22.0` are required at run time.
-- **Node transport failures** (`ECONNRESET`, `EPIPE`) are `SaferisError.ConnectionLost` with SQLSTATE `08006`, as an `IOException` is over JDBC, and the message keeps the code. They were a `QueryError` carrying the code as if it were a SQLSTATE."""
+- **Node transport failures** (`ECONNRESET`, `EPIPE`) are `SaferisError.ConnectionLost`. They are not a SQLSTATE, so `sqlState` is empty, and the message keeps the code. A JDBC `IOException` is the same: `ConnectionLost` with no SQLSTATE."""
     ),
     section("MySQL")(
       md"""- **The session time zone is UTC.** Every checkout runs `SET time_zone = '+00:00'` before your `configure`, so a `timestamp` column stores and returns UTC and an `Instant` round-trips whatever zone the JVM or server is in. That also means `NOW()` and `CURRENT_TIMESTAMP` in your own SQL return UTC. A `configure` that sets another time zone runs after it and wins, at the cost of that round trip.
 - **Streams read row by row** (Connector/J's streaming mode, fetch size `Integer.MIN_VALUE`). While a stream is open its connection cannot run another statement, so inside `transact` finish the stream before the next statement.
 - **DDL**: `Numeric` is `decimal(65, 30)`, `Timestamp` is `datetime(6)`, `TimestampTz` is `timestamp(6)`, and `Time` is `time(6)`. `import saferis.mysql.given` makes a `UUID` a `char(36)`.
 - **Tables created by Saferis 0.19** used `decimal` (which is `decimal(10,0)`) and `timestamp` for `LocalDateTime` too. A `LocalDateTime` field on such a `timestamp` column now reads as an instant and fails to decode; change the column to `datetime(6)` or the field to `Instant`.
-- **Errors**: vendor codes map to the shared SQLSTATEs. 1062 is a unique violation named by its key, 1451 and 1452 a foreign-key violation named by its constraint, 1048 not null, 3819 check, 1213 deadlock, and 3024 a canceled statement.
+- **Errors**: the errno picks the condition and the Connector/J SQLSTATE stays on the error. 1062 is unique, 1451 and 1452 foreign key, 1048 not null, 3819 check, 1213 deadlock, and 3024 canceled. The message is MySQL's sentence.
 - **No array parameters**: the query builder binds `IN (...)`, and binding an array fails with `SaferisError.Unsupported`. MySQL has no `RETURNING` or upsert capability.
 - **`Schema.verify`** reads `information_schema`, with names folded to lower case as MySQL compares them."""
     ),
@@ -40,7 +40,7 @@ This page says what each adapter does that the others do not.""",
 - **Types**: columns read by the type they were declared with (see [Dialect System](dialect-system.html)). Dates, times, and timestamps are ISO-8601 text, every integer is 64 bits, and a decimal uses SQLite's `numeric` affinity, which stores it as a number with SQLite's precision. A `json` column has numeric affinity too, so a document that is a bare number, such as `1e5`, is stored as a number and reads back as SQLite prints it.
 - **Tables created by Saferis 0.19** declared booleans as `integer`, every float and decimal as `real`, and dates and timestamps as `text`. On those columns a boolean or date/time field fails to decode; recreate those tables from the current DDL. Floats and doubles still read correctly, because a `real` column reads as the 8-byte double SQLite stores.
 - **`ddl.addColumn`** names the column. It used to emit `alter table t add column <type>` with no name, which SQLite rejects.
-- **Errors**: SQLite result codes map to the shared SQLSTATEs: unique and primary key, foreign key, not null, check, busy and locked (retryable), interrupt, and syntax, missing table, and missing column.
+- **Errors**: the result code names the condition. Unique and primary key, foreign key, not null, and check are those violations. Busy and locked are `SerializationFailure`. Interrupt is `Timeout`. Any other result code, including `SQLITE_ERROR`, is `QueryError`. The message is SQLite's sentence. A SQLSTATE is not invented.
 - **`Schema.verify`** reads the pragma table functions. SQLite does not keep the names of unique or foreign-key constraints, so those match by columns and `strictNameMatching` cannot match their names.
 - **No array parameters**: binding one fails with `SaferisError.Unsupported`."""
     ),

@@ -4,6 +4,7 @@ import saferis.*
 import saferis.postgres.DatabaseName
 import saferis.postgres.Host
 import saferis.postgres.PgConnectionConfig
+import saferis.postgres.PostgresSqlState
 import saferis.postgres.UserName
 import saferis.tests.PostgresTestContainer
 import zio.*
@@ -197,7 +198,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
 
   private val writes =
     suite("transactions")(
-      test("unique violation message is exactly unique violation"):
+      test("a unique violation keeps the server message and SQLSTATE"):
         for
           _    <- sql"drop table if exists pg_uniq".dml
           _    <- sql"create table pg_uniq (id integer primary key)".dml
@@ -207,8 +208,9 @@ object PgSessionSpecs extends ZIOSpecDefault:
           exit match
             case Exit.Failure(cause) =>
               cause.failureOption match
-                case Some(SaferisError.UniqueViolation(_, message, _)) => message == "unique violation"
-                case _                                                 => false
+                case Some(SaferisError.UniqueViolation(detail)) =>
+                  detail.sqlState.contains(SqlState.UniqueViolation) && detail.message.contains("duplicate key")
+                case _ => false
             case _ => false
       ,
       test("a failed transact rolls back"):
@@ -300,8 +302,8 @@ object PgSessionSpecs extends ZIOSpecDefault:
           ).provide(listening(pg.config(defaultTimeout = Some(30.seconds)), new Recording(heard)))
           (exit, captured, count) = result
           aborted                 = captured match
-            case Some(Left(SaferisError.QueryError(Some(SqlState.InFailedTransaction), _, sql))) =>
-              sql.exists(_.contains("later_count"))
+            case Some(Left(SaferisError.QueryError(detail))) =>
+              detail.sqlState == SqlState.parse("25P02") && detail.sql.exists(_.contains("later_count"))
             case _ => false
           recorded = exit match
             case Exit.Failure(cause) =>
@@ -337,20 +339,37 @@ object PgSessionSpecs extends ZIOSpecDefault:
   private val review =
     suite("review")(
       test("shutdown sqlstates break the client and a connection-shaped message does not"):
-        val shutdown = List(SqlState.AdminShutdown, SqlState.CrashShutdown, SqlState.CannotConnectNow).map: state =>
-          PgErrors.broken(
-            SaferisError.QueryError(Some(state), "terminating connection due to administrator command", None)
+        val shutdown =
+          List(PostgresSqlState.AdminShutdown, PostgresSqlState.CrashShutdown, PostgresSqlState.CannotConnectNow).map:
+            state =>
+              PgErrors.broken(
+                SaferisError.Shutdown(
+                  ServerDetail("terminating connection due to administrator command", None, Some(state), None, None)
+                )
+              )
+        val unique = PgErrors.broken(
+          SaferisError.UniqueViolation(
+            ServerDetail(
+              "duplicate key",
+              None,
+              Some(SqlState.UniqueViolation),
+              None,
+              Some(ConstraintName("pg_uniq_pkey")),
+            )
           )
-        val unique =
-          PgErrors.broken(SaferisError.UniqueViolation(Some(ConstraintName("pg_uniq_pkey")), "unique violation", None))
-        val mentioned = PgErrors.broken(SaferisError.QueryError(None, "the connection is still usable", None))
+        )
+        val mentioned =
+          PgErrors.broken(
+            SaferisError.QueryError(ServerDetail("the connection is still usable", None, None, None, None))
+          )
         assertTrue(shutdown.forall(identity), !unique, !mentioned)
       ,
-      test("a transport code is 08006, keeps the code in the message, and breaks the client"):
+      test("a transport code is not a SQLSTATE, keeps the code in the message, and breaks the client"):
         val info  = PgErrors.info(js.JavaScriptException(js.Dynamic.literal(code = "ECONNRESET", message = "reset")))
         val error = SqlState.classify(info, None, SqlState.defaultRetryable)
         assertTrue(
-          info.sqlState.contains(SqlState.ConnectionFailure),
+          info.sqlState.isEmpty,
+          info.condition == SqlCondition.Connection,
           info.message == "reset (ECONNRESET)",
           error.isInstanceOf[SaferisError.ConnectionLost],
           PgErrors.broken(error),
@@ -375,8 +394,9 @@ object PgSessionSpecs extends ZIOSpecDefault:
             kept = exit match
               case Exit.Failure(cause) =>
                 cause.failureOption match
-                  case Some(SaferisError.UniqueViolation(_, "unique violation", _)) => true
-                  case _                                                            => false
+                  case Some(SaferisError.UniqueViolation(detail)) =>
+                    detail.message.contains("duplicate key")
+                  case _ => false
               case _ => false
           yield assertTrue(kept, pid1 == pid2, pid1.isDefined)
       ,

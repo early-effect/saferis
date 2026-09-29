@@ -85,10 +85,11 @@ trait StandardJdbcAdapter extends JdbcAdapter:
     ref(tpe, rs.getString(column.index))(text => SqlValue.Other(ServerType.Named(column.typeName), text))(rs)
 
   def serverError(e: SQLException): ServerError =
+    val state = Option(e.getSQLState).flatMap(SqlState.parse)
     ServerError(
-      Option(e.getSQLState).flatMap(SqlState.parse),
+      SqlCondition.fromSqlState(state),
       StandardJdbcAdapter.messageOf(e),
-      None,
+      state,
       Some(e.getErrorCode),
     )
 

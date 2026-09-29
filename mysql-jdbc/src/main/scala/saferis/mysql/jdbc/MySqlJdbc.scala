@@ -18,7 +18,6 @@ import java.sql.Types
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import javax.sql.DataSource
-import scala.util.matching.Regex
 
 /** MySQL over Connector/J. Pair it with `import saferis.mysql.given`, which brings the MySQL dialect and the `char(36)`
   * UUID codecs.
@@ -48,10 +47,6 @@ object MySqlJdbc:
 end MySqlJdbc
 
 private object MySqlAdapter extends StandardJdbcAdapter:
-  private val duplicateKey = """for key '([^']+)'""".r
-  private val foreignKey   = """CONSTRAINT `([^`]+)`""".r
-  private val check        = """[Cc]heck constraint '([^']+)'""".r
-
   /** Connector/J streams rows only for this fetch size. A positive size is ignored without `useCursorFetch`. */
   override def cursor: CursorStrategy = CursorStrategy.Fetch(Integer.MIN_VALUE)
 
@@ -85,25 +80,17 @@ private object MySqlAdapter extends StandardJdbcAdapter:
     end match
   end read
 
-  /** MySQL reports most integrity failures as SQLSTATE `23000`. The vendor code says which one. */
+  /** MySQL reports most integrity failures as SQLSTATE `23000`. The errno says which one. The SQLSTATE stays. */
   override def serverError(e: SQLException): ServerError =
-    val base                                                           = super.serverError(e)
-    def as(state: SqlState, constraint: Option[ConstraintName] = None) =
-      base.copy(sqlState = Some(state), constraint = constraint)
-    e.getErrorCode match
-      case 1062        => as(SqlState.UniqueViolation, first(duplicateKey, base.message).map(unqualified))
-      case 1451 | 1452 => as(SqlState.ForeignKeyViolation, first(foreignKey, base.message))
-      case 1048        => as(SqlState.NotNullViolation)
-      case 3819        => as(SqlState.CheckViolation, first(check, base.message))
-      case 1213        => as(SqlState.Deadlock)
-      case 3024        => as(SqlState.QueryCanceled)
-      case _           => base
+    val base      = super.serverError(e)
+    val condition = e.getErrorCode match
+      case 1062        => SqlCondition.Unique(None)
+      case 1451 | 1452 => SqlCondition.ForeignKey(None)
+      case 1048        => SqlCondition.NotNull
+      case 3819        => SqlCondition.Check(None)
+      case 1213        => SqlCondition.Deadlock
+      case 3024        => SqlCondition.Canceled
+      case _           => base.condition
+    base.copy(condition = condition)
   end serverError
-
-  private def first(pattern: Regex, message: String): Option[ConstraintName] =
-    pattern.findFirstMatchIn(message).map(m => ConstraintName(m.group(1)))
-
-  /** MySQL 8 names the key `table.key`. */
-  private def unqualified(key: ConstraintName): ConstraintName =
-    ConstraintName(key.substring(key.lastIndexOf('.') + 1))
 end MySqlAdapter

@@ -8,6 +8,7 @@ import saferis.jdbc.JdbcSession
 import saferis.jdbc.JdbcSessionConfig
 import saferis.jdbc.StandardJdbcAdapter
 import saferis.postgres.PgText
+import saferis.postgres.PostgresSqlState
 
 import org.postgresql.core.TransactionState
 import org.postgresql.jdbc.PgConnection
@@ -42,7 +43,7 @@ private object PostgresAdapter extends StandardJdbcAdapter:
   override def cursor: CursorStrategy = CursorStrategy.FetchInTransaction(FetchSize)
 
   override def serverError(e: SQLException): ServerError =
-    super.serverError(e).copy(constraint = constraintOf(e))
+    PostgresSqlState(super.serverError(e), constraintOf(e))
 
   /** A proxy that cannot unwrap to pgjdbc skips the early check. The server still rolls the transaction back. */
   override def commitRejected(conn: Connection): Option[ServerError] =
@@ -51,8 +52,9 @@ private object PostgresAdapter extends StandardJdbcAdapter:
     else
       Some(
         ServerError(
-          Some(SqlState.InFailedTransaction),
+          SqlCondition.Aborted,
           "current transaction is aborted, commands ignored until end of transaction block",
+          Some(PostgresSqlState.InFailedTransaction),
         )
       )
 
