@@ -47,12 +47,12 @@ flowchart LR
     exampleValue {
       val userName = "Alice"
       sql"SELECT * FROM $users WHERE ${users.name} = $userName".sql
-    }.assert(sql => assertTrue(sql == "SELECT * FROM sql_injection_users WHERE name = ?")),
-    md"""The generated SQL uses a `?` placeholder, and the actual value is bound separately. It never touches the SQL string. Even malicious input is harmless:""",
+    }.assert(sql => assertTrue(sql == """SELECT * FROM "sql_injection_users" WHERE "name" = $1""")),
+    md"""The generated SQL uses a `$$1` placeholder, and the actual value is bound separately. It never touches the SQL string. The table and column are quoted. Even malicious input is harmless:""",
     exampleValue {
       val malicious = "'; DROP TABLE sql_injection_users; --"
       sql"SELECT * FROM $users WHERE ${users.name} = $malicious".sql
-    }.assert(sql => assertTrue(sql == "SELECT * FROM sql_injection_users WHERE name = ?")),
+    }.assert(sql => assertTrue(sql == """SELECT * FROM "sql_injection_users" WHERE "name" = $1""")),
     md"""The malicious string becomes a parameter value, not part of the SQL syntax. (`.show`, used elsewhere in these docs, inlines the bound values for debugging, but it is **not** what gets sent to the database.)
 
 ## Table Aliases: Compile-Time Literal Enforcement
@@ -78,15 +78,15 @@ This compile-time enforcement means SQL injection via aliases is **impossible**.
 
 ## Runtime Identifiers with `Placeholder.identifier()`
 
-Sometimes you genuinely need runtime-determined identifiers, for example dynamic column names from configuration. For these cases, use `Placeholder.identifier()` which applies proper escaping:""",
+Sometimes you genuinely need runtime-determined identifiers, for example dynamic column names from configuration. Wrap the string in the name type, then pass it to `Placeholder.identifier`. The dialect quotes it when the statement is rendered:""",
     exampleValue {
-      val columnName = "name"
+      val columnName = ColumnName("name")
       sql"SELECT ${Placeholder.identifier(columnName)} FROM $users".show
-    }.assert(sql => assertTrue(sql == """SELECT "name" FROM sql_injection_users""")),
+    }.assert(sql => assertTrue(sql == """SELECT "name" FROM "sql_injection_users"""")),
     md"""The identifier is escaped using the dialect's quoting rules. For PostgreSQL, this means double-quote escaping:""",
-    exampleValue(PostgresDialect.escapeIdentifier("table"))
+    exampleValue(PostgresDialect.escapeIdentifier(TableName("table")))
       .assert(value => assertTrue(value == "\"table\"")),
-    exampleValue(PostgresDialect.escapeIdentifier("user\"input"))
+    exampleValue(PostgresDialect.escapeIdentifier(ColumnName("user\"input")))
       .assert(value => assertTrue(value == "\"user\"\"input\"")),
     md"""**Important**: While `Placeholder.identifier()` escapes properly, you should still validate runtime identifiers against an allowlist when possible. Escaping is a defense-in-depth measure, not a replacement for input validation.
 
@@ -108,9 +108,9 @@ Never pass user input to `Placeholder.raw()`.
 ## JSON Operations: Automatic Escaping
 
 When using JSON operations in the Schema DSL or dialect methods, Saferis automatically escapes single quotes to prevent injection:""",
-    exampleValue(PostgresDialect.jsonHasKeySql("data", "user's_key"))
+    exampleValue(PostgresDialect.jsonHasKeySql(SqlText("data"), "user's_key"))
       .assert(sql => assertTrue(sql == "jsonb_exists(data, 'user''s_key')")),
-    exampleValue(PostgresDialect.jsonHasKeySql("data", "'); DROP TABLE sql_injection_profiles; --"))
+    exampleValue(PostgresDialect.jsonHasKeySql(SqlText("data"), "'); DROP TABLE sql_injection_profiles; --"))
       .assert(sql => assertTrue(sql == "jsonb_exists(data, '''); DROP TABLE sql_injection_profiles; --')")),
     md"""The single quote in the injection attempt is escaped to `''`, rendering it harmless.
 

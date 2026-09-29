@@ -13,9 +13,11 @@ object DefaultDialectSpecs extends ZIOSpecDefault:
     },
     test("Default dialect provides PostgreSQL-specific features") {
       val dialect = summon[Dialect]
-      assertTrue(dialect.autoIncrementClause(true, true, false) == " generated always as identity primary key") &&
+      assertTrue(
+        dialect.generatedKey(GeneratedKey.IdentityPrimaryKey) == " generated always as identity primary key"
+      ) &&
       assertTrue(dialect.identifierQuote == "\"") &&
-      assertTrue(dialect.columnType(java.sql.Types.VARCHAR) == "varchar(255)")
+      assertTrue(dialect.columnType(SqlType.VarChar) == "varchar(255)")
     },
     test("Can create tables with just import saferis.*") {
       // This tests that all the necessary implicits are available
@@ -23,7 +25,7 @@ object DefaultDialectSpecs extends ZIOSpecDefault:
       final case class TestTable(@key id: Int, name: String) derives Table
 
       val table = Table[TestTable]
-      assertTrue(toSql(table) == "test_default_dialect")
+      assertTrue(toSql(table) == "\"test_default_dialect\"")
     },
     test("Can generate compound key index SQL with default dialect") {
       @tableName("test_create_sql")

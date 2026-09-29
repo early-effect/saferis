@@ -55,13 +55,13 @@ object SpecializedDMLSpec extends ZIOSpecDefault:
     test("JSON operations are available for dialects with JsonSupport") {
       import saferis.postgres.PostgresDialect
       val dialect      = PostgresDialect
-      val jsonFragment = jsonExtract("user_data", "profile.name")(using dialect)
+      val jsonFragment = jsonExtract(SqlText("user_data"), "profile.name")(using dialect)
       assertTrue(jsonFragment.sql.contains("JSON_EXTRACT") || jsonFragment.sql.contains("->"))
     },
     test("Array operations are available for dialects with ArraySupport") {
       import saferis.postgres.PostgresDialect
       val dialect       = PostgresDialect
-      val arrayFragment = arrayContains("tags", "'scala'")(using dialect)
+      val arrayFragment = arrayContains(SqlText("tags"), SqlText("'scala'"))(using dialect)
       assertTrue(arrayFragment.sql.contains("ANY") || arrayFragment.sql.contains("@>"))
     },
   )

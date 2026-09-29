@@ -1,5 +1,22 @@
 package saferis
 
+/** How a column participates in key generation. A compound key is never [[GeneratedKey.IdentityPrimaryKey]]: the
+  * primary key is a table constraint, so the column is [[GeneratedKey.Identity]] or [[GeneratedKey.Plain]].
+  */
+enum GeneratedKey:
+  case Plain
+  case PrimaryKey
+  case Identity
+  case IdentityPrimaryKey
+
+object GeneratedKey:
+  def column(isGenerated: Boolean, isKey: Boolean, compound: Boolean): GeneratedKey =
+    if compound then if isGenerated then GeneratedKey.Identity else GeneratedKey.Plain
+    else if isGenerated && isKey then GeneratedKey.IdentityPrimaryKey
+    else if isGenerated then GeneratedKey.Identity
+    else if isKey then GeneratedKey.PrimaryKey
+    else GeneratedKey.Plain
+
 /** Trait representing a database dialect that provides database-specific type mappings and SQL generation.
   *
   * This allows the library to support multiple databases by providing different implementations for each database's
@@ -8,53 +25,25 @@ package saferis
   */
 trait Dialect:
 
-  /** Returns the database-specific type string for the given JDBC type.
-    *
-    * @param jdbcType
-    *   The JDBC SQL type constant
-    * @return
-    *   Database-specific type string
-    */
-  def columnType(jdbcType: Int): String
+  /** DDL spelling of a `SqlType` for this dialect. */
+  def columnType(tpe: SqlType): ColumnType
 
   /** Database name/identifier */
-  def name: String
+  def name: DialectName
 
   /** Default length for variable-length types like VARCHAR */
   val DefaultVarcharLength: Int = 255
 
-  /** Per-dialect classifier for transient, retryable failures.
-    *
-    * Defaults to [[SaferisError.defaultRetryClassifier]], which recognizes standard transient SQLState classes
-    * (`08xxx`, `40001`, `40P01`). Override in dialect implementations to add driver-specific quirks — for example, the
-    * Databricks JDBC driver tunnels over HTTP and can surface transient transport errors as vendor-specific codes that
-    * the standards-based default does not catch.
-    *
-    * Users can override the dialect default per-Transactor via `Transactor.layer(retryClassifier = ...)`.
+  /** The column clause for this [[GeneratedKey]]. A dialect with no identity or primary-key syntax returns empty SQL.
     */
-  def retryClassifier: SaferisError.RetryClassifier = SaferisError.defaultRetryClassifier
-
-  // === Auto-increment and Primary Key Support ===
-
-  /** Returns the SQL clause for auto-increment/generated primary key columns.
-    *
-    * @param isGenerated
-    *   Whether the column is marked as generated
-    * @param isPrimaryKey
-    *   Whether this column is a primary key
-    * @param hasCompoundKey
-    *   Whether the table has a compound primary key
-    * @return
-    *   SQL clause for auto-increment behavior (e.g., "GENERATED ALWAYS AS IDENTITY", "AUTO_INCREMENT", etc.)
-    */
-  def autoIncrementClause(isGenerated: Boolean, isPrimaryKey: Boolean, hasCompoundKey: Boolean): String
+  def generatedKey(key: GeneratedKey): SqlText
 
   /** Returns the SQL clause for primary key constraint on a single column.
     *
     * @return
     *   SQL clause for primary key (e.g., "PRIMARY KEY")
     */
-  def primaryKeyClause: String = "primary key"
+  def primaryKeyClause: SqlText = SqlText("primary key")
 
   /** Returns the SQL for a compound primary key constraint.
     *
@@ -63,7 +52,8 @@ trait Dialect:
     * @return
     *   SQL constraint clause
     */
-  def compoundPrimaryKeyClause(columnNames: Seq[String]): String = s"primary key (${columnNames.mkString(", ")})"
+  def compoundPrimaryKeyClause(columnNames: Seq[ColumnName]): SqlText =
+    SqlText(s"primary key (${columnNames.map(escapeIdentifier).mkString(", ")})")
 
   // === Index Creation ===
 
@@ -81,16 +71,18 @@ trait Dialect:
     *   SQL statement for creating the index
     */
   def createIndexSql(
-      indexName: String,
-      tableName: String,
-      columnNames: Seq[String],
+      indexName: IndexName,
+      tableName: TableName,
+      columnNames: Seq[ColumnName],
       ifNotExists: Boolean = true,
-      where: Option[String] = None,
-  ): String =
+      where: Option[SqlText] = None,
+  ): SqlText =
     val ifNotExistsClause = if ifNotExists then " if not exists" else ""
     val whereClause       = where.map(w => s" where $w").getOrElse("")
     // nosemgrep: scala-security.scala.lang.security.audit.tainted-sql-string -- identifiers are escaped via escapeIdentifier (identifiers cannot be bind parameters)
-    s"create index$ifNotExistsClause ${escapeIdentifier(indexName)} on ${escapeIdentifier(tableName)} (${columnNames.map(escapeIdentifier).mkString(", ")})$whereClause"
+    SqlText(
+      s"create index$ifNotExistsClause ${escapeIdentifier(indexName)} on ${escapeIdentifier(tableName)} (${columnNames.map(escapeIdentifier).mkString(", ")})$whereClause"
+    )
   end createIndexSql
 
   /** Returns the SQL for creating a unique index.
@@ -107,16 +99,18 @@ trait Dialect:
     *   SQL statement for creating the unique index
     */
   def createUniqueIndexSql(
-      indexName: String,
-      tableName: String,
-      columnNames: Seq[String],
+      indexName: IndexName,
+      tableName: TableName,
+      columnNames: Seq[ColumnName],
       ifNotExists: Boolean = true,
-      where: Option[String] = None,
-  ): String =
+      where: Option[SqlText] = None,
+  ): SqlText =
     val ifNotExistsClause = if ifNotExists then " if not exists" else ""
     val whereClause       = where.map(w => s" where $w").getOrElse("")
     // nosemgrep: scala-security.scala.lang.security.audit.tainted-sql-string -- identifiers are escaped via escapeIdentifier (identifiers cannot be bind parameters)
-    s"create unique index$ifNotExistsClause ${escapeIdentifier(indexName)} on ${escapeIdentifier(tableName)} (${columnNames.map(escapeIdentifier).mkString(", ")})$whereClause"
+    SqlText(
+      s"create unique index$ifNotExistsClause ${escapeIdentifier(indexName)} on ${escapeIdentifier(tableName)} (${columnNames.map(escapeIdentifier).mkString(", ")})$whereClause"
+    )
   end createUniqueIndexSql
 
   /** Returns the SQL for dropping an index.
@@ -128,10 +122,10 @@ trait Dialect:
     * @return
     *   SQL statement for dropping the index
     */
-  def dropIndexSql(indexName: String, ifExists: Boolean = false): String =
+  def dropIndexSql(indexName: IndexName, ifExists: Boolean = false): SqlText =
     val ifExistsClause = if ifExists then " if exists" else ""
     // nosemgrep: scala-security.scala.lang.security.audit.tainted-sql-string -- identifiers are escaped via escapeIdentifier (identifiers cannot be bind parameters)
-    s"drop index$ifExistsClause ${escapeIdentifier(indexName)}"
+    SqlText(s"drop index$ifExistsClause ${escapeIdentifier(indexName)}")
 
   // === Table Operations ===
 
@@ -142,9 +136,9 @@ trait Dialect:
     * @return
     *   SQL clause for table creation
     */
-  def createTableClause(ifNotExists: Boolean): String =
+  def createTableClause(ifNotExists: Boolean): SqlText =
     val ifNotExistsClause = if ifNotExists then " if not exists" else ""
-    s"create table$ifNotExistsClause"
+    SqlText(s"create table$ifNotExistsClause")
 
   /** Returns the SQL for dropping a table.
     *
@@ -155,10 +149,10 @@ trait Dialect:
     * @return
     *   SQL statement for dropping the table
     */
-  def dropTableSql(tableName: String, ifExists: Boolean): String =
+  def dropTableSql(tableName: TableName, ifExists: Boolean): SqlText =
     val ifExistsClause = if ifExists then " if exists" else ""
     // nosemgrep: scala-security.scala.lang.security.audit.tainted-sql-string -- identifiers are escaped via escapeIdentifier (identifiers cannot be bind parameters)
-    s"drop table$ifExistsClause ${escapeIdentifier(tableName)}"
+    SqlText(s"drop table$ifExistsClause ${escapeIdentifier(tableName)}")
 
   /** Returns the SQL for truncating a table.
     *
@@ -167,7 +161,7 @@ trait Dialect:
     * @return
     *   SQL statement for truncating the table
     */
-  def truncateTableSql(tableName: String): String = s"truncate table ${escapeIdentifier(tableName)}"
+  def truncateTableSql(tableName: TableName): SqlText = SqlText(s"truncate table ${escapeIdentifier(tableName)}")
 
   // === Column Operations ===
 
@@ -182,8 +176,8 @@ trait Dialect:
     * @return
     *   SQL statement for adding the column
     */
-  def addColumnSql(tableName: String, columnName: String, columnType: String): String =
-    s"alter table ${escapeIdentifier(tableName)} add column ${escapeIdentifier(columnName)} $columnType"
+  def addColumnSql(tableName: TableName, columnName: ColumnName, columnType: ColumnType): SqlText =
+    SqlText(s"alter table ${escapeIdentifier(tableName)} add column ${escapeIdentifier(columnName)} $columnType")
 
   /** Returns the SQL for dropping a column from a table.
     *
@@ -194,8 +188,8 @@ trait Dialect:
     * @return
     *   SQL statement for dropping the column
     */
-  def dropColumnSql(tableName: String, columnName: String): String =
-    s"alter table ${escapeIdentifier(tableName)} drop column ${escapeIdentifier(columnName)}"
+  def dropColumnSql(tableName: TableName, columnName: ColumnName): SqlText =
+    SqlText(s"alter table ${escapeIdentifier(tableName)} drop column ${escapeIdentifier(columnName)}")
 
   // === Query Features ===
 
@@ -213,20 +207,24 @@ trait Dialect:
     * @return
     *   Escaped identifier
     */
-  def escapeIdentifier(identifier: String): String =
-    val escaped = identifier.replace(identifierQuote, identifierQuote + identifierQuote)
-    s"$identifierQuote$escaped$identifierQuote"
+  def escapeIdentifier[A](name: A)(using sqlName: SqlName[A]): SqlText =
+    Dialect.quote(identifierQuote, sqlName.text(name), sqlName.qualify)
 
 end Dialect
 
 object Dialect:
-  /** Get the database-specific type string for a column type A using the current dialect */
-  def columnType[A](using encoder: Encoder[A], dialect: Dialect): String =
-    dialect.columnType(encoder.jdbcType)
+  /** Wrap `name` in `identifierQuote`, doubling any quote already inside it.
+    *
+    * When `qualify` is set, a dot separates identifiers (`schema.table` becomes `"schema"."table"`).
+    */
+  def quote(identifierQuote: String, name: String, qualify: Boolean = false): SqlText =
+    if qualify && name.contains('.') then
+      SqlText(name.split("\\.", -1).map(part => quoteOne(identifierQuote, part)).mkString("."))
+    else SqlText(quoteOne(identifierQuote, name))
 
-  /** Get the database-specific type string for a JDBC type using the current dialect */
-  def columnType(jdbcType: Int)(using dialect: Dialect): String =
-    dialect.columnType(jdbcType)
+  private def quoteOne(identifierQuote: String, name: String): String =
+    val escaped = name.replace(identifierQuote, identifierQuote + identifierQuote)
+    s"$identifierQuote$escaped$identifierQuote"
 
   /** Default PostgreSQL dialect - provided as a low priority given. This allows users to work with Postgres out of the
     * box with just `import saferis.*` Users can override this by providing their own given Dialect with higher

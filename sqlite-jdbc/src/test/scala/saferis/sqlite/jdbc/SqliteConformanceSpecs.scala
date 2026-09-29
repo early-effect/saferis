@@ -1,0 +1,45 @@
+package saferis.sqlite.jdbc
+
+import saferis.*
+import saferis.sqlite.SQLiteDialect
+import saferis.tests.DatabaseTarget
+import saferis.tests.SchemaConformance
+import saferis.tests.SqlSessionConformance
+import saferis.tests.TransactionConformance
+
+import org.sqlite.SQLiteDataSource
+import zio.*
+import zio.test.*
+
+import java.nio.file.Files
+import java.nio.file.Path
+import javax.sql.DataSource
+
+object SqliteConformanceSpecs extends ZIOSpecDefault:
+
+  /** A fresh database file per run. The scope deletes it and its WAL files. */
+  val dataSource: TaskLayer[DataSource] =
+    ZLayer.scoped:
+      ZIO
+        .acquireRelease(ZIO.attemptBlocking(Files.createTempFile("saferis-sqlite", ".db"))): file =>
+          ZIO.foreachDiscard(List("", "-wal", "-shm")): suffix =>
+            ZIO.attemptBlocking(Files.deleteIfExists(Path.of(s"$file$suffix"))).ignore
+        .map: file =>
+          val ds = SQLiteDataSource()
+          ds.setUrl(s"jdbc:sqlite:$file")
+          ds
+
+  val session: TaskLayer[SqlSession] = dataSource >>> SqliteJdbc.layer()
+
+  /** SQLite reads its catalog through pragmas. It has no statement that runs long enough to cancel. */
+  val target: ULayer[DatabaseTarget] = ZLayer.succeed(DatabaseTarget(SQLiteDialect))
+
+  /** SQLite runs the portable suite, its catalog, and what only SQLite does. */
+  def spec =
+    suite("sqlite")(
+      SqlSessionConformance.suite,
+      SchemaConformance.conformance,
+      SqliteValueSpecs.spec,
+      TransactionConformance.continuesAfterUniqueViolation,
+    ).provideShared(session, target) @@ TestAspect.sequential
+end SqliteConformanceSpecs

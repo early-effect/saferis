@@ -2,8 +2,6 @@ package saferis.mysql
 
 import saferis.*
 
-import java.sql.Types
-
 given Dialect = MySQLDialect
 
 /** MySQL dialect implementation providing MySQL-specific type mappings and SQL generation.
@@ -14,111 +12,97 @@ given Dialect = MySQLDialect
   *   - MySQL uses backticks for identifier escaping
   *   - MySQL has different type names for some SQL types
   */
-object MySQLDialect extends Dialect with JsonSupport with WindowFunctionSupport with CommonTableExpressionSupport:
+object MySQLDialect
+    extends Dialect
+    with JsonSupport
+    with WindowFunctionSupport
+    with CommonTableExpressionSupport
+    with SchemaIntrospectionSupport:
 
-  val name: String = "MySQL"
+  val name: DialectName = DialectName("MySQL")
 
-  def columnType(jdbcType: Int): String = jdbcType match
-    case Types.VARCHAR     => s"varchar($DefaultVarcharLength)"
-    case Types.CHAR        => "char"
-    case Types.LONGVARCHAR => "longtext"
-    case Types.CLOB        => "longtext"
+  def introspectTable(tableName: TableName)(using zio.Trace): zio.ZIO[SqlSession, SaferisError, Option[DatabaseTable]] =
+    MySQLCatalog.introspect(tableName)
 
-    case Types.SMALLINT => "smallint"
-    case Types.INTEGER  => "int"
-    case Types.BIGINT   => "bigint"
+  /** `decimal` alone is `decimal(10,0)` in MySQL and drops the fraction, so `Numeric` asks for the widest scale.
+    * `datetime(6)` is a local timestamp and `timestamp(6)` an instant: MySQL converts only `timestamp` through the
+    * session time zone, and the two spellings let a driver tell them apart when reading. `(6)` keeps microseconds.
+    */
+  def columnType(tpe: SqlType): ColumnType = ColumnType:
+    tpe match
+      case SqlType.Bool            => "boolean"
+      case SqlType.SmallInt        => "smallint"
+      case SqlType.Integer         => "int"
+      case SqlType.BigInt          => "bigint"
+      case SqlType.Real            => "float"
+      case SqlType.DoublePrecision => "double"
+      case SqlType.Numeric         => "decimal(65, 30)"
+      case SqlType.VarChar         => s"varchar($DefaultVarcharLength)"
+      case SqlType.Text            => "longtext"
+      case SqlType.Binary          => "blob"
+      case SqlType.Date            => "date"
+      case SqlType.Time            => "time(6)"
+      case SqlType.TimeTz          => "varchar(32)"
+      case SqlType.Timestamp       => "datetime(6)"
+      case SqlType.TimestampTz     => "timestamp(6)"
+      case SqlType.Json            => "json"
+      case SqlType.Uuid            => "char(36)"
+      case SqlType.Array(_)        => "json"
+      case SqlType.Other(_)        => "text"
 
-    case Types.FLOAT   => "float"
-    case Types.DOUBLE  => "double"
-    case Types.REAL    => "float"
-    case Types.DECIMAL => "decimal"
-    case Types.NUMERIC => "decimal"
-
-    case Types.BOOLEAN => "boolean"
-    case Types.BIT     => "bit"
-
-    case Types.DATE                    => "date"
-    case Types.TIME                    => "time"
-    case Types.TIMESTAMP               => "timestamp"
-    case Types.TIMESTAMP_WITH_TIMEZONE => "timestamp" // MySQL doesn't have separate timezone type
-
-    case Types.BINARY        => "binary"
-    case Types.VARBINARY     => "varbinary(255)"
-    case Types.LONGVARBINARY => "longblob"
-    case Types.BLOB          => "blob"
-
-    case Types.DATALINK => "text" // URLs stored as text
-    case Types.ARRAY    => "json" // MySQL 5.7+ supports JSON
-    case Types.STRUCT   => "json"
-    case Types.OTHER    => "json"
-
-    // Fallback to JDBC standard name for unknown types
-    case other =>
-      try java.sql.JDBCType.valueOf(other).getName.toLowerCase
-      catch case _: IllegalArgumentException => "text"
-
-  // === MySQL-specific Auto-increment and Primary Key Support ===
-
-  def autoIncrementClause(isGenerated: Boolean, isPrimaryKey: Boolean, hasCompoundKey: Boolean): String =
-    if isGenerated && isPrimaryKey && !hasCompoundKey then " auto_increment primary key"
-    else if isGenerated then " auto_increment"
-    else if isPrimaryKey && !hasCompoundKey then " primary key"
-    else ""
+  def generatedKey(key: GeneratedKey): SqlText = SqlText:
+    key match
+      case GeneratedKey.IdentityPrimaryKey => " auto_increment primary key"
+      case GeneratedKey.Identity           => " auto_increment"
+      case GeneratedKey.PrimaryKey         => " primary key"
+      case GeneratedKey.Plain              => ""
 
   // === MySQL-specific Index Creation ===
   // MySQL doesn't support IF NOT EXISTS for indexes in older versions
   // MySQL also doesn't support partial indexes (WHERE clause), so we ignore it
   override def createIndexSql(
-      indexName: String,
-      tableName: String,
-      columnNames: Seq[String],
+      indexName: IndexName,
+      tableName: TableName,
+      columnNames: Seq[ColumnName],
       ifNotExists: Boolean = true,
-      where: Option[String] = None, // Ignored - MySQL doesn't support partial indexes
-  ): String =
+      where: Option[SqlText] = None, // Ignored - MySQL doesn't support partial indexes
+  ): SqlText = SqlText:
     s"create index ${escapeIdentifier(indexName)} on ${escapeIdentifier(tableName)} (${columnNames.map(escapeIdentifier).mkString(", ")})"
 
   override def createUniqueIndexSql(
-      indexName: String,
-      tableName: String,
-      columnNames: Seq[String],
+      indexName: IndexName,
+      tableName: TableName,
+      columnNames: Seq[ColumnName],
       ifNotExists: Boolean = true,
-      where: Option[String] = None, // Ignored - MySQL doesn't support partial indexes
-  ): String =
+      where: Option[SqlText] = None, // Ignored - MySQL doesn't support partial indexes
+  ): SqlText = SqlText:
     s"create unique index ${escapeIdentifier(indexName)} on ${escapeIdentifier(tableName)} (${columnNames.map(escapeIdentifier).mkString(", ")})"
 
   // === MySQL-specific Query Features ===
   // MySQL uses backticks for identifier escaping
   override def identifierQuote: String = "`"
 
-  // === MySQL-specific Table Operations ===
-  override def truncateTableSql(tableName: String): String = s"truncate table ${escapeIdentifier(tableName)}"
-
-  override def dropIndexSql(indexName: String, ifExists: Boolean = false): String =
-    // MySQL uses different syntax for dropping indexes
-    if ifExists then s"drop index if exists ${escapeIdentifier(indexName)}"
-    else s"drop index ${escapeIdentifier(indexName)}"
-
   // === JsonSupport implementation ===
-  def jsonType: String = "json"
+  def jsonType: ColumnType = ColumnType("json")
 
-  def jsonExtractSql(columnName: String, fieldPath: String): String =
+  def jsonExtractSql(column: SqlText, fieldPath: String): SqlText =
     val escaped = fieldPath.replace("'", "''")
-    s"JSON_EXTRACT($columnName, '$$.$escaped')"
+    SqlText(s"JSON_EXTRACT($column, '$$.$escaped')")
 
-  def jsonContainsSql(columnName: String, jsonValue: String): String =
+  def jsonContainsSql(column: SqlText, jsonValue: JsonText): SqlText =
     val escaped = jsonValue.replace("'", "''")
-    s"JSON_CONTAINS($columnName, '$escaped')"
+    SqlText(s"JSON_CONTAINS($column, '$escaped')")
 
-  def jsonHasKeySql(columnName: String, key: String): String =
+  def jsonHasKeySql(column: SqlText, key: String): SqlText =
     val escaped = key.replace("'", "''")
-    s"JSON_CONTAINS_PATH($columnName, 'one', '$$.$escaped')"
+    SqlText(s"JSON_CONTAINS_PATH($column, 'one', '$$.$escaped')")
 
-  def jsonHasAnyKeySql(columnName: String, keys: Seq[String]): String =
+  def jsonHasAnyKeySql(column: SqlText, keys: Seq[String]): SqlText =
     val paths = keys.map(k => s"'$$.${k.replace("'", "''")}'").mkString(", ")
-    s"JSON_CONTAINS_PATH($columnName, 'one', $paths)"
+    SqlText(s"JSON_CONTAINS_PATH($column, 'one', $paths)")
 
-  def jsonHasAllKeysSql(columnName: String, keys: Seq[String]): String =
+  def jsonHasAllKeysSql(column: SqlText, keys: Seq[String]): SqlText =
     val paths = keys.map(k => s"'$$.${k.replace("'", "''")}'").mkString(", ")
-    s"JSON_CONTAINS_PATH($columnName, 'all', $paths)"
+    SqlText(s"JSON_CONTAINS_PATH($column, 'all', $paths)")
 
 end MySQLDialect

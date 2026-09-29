@@ -16,11 +16,11 @@ package saferis
   *   Column position in the table (1-based)
   */
 final case class DatabaseColumn(
-    name: String,
-    dataType: String,
+    name: ColumnName,
+    dataType: ColumnType,
     isNullable: Boolean,
     isPrimaryKey: Boolean,
-    defaultValue: Option[String],
+    defaultValue: Option[SqlText],
     ordinalPosition: Int,
 )
 
@@ -36,10 +36,10 @@ final case class DatabaseColumn(
   *   WHERE clause for partial indexes (if any)
   */
 final case class DatabaseIndex(
-    indexName: String,
-    columns: Seq[String],
+    indexName: IndexName,
+    columns: Seq[ColumnName],
     isUnique: Boolean,
-    whereClause: Option[String],
+    whereClause: Option[SqlText],
 )
 
 /** Represents a unique constraint from database introspection.
@@ -50,8 +50,8 @@ final case class DatabaseIndex(
   *   Columns included in the constraint (in order)
   */
 final case class DatabaseUniqueConstraint(
-    constraintName: String,
-    columns: Seq[String],
+    constraintName: ConstraintName,
+    columns: Seq[ColumnName],
 )
 
 /** Represents a foreign key constraint from database introspection.
@@ -65,17 +65,17 @@ final case class DatabaseUniqueConstraint(
   * @param toColumns
   *   Columns in the referenced table
   * @param onDelete
-  *   Action on delete (e.g., "CASCADE", "NO ACTION")
+  *   Action on delete
   * @param onUpdate
-  *   Action on update (e.g., "CASCADE", "NO ACTION")
+  *   Action on update
   */
 final case class DatabaseForeignKey(
-    constraintName: String,
-    fromColumns: Seq[String],
-    toTable: String,
-    toColumns: Seq[String],
-    onDelete: String,
-    onUpdate: String,
+    constraintName: ConstraintName,
+    fromColumns: Seq[ColumnName],
+    toTable: TableName,
+    toColumns: Seq[ColumnName],
+    onDelete: ForeignKeyAction,
+    onUpdate: ForeignKeyAction,
 )
 
 /** Represents actual table metadata from database introspection.
@@ -94,9 +94,9 @@ final case class DatabaseForeignKey(
   *   Foreign key constraints
   */
 final case class DatabaseTable(
-    tableName: String,
+    tableName: TableName,
     columns: Seq[DatabaseColumn],
-    primaryKeyColumns: Seq[String],
+    primaryKeyColumns: Seq[ColumnName],
     indexes: Seq[DatabaseIndex],
     uniqueConstraints: Seq[DatabaseUniqueConstraint],
     foreignKeys: Seq[DatabaseForeignKey],

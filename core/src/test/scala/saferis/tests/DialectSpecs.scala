@@ -9,37 +9,38 @@ import zio.test.*
 object DialectSpecs extends ZIOSpecDefault:
 
   val spec = suite("Dialect Support")(
-    test("PostgreSQL dialect provides correct auto-increment clause") {
+    test("PostgreSQL spells each GeneratedKey") {
       val dialect = summon[Dialect]
       assertTrue(dialect.name == "PostgreSQL") &&
-      assertTrue(dialect.autoIncrementClause(true, true, false) == " generated always as identity primary key") &&
-      assertTrue(dialect.autoIncrementClause(true, true, true) == " generated always as identity") &&
-      assertTrue(dialect.autoIncrementClause(false, true, false) == " primary key") &&
-      assertTrue(dialect.autoIncrementClause(false, false, false) == "")
+      assertTrue(
+        dialect.generatedKey(GeneratedKey.IdentityPrimaryKey) == " generated always as identity primary key"
+      ) &&
+      assertTrue(dialect.generatedKey(GeneratedKey.Identity) == " generated always as identity") &&
+      assertTrue(dialect.generatedKey(GeneratedKey.PrimaryKey) == " primary key") &&
+      assertTrue(dialect.generatedKey(GeneratedKey.Plain) == "")
     },
-    test("MySQL dialect provides correct auto-increment clause") {
+    test("MySQL spells each GeneratedKey") {
       assertTrue(MySQLDialect.name == "MySQL") &&
-      assertTrue(MySQLDialect.autoIncrementClause(true, true, false) == " auto_increment primary key") &&
-      assertTrue(MySQLDialect.autoIncrementClause(true, true, true) == " auto_increment") &&
-      assertTrue(MySQLDialect.autoIncrementClause(false, true, false) == " primary key") &&
-      assertTrue(MySQLDialect.autoIncrementClause(false, false, false) == "")
+      assertTrue(MySQLDialect.generatedKey(GeneratedKey.IdentityPrimaryKey) == " auto_increment primary key") &&
+      assertTrue(MySQLDialect.generatedKey(GeneratedKey.Identity) == " auto_increment") &&
+      assertTrue(MySQLDialect.generatedKey(GeneratedKey.PrimaryKey) == " primary key") &&
+      assertTrue(MySQLDialect.generatedKey(GeneratedKey.Plain) == "")
     },
-    test("SQLite dialect provides correct auto-increment clause") {
+    test("SQLite spells each GeneratedKey, and AUTOINCREMENT is the identity primary key") {
       assertTrue(SQLiteDialect.name == "SQLite") &&
-      assertTrue(SQLiteDialect.autoIncrementClause(true, true, false) == " primary key autoincrement") &&
-      assertTrue(SQLiteDialect.autoIncrementClause(false, true, false) == " primary key") &&
-      assertTrue(SQLiteDialect.autoIncrementClause(true, false, false) == " autoincrement") &&
-      assertTrue(SQLiteDialect.autoIncrementClause(false, false, false) == "")
+      assertTrue(SQLiteDialect.generatedKey(GeneratedKey.IdentityPrimaryKey) == " primary key autoincrement") &&
+      assertTrue(SQLiteDialect.generatedKey(GeneratedKey.Identity) == " autoincrement") &&
+      assertTrue(SQLiteDialect.generatedKey(GeneratedKey.PrimaryKey) == " primary key") &&
+      assertTrue(SQLiteDialect.generatedKey(GeneratedKey.Plain) == "")
     },
     test("Dialects have different column type mappings") {
-      import java.sql.Types
       val pgDialect = summon[Dialect]
-      assertTrue(pgDialect.columnType(Types.VARCHAR) == "varchar(255)") &&
-      assertTrue(MySQLDialect.columnType(Types.VARCHAR) == "varchar(255)") &&
-      assertTrue(SQLiteDialect.columnType(Types.VARCHAR) == "text") &&
-      assertTrue(pgDialect.columnType(Types.INTEGER) == "integer") &&
-      assertTrue(MySQLDialect.columnType(Types.INTEGER) == "int") &&
-      assertTrue(SQLiteDialect.columnType(Types.INTEGER) == "integer")
+      assertTrue(pgDialect.columnType(SqlType.VarChar) == "varchar(255)") &&
+      assertTrue(MySQLDialect.columnType(SqlType.VarChar) == "varchar(255)") &&
+      assertTrue(SQLiteDialect.columnType(SqlType.VarChar) == "varchar(255)") &&
+      assertTrue(pgDialect.columnType(SqlType.Integer) == "integer") &&
+      assertTrue(MySQLDialect.columnType(SqlType.Integer) == "int") &&
+      assertTrue(SQLiteDialect.columnType(SqlType.Integer) == "integer")
     },
     test("Dialects have different identifier quoting") {
       val pgDialect = summon[Dialect]
@@ -49,57 +50,62 @@ object DialectSpecs extends ZIOSpecDefault:
     },
     test("Dialects generate correct index SQL with escaped identifiers") {
       val pgDialect = summon[Dialect]
-      val indexSql  = pgDialect.createIndexSql("idx_test", "test_table", Seq("name"), true)
+      val indexSql  =
+        pgDialect.createIndexSql(IndexName("idx_test"), TableName("test_table"), Seq(ColumnName("name")), true)
       assertTrue(indexSql == "create index if not exists \"idx_test\" on \"test_table\" (\"name\")")
 
-      val mysqlIndexSql = MySQLDialect.createIndexSql("idx_test", "test_table", Seq("name"), true)
+      val mysqlIndexSql =
+        MySQLDialect.createIndexSql(IndexName("idx_test"), TableName("test_table"), Seq(ColumnName("name")), true)
       assertTrue(mysqlIndexSql == "create index `idx_test` on `test_table` (`name`)")
 
-      val sqliteIndexSql = SQLiteDialect.createIndexSql("idx_test", "test_table", Seq("name"), true)
+      val sqliteIndexSql =
+        SQLiteDialect.createIndexSql(IndexName("idx_test"), TableName("test_table"), Seq(ColumnName("name")), true)
       assertTrue(sqliteIndexSql == "create index if not exists \"idx_test\" on \"test_table\" (\"name\")")
     },
     test("PostgreSQL escapeIdentifier handles SQL injection attempts") {
       val pgDialect = summon[Dialect]
       // Test normal identifier
-      assertTrue(pgDialect.escapeIdentifier("my_column") == "\"my_column\"") &&
+      assertTrue(pgDialect.escapeIdentifier(ColumnName("my_column")) == "\"my_column\"") &&
       // Test identifier with embedded quotes - should double the quotes
-      assertTrue(pgDialect.escapeIdentifier("my\"column") == "\"my\"\"column\"") &&
+      assertTrue(pgDialect.escapeIdentifier(ColumnName("my\"column")) == "\"my\"\"column\"") &&
       // Test SQL injection attempt with DROP TABLE
-      assertTrue(pgDialect.escapeIdentifier("\"; DROP TABLE users--") == "\"\"\"; DROP TABLE users--\"") &&
+      assertTrue(pgDialect.escapeIdentifier(ColumnName("\"; DROP TABLE users--")) == "\"\"\"; DROP TABLE users--\"") &&
       // Test identifier with multiple quotes
-      assertTrue(pgDialect.escapeIdentifier("a\"b\"c") == "\"a\"\"b\"\"c\"") &&
+      assertTrue(pgDialect.escapeIdentifier(ColumnName("a\"b\"c")) == "\"a\"\"b\"\"c\"") &&
       // Test empty identifier
-      assertTrue(pgDialect.escapeIdentifier("") == "\"\"") &&
+      assertTrue(pgDialect.escapeIdentifier(ColumnName("")) == "\"\"") &&
       // Test identifier with spaces
-      assertTrue(pgDialect.escapeIdentifier("my column") == "\"my column\"")
+      assertTrue(pgDialect.escapeIdentifier(ColumnName("my column")) == "\"my column\"")
     },
     test("MySQL escapeIdentifier handles SQL injection attempts") {
       // Test normal identifier
-      assertTrue(MySQLDialect.escapeIdentifier("my_column") == "`my_column`") &&
+      assertTrue(MySQLDialect.escapeIdentifier(ColumnName("my_column")) == "`my_column`") &&
       // Test identifier with embedded backticks - should double the backticks
-      assertTrue(MySQLDialect.escapeIdentifier("my`column") == "`my``column`") &&
+      assertTrue(MySQLDialect.escapeIdentifier(ColumnName("my`column")) == "`my``column`") &&
       // Test SQL injection attempt with DROP TABLE
-      assertTrue(MySQLDialect.escapeIdentifier("`; DROP TABLE users--") == "```; DROP TABLE users--`") &&
+      assertTrue(MySQLDialect.escapeIdentifier(ColumnName("`; DROP TABLE users--")) == "```; DROP TABLE users--`") &&
       // Test identifier with multiple backticks
-      assertTrue(MySQLDialect.escapeIdentifier("a`b`c") == "`a``b``c`") &&
+      assertTrue(MySQLDialect.escapeIdentifier(ColumnName("a`b`c")) == "`a``b``c`") &&
       // Test empty identifier
-      assertTrue(MySQLDialect.escapeIdentifier("") == "``") &&
+      assertTrue(MySQLDialect.escapeIdentifier(ColumnName("")) == "``") &&
       // Test identifier with spaces
-      assertTrue(MySQLDialect.escapeIdentifier("my column") == "`my column`")
+      assertTrue(MySQLDialect.escapeIdentifier(ColumnName("my column")) == "`my column`")
     },
     test("SQLite escapeIdentifier handles SQL injection attempts") {
       // Test normal identifier
-      assertTrue(SQLiteDialect.escapeIdentifier("my_column") == "\"my_column\"") &&
+      assertTrue(SQLiteDialect.escapeIdentifier(ColumnName("my_column")) == "\"my_column\"") &&
       // Test identifier with embedded quotes - should double the quotes
-      assertTrue(SQLiteDialect.escapeIdentifier("my\"column") == "\"my\"\"column\"") &&
+      assertTrue(SQLiteDialect.escapeIdentifier(ColumnName("my\"column")) == "\"my\"\"column\"") &&
       // Test SQL injection attempt with DROP TABLE
-      assertTrue(SQLiteDialect.escapeIdentifier("\"; DROP TABLE users--") == "\"\"\"; DROP TABLE users--\"") &&
+      assertTrue(
+        SQLiteDialect.escapeIdentifier(ColumnName("\"; DROP TABLE users--")) == "\"\"\"; DROP TABLE users--\""
+      ) &&
       // Test identifier with multiple quotes
-      assertTrue(SQLiteDialect.escapeIdentifier("a\"b\"c") == "\"a\"\"b\"\"c\"") &&
+      assertTrue(SQLiteDialect.escapeIdentifier(ColumnName("a\"b\"c")) == "\"a\"\"b\"\"c\"") &&
       // Test empty identifier
-      assertTrue(SQLiteDialect.escapeIdentifier("") == "\"\"") &&
+      assertTrue(SQLiteDialect.escapeIdentifier(ColumnName("")) == "\"\"") &&
       // Test identifier with spaces
-      assertTrue(SQLiteDialect.escapeIdentifier("my column") == "\"my column\"")
+      assertTrue(SQLiteDialect.escapeIdentifier(ColumnName("my column")) == "\"my column\"")
     },
   )
 end DialectSpecs

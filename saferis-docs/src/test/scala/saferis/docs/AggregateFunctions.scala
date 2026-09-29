@@ -1,7 +1,6 @@
 package saferis.docs
 
 import saferis.*
-import saferis.docs.DocsTransactor.xa
 import saferis.postgres.given
 import specular.*
 import specular.ziotest.DocSpecSuite
@@ -91,7 +90,7 @@ object AggregateFunctions extends SaferisDocSpecSuite:
     section("Executing Aggregate Queries")(
       md"""Use `queryValue[T]` to get the aggregate result:""",
       exampleZIO {
-        xa.run(
+        (
           for
             _      <- ddl.createTable[EventRow](ifNotExists = true)
             _      <- dml.insert(EventRow(-1, "test", 1L, BigDecimal(100)))
@@ -114,6 +113,7 @@ object AggregateFunctions extends SaferisDocSpecSuite:
               .queryValue[Long]
           yield (maxSeq, total, count)
         ).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right((maxSeq, total, count)) =>
           assertTrue(

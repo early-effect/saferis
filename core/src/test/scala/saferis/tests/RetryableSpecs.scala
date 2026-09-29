@@ -1,128 +1,97 @@
 package saferis.tests
 
 import saferis.*
-import saferis.postgres.given
-import saferis.tests.PostgresTestContainer.DataSourceProvider
-import zio.*
-import zio.test.*
-import zio.test.Assertion.*
 
-import java.sql.SQLException
+import zio.test.*
 
 object RetryableSpecs extends ZIOSpecDefault:
 
-  // ---- Pure unit tests for the standards-based default classifier ----
+  private def reported(state: Option[SqlState], message: String): ServerError =
+    val condition = state match
+      case Some(code) if code == SqlState.UniqueViolation =>
+        SqlCondition.Unique(Some(ConstraintName("constraint_name")))
+      case other => SqlCondition.fromSqlState(other)
+    ServerError(condition, message, state)
 
-  private def sqlEx(state: String): SQLException =
-    new SQLException("synthetic", state)
+  private def classified(state: Option[SqlState], vendor: Boolean = false): SaferisError =
+    SqlState.classify(
+      reported(state, s"server ${state.getOrElse("none")}"),
+      Some(SqlText("insert into t values ($1)")),
+      _ => vendor,
+    )
 
-  private val defaultClassifierTests = suite("SaferisError.defaultRetryClassifier")(
-    test("flags 08xxx connection-exception states"):
-      val cls = SaferisError.defaultRetryClassifier
+  private def classified(state: SqlState): SaferisError = classified(Some(state))
+
+  private val classifyTests = suite("SqlState.classify")(
+    test("class 08 is ConnectionLost and retryable"):
+      val err = classified(SqlState.ConnectionException)
       assertTrue(
-        cls(sqlEx("08000")),
-        cls(sqlEx("08003")),
-        cls(sqlEx("08006")),
-        cls(sqlEx("08S01")),
+        err.isInstanceOf[SaferisError.ConnectionLost],
+        SqlState.defaultRetryable(reported(Some(SqlState.ConnectionException), "lost")),
       )
     ,
-    test("flags 40001 serialization failure"):
-      assertTrue(SaferisError.defaultRetryClassifier(sqlEx("40001")))
+    test("40001 is SerializationFailure"):
+      assertTrue(classified(SqlState.SerializationFailure).isInstanceOf[SaferisError.SerializationFailure])
     ,
-    test("flags 40P01 deadlock detected"):
-      assertTrue(SaferisError.defaultRetryClassifier(sqlEx("40P01")))
+    test("23505 keeps the server message and the constraint"):
+      classified(SqlState.UniqueViolation) match
+        case SaferisError.UniqueViolation(detail) =>
+          assertTrue(
+            detail.constraint.contains("constraint_name"),
+            detail.message == "server 23505",
+            detail.sqlState.contains(SqlState.UniqueViolation),
+            detail.sql.exists(_.contains("insert")),
+          )
+        case other =>
+          assertTrue(false).label(other.message)
     ,
-    test("does not flag syntax errors (42xxx)"):
-      assertTrue(!SaferisError.defaultRetryClassifier(sqlEx("42601")))
+    test("23514 and 23503 keep the server message"):
+      val check = classified(SqlState.CheckViolation)
+      val fk    = classified(SqlState.ForeignKeyViolation)
+      assertTrue(
+        check match
+          case SaferisError.CheckViolation(detail) => detail.message == "server 23514"
+          case _                                   => false
+        ,
+        fk match
+          case SaferisError.ForeignKeyViolation(detail) => detail.message == "server 23503"
+          case _                                        => false,
+      )
     ,
-    test("does not flag constraint violations (23xxx)"):
-      assertTrue(!SaferisError.defaultRetryClassifier(sqlEx("23505")))
+    test("class 42 stays SyntaxError even when the vendor hook matches"):
+      val state = SqlState.parse("42000")
+      assertTrue(classified(state, vendor = true).isInstanceOf[SaferisError.SyntaxError])
     ,
-    test("does not flag non-SQL throwables"):
-      assertTrue(!SaferisError.defaultRetryClassifier(new RuntimeException("nope"))),
+    test("Canceled is Timeout even when the vendor hook matches"):
+      val err = SqlState.classify(
+        ServerError(SqlCondition.Canceled, "cancel"),
+        Some(SqlText("select 1")),
+        _ => true,
+      )
+      assertTrue(err.isInstanceOf[SaferisError.Timeout], err.message == "cancel")
+    ,
+    test("Other is Retryable when the vendor hook matches"):
+      assertTrue(classified(None, vendor = true).isInstanceOf[SaferisError.Retryable])
+    ,
+    test("a fixed code classifies any message the same way and the message is unchanged"):
+      val codes = Gen.elements("23505", "23503", "23502", "08001", "22012", "42000", "40001")
+      check(codes, Gen.string): (code, message) =>
+        val state = SqlState.parse(code)
+        val left  = reported(state, message)
+        val right = reported(state, message.reverse)
+        val got   = SqlState.classify(left, None, _ => false)
+        assertTrue(left.condition == right.condition, got.message == message),
   )
 
-  private val fromThrowableTests = suite("SaferisError.fromThrowable")(
-    test("wraps in Retryable when classifier returns true"):
-      val classifier: SaferisError.RetryClassifier = _ => true
-      val err = SaferisError.fromThrowable(sqlEx("23505"), Some("insert ..."), classifier)
-      assert(err)(isSubtype[SaferisError.Retryable](anything))
-    ,
-    test("classifier short-circuits SQLState categorization"):
-      // Without the classifier, 23505 would be ConstraintViolation;
-      // with one that flags it, we should get Retryable.
-      val classifier: SaferisError.RetryClassifier =
-        case e: SQLException => e.getSQLState == "23505"
-        case _               => false
-      val err = SaferisError.fromThrowable(sqlEx("23505"), Some("insert ..."), classifier)
-      assert(err)(isSubtype[SaferisError.Retryable](anything))
-    ,
-    test("falls through to normal categorization when classifier returns false"):
-      val err = SaferisError.fromThrowable(sqlEx("42601"), Some("bad sql"), _ => false)
-      assert(err)(isSubtype[SaferisError.SyntaxError](anything))
-    ,
-    test("default fromThrowable (no classifier) preserves prior behavior"):
-      val err = SaferisError.fromThrowable(sqlEx("23505"), Some("insert ..."))
-      assert(err)(isSubtype[SaferisError.ConstraintViolation](anything)),
-  )
-
-  // ---- Integration test: user-supplied classifier wired through Transactor ----
-
-  // Classifier that flags any SyntaxError (42xxx) as retryable. Lets us trigger Retryable
-  // end-to-end with a deterministic, fast query (no need to set up a serialization conflict).
-  private val syntaxIsRetryable: SaferisError.RetryClassifier =
-    case e: SQLException => Option(e.getSQLState).exists(_.startsWith("42"))
-    case _               => false
-
-  private val customClassifierLayer: ULayer[Transactor] =
-    DataSourceProvider.default >>> Transactor.layer(retryClassifier = Some(syntaxIsRetryable))
-
-  private val defaultClassifierLayer: ULayer[Transactor] =
-    DataSourceProvider.default >>> Transactor.layer()
-
-  // A query that always fails with SQLState 42601 (syntax error)
-  private val brokenQuery = sql"deli meat from nowhere".dml
-
-  private val transactorWiringTests = suite("Transactor wiring")(
-    test("user-supplied classifier flips a syntax error into Retryable"):
-      for
-        xa     <- ZIO.service[Transactor]
-        result <- xa.run(brokenQuery).exit
-      yield assert(result)(fails(isSubtype[SaferisError.Retryable](anything)))
-    .provideShared(customClassifierLayer),
-    test("default dialect classifier leaves syntax errors as SyntaxError"):
-      for
-        xa     <- ZIO.service[Transactor]
-        result <- xa.run(brokenQuery).exit
-      yield assert(result)(fails(isSubtype[SaferisError.SyntaxError](anything)))
-    .provideShared(defaultClassifierLayer),
-    test("classifier flows through transact as well"):
-      for
-        xa     <- ZIO.service[Transactor]
-        result <- xa.transact(brokenQuery).exit
-      yield assert(result)(fails(isSubtype[SaferisError.Retryable](anything)))
-    .provideShared(customClassifierLayer),
-    test("Retryable composes with ZIO.retry"):
-      // Use a classifier that flags the syntax error as retryable, then verify that
-      // ZIO's retry combinator actually drives multiple attempts.
-      for
-        attempts <- Ref.make(0)
-        xa       <- ZIO.service[Transactor]
-        countingQuery = attempts.update(_ + 1) *> xa.run(brokenQuery)
-        result <- countingQuery
-          .retry(Schedule.recurs(2) && Schedule.recurWhile[SaferisError]:
-            case _: SaferisError.Retryable => true
-            case _                         => false)
-          .exit
-        n <- attempts.get
-      yield assertTrue(n == 3) && assert(result)(fails(isSubtype[SaferisError.Retryable](anything)))
-    .provideShared(customClassifierLayer),
+  private val parseTests = suite("SqlState.parse")(
+    test("succeeds exactly on five digits or upper-case letters"):
+      check(Gen.string): raw =>
+        val ok = raw.length == 5 && raw.forall(c => c.isDigit || (c >= 'A' && c <= 'Z'))
+        assertTrue(SqlState.parse(raw).isDefined == ok)
   )
 
   override def spec = suite("Retryable error classification")(
-    defaultClassifierTests,
-    fromThrowableTests,
-    transactorWiringTests,
-  ) @@ TestAspect.sequential
-
+    classifyTests,
+    parseTests,
+  )
 end RetryableSpecs

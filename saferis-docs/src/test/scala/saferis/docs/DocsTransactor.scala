@@ -2,10 +2,13 @@ package saferis.docs
 
 import org.postgresql.ds.PGSimpleDataSource
 import org.testcontainers.containers.PostgreSQLContainer
-import saferis.*
+import saferis.SqlSession
+import saferis.postgres.jdbc.PostgresJdbc
 import zio.*
 
-/** Shared Postgres + [[Transactor]] for Specular DocSpecs (one container per JVM). */
+import javax.sql.DataSource
+
+/** Shared Postgres `SqlSession` for Specular DocSpecs (one container per JVM). */
 object DocsTransactor:
 
   private lazy val container: PostgreSQLContainer[?] =
@@ -13,22 +16,20 @@ object DocsTransactor:
     val previous = thread.getContextClassLoader()
     thread.setContextClassLoader(getClass.getClassLoader())
     try
-      val c = new PostgreSQLContainer("postgres:16")
+      val c = new PostgreSQLContainer("postgres:17")
       c.withEnv("POSTGRES_HOST_AUTH_METHOD", "trust")
       c.start()
       c
     finally thread.setContextClassLoader(previous)
   end container
 
-  lazy val transactor: Transactor =
-    val dataSource = PGSimpleDataSource()
-    dataSource.setURL(container.getJdbcUrl())
-    dataSource.setUser(container.getUsername())
-    dataSource.setPassword(container.getPassword())
-    Transactor(ConnectionProvider.FromDataSource(dataSource), _ => (), None)
+  lazy val dataSource: DataSource =
+    val ds = PGSimpleDataSource()
+    ds.setURL(container.getJdbcUrl())
+    ds.setUser(container.getUsername())
+    ds.setPassword(container.getPassword())
+    ds
 
-  val xa: Transactor = transactor
-
-  val transactorLayer: ZLayer[Any, Nothing, Transactor] =
-    ZLayer.succeed(transactor)
+  val layer: ULayer[SqlSession] =
+    ZLayer.succeed(dataSource) >>> PostgresJdbc.layer()
 end DocsTransactor

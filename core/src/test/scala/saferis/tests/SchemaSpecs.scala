@@ -96,7 +96,7 @@ object SchemaSpecs extends ZIOSpecDefault:
       test("named index") {
         val sql = Schema[User]
           .withIndex(_.name)
-          .named("idx_custom_name")
+          .named(IndexName("idx_custom_name"))
           .ddl(ifNotExists = false)
           .sql
         assertTrue(sql.contains("idx_custom_name"))
@@ -365,7 +365,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .withIndex(_.status)
           .where(_.status)
           .eql("active")
-          .named("idx_active_users")
+          .named(IndexName("idx_active_users"))
           .ddl(ifNotExists = false)
           .sql
         assertTrue(
@@ -378,7 +378,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .withUniqueIndex(_.email)
           .where(_.status)
           .eql("active")
-          .named("idx_unique_active_email")
+          .named(IndexName("idx_unique_active_email"))
           .ddl(ifNotExists = false)
           .sql
         assertTrue(
@@ -398,7 +398,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .ddl(ifNotExists = false)
           .sql
         // Uses jsonb_exists function to avoid JDBC parameter placeholder conflict with ? operator
-        assertTrue(sql.contains("where jsonb_exists(data, 'email')"))
+        assertTrue(sql.contains("where jsonb_exists(\"data\", 'email')"))
       },
       test("jsonHasAnyKey generates correct PostgreSQL SQL") {
         val sql = Schema[Profile]
@@ -408,7 +408,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .ddl(ifNotExists = false)
           .sql
         // Uses jsonb_exists_any function to avoid JDBC parameter placeholder conflict with ?| operator
-        assertTrue(sql.contains("where jsonb_exists_any(data, array['email', 'verified'])"))
+        assertTrue(sql.contains("where jsonb_exists_any(\"data\", array['email', 'verified'])"))
       },
       test("jsonHasAllKeys generates correct PostgreSQL SQL") {
         val sql = Schema[Profile]
@@ -418,7 +418,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .ddl(ifNotExists = false)
           .sql
         // Uses jsonb_exists_all function to avoid JDBC parameter placeholder conflict with ?& operator
-        assertTrue(sql.contains("where jsonb_exists_all(data, array['email', 'verified'])"))
+        assertTrue(sql.contains("where jsonb_exists_all(\"data\", array['email', 'verified'])"))
       },
       test("jsonContains generates correct PostgreSQL SQL") {
         val sql = Schema[Profile]
@@ -427,7 +427,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .jsonContains(UserData("test@example.com", true))
           .ddl(ifNotExists = false)
           .sql
-        assertTrue(sql.contains("""where data @> '{"email":"test@example.com","verified":true}'"""))
+        assertTrue(sql.contains("""where "data" @> '{"email":"test@example.com","verified":true}'"""))
       },
     ),
     // === JSON Path Operators ===
@@ -440,7 +440,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .eql("admin@test.com")
           .ddl(ifNotExists = false)
           .sql
-        assertTrue(sql.contains("where data->>'email' = 'admin@test.com'"))
+        assertTrue(sql.contains("where \"data\"->>'email' = 'admin@test.com'"))
       },
       test("jsonPath.neql generates correct SQL") {
         val sql = Schema[Profile]
@@ -450,7 +450,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .neql("spam@test.com")
           .ddl(ifNotExists = false)
           .sql
-        assertTrue(sql.contains("where data->>'email' <> 'spam@test.com'"))
+        assertTrue(sql.contains("where \"data\"->>'email' <> 'spam@test.com'"))
       },
       test("jsonPath.like generates correct SQL") {
         val sql = Schema[Profile]
@@ -460,7 +460,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .like("%@example.com")
           .ddl(ifNotExists = false)
           .sql
-        assertTrue(sql.contains("where data->>'email' like '%@example.com'"))
+        assertTrue(sql.contains("where \"data\"->>'email' like '%@example.com'"))
       },
       test("jsonPath.isNull generates correct SQL") {
         val sql = Schema[Profile]
@@ -470,7 +470,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .isNull
           .ddl(ifNotExists = false)
           .sql
-        assertTrue(sql.contains("where data->>'email' is null"))
+        assertTrue(sql.contains("where \"data\"->>'email' is null"))
       },
       test("jsonPath.isNotNull generates correct SQL") {
         val sql = Schema[Profile]
@@ -480,7 +480,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .isNotNull
           .ddl(ifNotExists = false)
           .sql
-        assertTrue(sql.contains("where data->>'email' is not null"))
+        assertTrue(sql.contains("where \"data\"->>'email' is not null"))
       },
     ),
     // === JSON Combined with Other Conditions ===
@@ -494,7 +494,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .eql("Alice")
           .ddl(ifNotExists = false)
           .sql
-        assertTrue(sql.contains("where jsonb_exists(data, 'email') and name = 'Alice'"))
+        assertTrue(sql.contains("where jsonb_exists(\"data\", 'email') and name = 'Alice'"))
       },
       test("jsonPath with OR condition") {
         val sql = Schema[Profile]
@@ -506,29 +506,29 @@ object SchemaSpecs extends ZIOSpecDefault:
           .like("Admin%")
           .ddl(ifNotExists = false)
           .sql
-        assertTrue(sql.contains("where data->>'verified' = 'true' or name like 'Admin%'"))
+        assertTrue(sql.contains("where \"data\"->>'verified' = 'true' or name like 'Admin%'"))
       },
     ),
     // === MySQL JSON Dialect ===
     suite("MySQL JSON dialect SQL generation")(
       test("MySQLDialect.jsonHasKeySql generates correct SQL") {
-        val sql = saferis.mysql.MySQLDialect.jsonHasKeySql("data", "email")
+        val sql = saferis.mysql.MySQLDialect.jsonHasKeySql(SqlText("data"), "email")
         assertTrue(sql == "JSON_CONTAINS_PATH(data, 'one', '$.email')")
       },
       test("MySQLDialect.jsonContainsSql generates correct SQL") {
-        val sql = saferis.mysql.MySQLDialect.jsonContainsSql("data", """{"verified":true}""")
+        val sql = saferis.mysql.MySQLDialect.jsonContainsSql(SqlText("data"), JsonText("""{"verified":true}"""))
         assertTrue(sql == """JSON_CONTAINS(data, '{"verified":true}')""")
       },
       test("MySQLDialect.jsonExtractSql generates correct SQL") {
-        val sql = saferis.mysql.MySQLDialect.jsonExtractSql("data", "email")
+        val sql = saferis.mysql.MySQLDialect.jsonExtractSql(SqlText("data"), "email")
         assertTrue(sql == "JSON_EXTRACT(data, '$.email')")
       },
       test("MySQLDialect.jsonHasAnyKeySql generates correct SQL") {
-        val sql = saferis.mysql.MySQLDialect.jsonHasAnyKeySql("data", Seq("email", "name"))
+        val sql = saferis.mysql.MySQLDialect.jsonHasAnyKeySql(SqlText("data"), Seq("email", "name"))
         assertTrue(sql == "JSON_CONTAINS_PATH(data, 'one', '$.email', '$.name')")
       },
       test("MySQLDialect.jsonHasAllKeysSql generates correct SQL") {
-        val sql = saferis.mysql.MySQLDialect.jsonHasAllKeysSql("data", Seq("email", "name"))
+        val sql = saferis.mysql.MySQLDialect.jsonHasAllKeysSql(SqlText("data"), Seq("email", "name"))
         assertTrue(sql == "JSON_CONTAINS_PATH(data, 'all', '$.email', '$.name')")
       },
     ),
@@ -541,8 +541,8 @@ object SchemaSpecs extends ZIOSpecDefault:
           .ddl(ifNotExists = false)
           .sql
         assertTrue(
-          sql.contains("foreign key (userId)"),
-          sql.contains("references schema_test_users (id)"),
+          sql.contains("foreign key (\"userId\")"),
+          sql.contains("references \"schema_test_users\" (\"id\")"),
         )
       },
       test("FK with onDelete cascade") {
@@ -553,7 +553,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .ddl(ifNotExists = false)
           .sql
         assertTrue(
-          sql.contains("foreign key (userId)"),
+          sql.contains("foreign key (\"userId\")"),
           sql.contains("on delete cascade"),
         )
       },
@@ -570,10 +570,10 @@ object SchemaSpecs extends ZIOSpecDefault:
         val sql = Schema[Order]
           .withForeignKey(_.userId)
           .references[User](_.id)
-          .named("fk_order_user")
+          .named(ConstraintName("fk_order_user"))
           .ddl(ifNotExists = false)
           .sql
-        assertTrue(sql.contains("constraint fk_order_user foreign key"))
+        assertTrue(sql.contains("constraint \"fk_order_user\" foreign key"))
       },
       test("compound FK with and()") {
         val sql = Schema[OrderItem]
@@ -584,8 +584,8 @@ object SchemaSpecs extends ZIOSpecDefault:
           .ddl(ifNotExists = false)
           .sql
         assertTrue(
-          sql.contains("foreign key (orderId, lineNum)"),
-          sql.contains("references schema_test_order_details (orderId, lineNum)"),
+          sql.contains("foreign key (\"orderId\", \"lineNum\")"),
+          sql.contains("references \"schema_test_order_details\" (\"orderId\", \"lineNum\")"),
         )
       },
       test("compound FK with onDelete and onUpdate") {
@@ -599,7 +599,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .ddl(ifNotExists = false)
           .sql
         assertTrue(
-          sql.contains("foreign key (orderId, lineNum)"),
+          sql.contains("foreign key (\"orderId\", \"lineNum\")"),
           sql.contains("on delete cascade"),
           sql.contains("on update cascade"),
         )
@@ -615,10 +615,10 @@ object SchemaSpecs extends ZIOSpecDefault:
           .ddl(ifNotExists = false)
           .sql
         assertTrue(
-          sql.contains("foreign key (userId)"),
-          sql.contains("references schema_test_users (id)"),
-          sql.contains("foreign key (productId)"),
-          sql.contains("references schema_test_products (id)"),
+          sql.contains("foreign key (\"userId\")"),
+          sql.contains("references \"schema_test_users\" (\"id\")"),
+          sql.contains("foreign key (\"productId\")"),
+          sql.contains("references \"schema_test_products\" (\"id\")"),
         )
       },
     ),
@@ -641,7 +641,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .withUniqueConstraint(_.email)
           .ddl(ifNotExists = false)
           .sql
-        assertTrue(sql.contains("unique (email)"))
+        assertTrue(sql.contains("unique (\"email\")"))
       },
       test("compound unique constraint with and()") {
         val sql = Schema[User]
@@ -649,15 +649,15 @@ object SchemaSpecs extends ZIOSpecDefault:
           .and(_.email)
           .ddl(ifNotExists = false)
           .sql
-        assertTrue(sql.contains("unique (name, email)"))
+        assertTrue(sql.contains("unique (\"name\", \"email\")"))
       },
       test("named unique constraint") {
         val sql = Schema[User]
           .withUniqueConstraint(_.email)
-          .named("uq_user_email")
+          .named(ConstraintName("uq_user_email"))
           .ddl(ifNotExists = false)
           .sql
-        assertTrue(sql.contains("constraint uq_user_email unique"))
+        assertTrue(sql.contains("constraint \"uq_user_email\" unique"))
       },
     ),
     // === Schema Build Method ===
@@ -721,8 +721,8 @@ object SchemaSpecs extends ZIOSpecDefault:
         assertTrue(
           sql.contains("create index"),
           sql.contains("idx_schema_test_orders_userId"),
-          sql.contains("foreign key (userId)"),
-          sql.contains("foreign key (productId)"),
+          sql.contains("foreign key (\"userId\")"),
+          sql.contains("foreign key (\"productId\")"),
         )
       },
       test("partial index + FK on same column") {
@@ -736,7 +736,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .sql
         assertTrue(
           sql.contains("where amount > 100"),
-          sql.contains("foreign key (userId)"),
+          sql.contains("foreign key (\"userId\")"),
         )
       },
     ),
@@ -812,7 +812,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .ddl(ifNotExists = false)
           .sql
         assertTrue(
-          sql.contains("unique (instance_id)"),
+          sql.contains("unique (\"instance_id\")"),
           !sql.contains("instanceId"),
         )
       },
@@ -830,7 +830,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .ddl(ifNotExists = false)
           .sql
         assertTrue(
-          sql.contains("unique (instance_id, sequence_nr)"),
+          sql.contains("unique (\"instance_id\", \"sequence_nr\")"),
           !sql.contains("instanceId"),
           !sql.contains("sequenceNr"),
         )
@@ -848,7 +848,7 @@ object SchemaSpecs extends ZIOSpecDefault:
           .ddl(ifNotExists = false)
           .sql
         assertTrue(
-          sql.contains("foreign key (user_ref_id)"),
+          sql.contains("foreign key (\"user_ref_id\")"),
           !sql.contains("userRefId"),
         )
       },
@@ -871,8 +871,8 @@ object SchemaSpecs extends ZIOSpecDefault:
           .ddl(ifNotExists = false)
           .sql
         assertTrue(
-          sql.contains("foreign key (target_ref)"),
-          sql.contains("references label_test_target (target_id)"),
+          sql.contains("foreign key (\"target_ref\")"),
+          sql.contains("references \"label_test_target\" (\"target_id\")"),
           !sql.contains("targetRef"),
           !sql.contains("targetId"),
         )

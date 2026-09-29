@@ -1,7 +1,6 @@
 package saferis.docs
 
 import saferis.*
-import saferis.docs.DocsTransactor.xa
 import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.*
@@ -164,7 +163,7 @@ object UpsertDocs extends SaferisDocSpecSuite:
     section("Full Atomic Lock Acquisition Example")(
       md"""Here's a complete example of atomic lock acquisition, run against the database:""",
       exampleZIO {
-        xa.run(
+        (
           for
             _ <- ddl.createTable[AtomicLock](ifNotExists = true)
             now  = java.time.Instant.now()
@@ -198,6 +197,7 @@ object UpsertDocs extends SaferisDocSpecSuite:
 
           yield (result1, result2)
         ).either
+          .provideLayer(DocsTransactor.layer)
       }.assert {
         case Right((result1, result2)) =>
           assertTrue(result1.exists(_.nodeId == "node-A") && result2.exists(_.nodeId == "node-A"))

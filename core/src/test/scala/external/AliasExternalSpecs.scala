@@ -5,6 +5,7 @@ package external
 // It also documents that user code cannot call the internal factory directly.
 
 import saferis.*
+import saferis.postgres.PostgresDialect
 import scala.compiletime.testing.typeCheckErrors
 import zio.test.*
 
@@ -13,7 +14,7 @@ object AliasExternalSpecs extends ZIOSpecDefault:
   def spec = suite("Alias from an external package")(
     test("Alias(\"literal\") macro compiles and works from outside the saferis package"):
       val alias = Alias("u")
-      assertTrue(alias.value == "u", alias.toSql == "u")
+      assertTrue(alias.value == "u", PostgresDialect.escapeIdentifier(alias) == "\"u\"")
     ,
     test("Alias.unsafe is not accessible from user code"):
       // unsafe is private[saferis]; a direct call must not typecheck from an external package.

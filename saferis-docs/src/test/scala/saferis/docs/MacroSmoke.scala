@@ -16,15 +16,14 @@ object MacroSmoke extends SaferisDocSpecSuite:
     exampleValue {
       val t = Table[SmokeUser]
       sql"SELECT * FROM $t WHERE ${t.name} = ${"Alice"}".sql
-    }.assert(s => assertTrue(s.contains("macro_smoke_users") && s.contains("?"))),
+    }.assert(s => assertTrue(s.contains("macro_smoke_users") && s.contains("$1"))),
     exampleZIO {
-      DocsTransactor.xa
-        .run(for
-          _     <- ddl.createTable[SmokeUser](ifNotExists = true)
-          _     <- dml.insert(SmokeUser(-1, "Alice"))
-          users <- sql"SELECT * FROM ${Table[SmokeUser]}".query[SmokeUser]
-        yield users)
-        .either
+      (for
+        _     <- ddl.createTable[SmokeUser](ifNotExists = true)
+        _     <- dml.insert(SmokeUser(-1, "Alice"))
+        users <- sql"SELECT * FROM ${Table[SmokeUser]}".query[SmokeUser]
+      yield users).either
+        .provideLayer(DocsTransactor.layer)
     }.assert {
       case Right(users) => assertTrue(users.exists(_.name == "Alice"))
       case Left(err)    => assertTrue(false).label(err.message)
