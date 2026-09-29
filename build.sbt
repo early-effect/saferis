@@ -314,7 +314,8 @@ lazy val sqliteJdbc = (projectMatrix in file("sqlite-jdbc"))
 
 // Postgres JdbcAdapter. The only JVM module that depends on pgjdbc and saferis-postgres.
 lazy val postgresJdbc = (projectMatrix in file("postgres-jdbc"))
-  .dependsOn(jdbc, postgres)
+  .dependsOn(jdbc)
+  .dependsOn(postgres % "compile->compile;test->test")
   .dependsOn(testkit % "test->compile;test->test")
   .settings(commonSettings)
   .settings(publishSettings)
@@ -329,7 +330,8 @@ lazy val postgresJdbc = (projectMatrix in file("postgres-jdbc"))
 
 // Node pg driver. Scala.js only. Depends on the core JS row and the shared Postgres codec.
 lazy val pg = (projectMatrix in file("pg"))
-  .dependsOn(core, postgres)
+  .dependsOn(core)
+  .dependsOn(postgres % "compile->compile;test->test")
   .dependsOn(testkit % "test->compile;test->test")
   .settings(commonSettings)
   .settings(publishSettings)

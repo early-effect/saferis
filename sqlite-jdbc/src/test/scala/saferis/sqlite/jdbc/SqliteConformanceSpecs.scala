@@ -2,8 +2,8 @@ package saferis.sqlite.jdbc
 
 import saferis.*
 import saferis.sqlite.SQLiteDialect
-import saferis.tests.Capability
 import saferis.tests.DatabaseTarget
+import saferis.tests.SchemaConformance
 import saferis.tests.SqlSessionConformance
 import saferis.tests.TransactionConformance
 
@@ -32,12 +32,13 @@ object SqliteConformanceSpecs extends ZIOSpecDefault:
   val session: TaskLayer[SqlSession] = dataSource >>> SqliteJdbc.layer()
 
   /** SQLite reads its catalog through pragmas. It has no statement that runs long enough to cancel. */
-  val target: ULayer[DatabaseTarget] = ZLayer.succeed(DatabaseTarget(SQLiteDialect, Set(Capability.Catalog)))
+  val target: ULayer[DatabaseTarget] = ZLayer.succeed(DatabaseTarget(SQLiteDialect))
 
-  /** SQLite proves itself by providing its session and target to the common suite, then runs what only SQLite does. */
+  /** SQLite runs the portable suite, its catalog, and what only SQLite does. */
   def spec =
     suite("sqlite")(
       SqlSessionConformance.suite,
+      SchemaConformance.conformance,
       SqliteValueSpecs.spec,
       TransactionConformance.continuesAfterUniqueViolation,
     ).provideShared(session, target) @@ TestAspect.sequential

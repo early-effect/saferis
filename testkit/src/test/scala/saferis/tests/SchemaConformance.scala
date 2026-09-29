@@ -8,8 +8,9 @@ import saferis.tests.SqlSessionConformance.withDialect
 import zio.{test as _, *}
 import zio.test.*
 
-/** `Schema.verify` on any database whose dialect reads a catalog. Tables come from the target's DDL and are broken with
-  * `alter table ... add/drop column`, which every catalog database here speaks, so no test assumes Postgres.
+/** `Schema.verify` for a dialect that reads its catalog. Postgres, MySQL, and SQLite include this suite. H2 does not,
+  * so it stays out of the portable conformance suite. Tables come from the target's DDL and are broken with `alter
+  * table ... add/drop column`.
   */
 object SchemaConformance:
   @tableName("verify_users")

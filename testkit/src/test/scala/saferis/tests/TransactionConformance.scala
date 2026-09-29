@@ -6,20 +6,17 @@ import zio.{test as _, *}
 import zio.test.*
 
 /** Transaction behavior every driver has to share. No pool, listener, or socket assumptions, and only SQL that every
-  * database Saferis ships speaks. The timeout test runs when the [[DatabaseTarget]] has a long statement to cancel.
+  * database Saferis ships speaks.
   */
 object TransactionConformance:
   def conformance =
-    suite("transaction semantics")(
-      (portable :+ timeout.whenZIO(ZIO.serviceWith[DatabaseTarget](_.longStatement.isDefined)))*
-    )
+    suite("transaction semantics")(portable*)
 
-  private def timeout =
+  /** A dialect that can block for several seconds includes this. The statement is that dialect's sleep. */
+  def cancelsLongStatement(statement: SqlFragment)(using Dialect) =
     test("a one second cap cancels a long statement"):
       for
-        long <- ZIO.serviceWithZIO[DatabaseTarget]: target =>
-          ZIO.fromOption(target.longStatement).orElseFail(SaferisError.Unsupported("no long statement"))
-        command <- long.withTimeout(1.second).toCommand
+        command <- statement.withTimeout(1.second).toCommand
         exit    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(_ => Right(()))).exit
       yield assertTrue:
         exit match
@@ -28,6 +25,8 @@ object TransactionConformance:
               case Some(_: SaferisError.Timeout) => true
               case _                             => false
           case _ => false
+    @@ TestAspect.withLiveClock
+      @@ TestAspect.timeout(30.seconds)
 
   private def portable =
     List(

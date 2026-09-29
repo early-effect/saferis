@@ -60,7 +60,7 @@ object BringYourOwnDatabaseSpecs extends ZIOSpecDefault:
       ds.setURL("jdbc:h2:mem:saferis_byo;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE")
       ds
 
-  /** The portable core only: no catalog, no Postgres SQL, and no long statement to cancel. */
+  /** The portable core only. This database does not read a catalog and has no statement long enough to cancel. */
   private val target: ULayer[DatabaseTarget] = ZLayer.succeed(DatabaseTarget(H2Dialect))
 
   /** A database brought from outside `saferis` proves itself the same way the shipped ones do. */
