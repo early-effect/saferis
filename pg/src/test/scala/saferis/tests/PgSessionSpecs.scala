@@ -11,7 +11,6 @@ import zio.*
 import zio.test.*
 
 import java.time.Instant
-import scala.scalajs.js
 
 object PgSessionSpecs extends ZIOSpecDefault:
   private val pastBigInt  = 9223372036854775807L
@@ -187,13 +186,20 @@ object PgSessionSpecs extends ZIOSpecDefault:
             .decode(row)
             .left
             .map(err => SaferisError.DecodingError(ColumnName("n"), TypeName("Int"), err.detail))
-        for
-          _       <- NodeSession.cursorReads.set(0)
-          command <- sql"select n::int4 from generate_series(1, 1000000) n".toCommand
-          session <- ZIO.service[SqlSession]
-          rows    <- session.stream(command)(read).take(10).runCollect
-          reads   <- NodeSession.cursorReads.get
-        yield assertTrue(rows == Chunk.fromIterable(1 to 10), reads >= 1, reads <= 2),
+        val counted =
+          for
+            reads   <- Ref.make(0)
+            _       <- ZIO.succeed(NodeSession.setOnBatch(reads.update(_ + 1)))
+            command <- sql"select n::int4 from generate_series(1, 1000000) n".toCommand
+            session <- ZIO.service[SqlSession]
+            rows    <- session
+              .stream(command)(read)
+              .take(10)
+              .runCollect
+              .ensuring(ZIO.succeed(NodeSession.setOnBatch(ZIO.unit)))
+            batches <- reads.get
+          yield assertTrue(rows == Chunk.fromIterable(1 to 10), batches >= 1, batches <= 2)
+        counted,
     )
 
   private val writes =
@@ -368,7 +374,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
         assertTrue(shutdown.forall(identity), !unique, !mentioned)
       ,
       test("a transport code is not a SQLSTATE, keeps the code in the message, and breaks the client"):
-        val info  = PgErrors.info(js.JavaScriptException(js.Dynamic.literal(code = "ECONNRESET", message = "reset")))
+        val info  = PgErrors.reported(Some("ECONNRESET"), "reset", None)
         val error = SqlState.classify(info, None, SqlState.defaultRetryable)
         assertTrue(
           info.sqlState.isEmpty,

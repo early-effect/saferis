@@ -5,45 +5,53 @@ import saferis.*
 import zio.Chunk
 import zio.Duration
 import zio.durationInt
-import zio.FiberRef
 import zio.IO
 import zio.Ref
 import zio.Scope
 import zio.Trace
 import zio.UIO
-import zio.Unsafe
 import zio.ZIO
 import zio.ZLayer
 import zio.stream.ZStream
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.scalajs.js
 import scala.util.control.NonFatal
 
 /** Node `pg` connection. The session around it is [[SqlSession.pooled]]. */
 object NodeSession:
-  /** How many `pg-cursor` `read` calls this fiber has made. A short stream stays at one batch. */
-  private[pg] val cursorReads: FiberRef[Int] =
-    Unsafe.unsafe(implicit unsafe => FiberRef.unsafe.make(0))
-
   private[pg] val Batch = 256
+
+  /** One successful cursor batch. Production leaves this as [[zio.ZIO.unit]]. The stream test counts batches with it.
+    */
+  private val batchHook = new AtomicReference[UIO[Unit]](ZIO.unit)
+
+  private[pg] def onBatch: UIO[Unit] = batchHook.get()
+
+  private[pg] def setOnBatch(hook: UIO[Unit]): Unit =
+    val _ = batchHook.set(hook)
+
+  private val swallow: js.Function1[PgDatabaseError, Unit] = _ => ()
 
   def layer(using Trace): ZLayer[PgConfig, SaferisError, SqlSession] =
     ZLayer.scoped:
       for
         config <- ZIO.service[PgConfig]
         pool   <- open(config)
-        _      <- ZIO.addFinalizer(PgPromises.complete(None, pool.end(), _ => ()).ignore)
+        _      <- ZIO.addFinalizer(
+          ZIO
+            .fromPromiseJS(pool.end())
+            .mapError(t => SaferisError.ConnectionError(PgErrors.message(t)))
+            .ignore
+        )
       yield SqlSession.pooled(checkout(pool, config), config.defaultTimeout)
 
   private def open(config: PgConfig)(using Trace): IO[SaferisError, PgPool] =
     ZIO
       .attempt:
         val pool = new PgPool(PgWire.poolConfig(config))
-        pool.on(
-          "connect",
-          (client: js.Any) => client.asInstanceOf[PgClient].on("error", PgPromises.swallow),
-        )
-        pool.on("error", PgPromises.swallow)
+        pool.onConnect("connect", (client: PgClient) => client.on("error", swallow))
+        pool.onError("error", swallow)
         pool
       .mapError(t => SaferisError.ConnectionError(PgErrors.message(t)))
 
@@ -62,9 +70,8 @@ object NodeSession:
         yield new NodeConnection(lease, config, lastTimeout)
 
   private def connect(pool: PgPool)(using Trace): IO[SaferisError, PgClient] =
-    PgPromises
-      .complete(None, pool.connect(), releaseAbandoned)
-      .mapError(t => SaferisError.ConnectionError(PgErrors.message(t)))
+    awaitSettled(pool.connectSettled(), releaseAbandoned, ZIO.unit).mapError: failure =>
+      SaferisError.ConnectionError(failureMessage(failure))
 
   private def releaseAbandoned(client: PgClient): Unit =
     try client.release(true)
@@ -79,8 +86,9 @@ object NodeSession:
           .flatMap: (opened, done) =>
             val rollback =
               if opened && !done then
-                PgPromises
-                  .complete(None, lease.client.query(PgWire.queryConfig("ROLLBACK", js.Array())), _ => ())
+                ZIO
+                  .fromPromiseJS(lease.client.query(PgWire.queryConfig("ROLLBACK", js.Array())))
+                  .mapError(t => SaferisError.ConnectionError(PgErrors.message(t)))
                   .ignore
               else ZIO.unit
             rollback *> lease.destroy.get.flatMap(drop => release(lease, drop))
@@ -92,7 +100,41 @@ object NodeSession:
         case false => (true, true)
       .flatMap: should =>
         ZIO.when(should)(ZIO.attempt(lease.client.release(destroy)).ignore).unit
+
+  /** Attach handlers before the promise can settle. `before` runs only while this fiber is still waiting, so an
+    * interrupt leaves a query `busy` and a late `connect` is `onLate`.
+    */
+  private[pg] def awaitSettled[A](
+      settled: => PgSettled[A],
+      onLate: A => Unit,
+      before: UIO[Unit],
+  )(using Trace): IO[AwaitFailure, A] =
+    ZIO.asyncInterrupt[Any, AwaitFailure, A]: register =>
+      var cancelled = false
+      try
+        val running                     = settled
+        val onOk: js.Function1[A, Unit] = value =>
+          if cancelled then onLate(value)
+          else register(before *> ZIO.succeed(value))
+        val onErr: js.Function1[PgDatabaseError, Unit] =
+          error => if !cancelled then register(before *> ZIO.fail(AwaitFailure.Rejected(error)))
+        running.`then`(onOk, onErr)
+        Left(ZIO.succeed { cancelled = true })
+      catch
+        case NonFatal(t) =>
+          register(before *> ZIO.fail(AwaitFailure.Thrown(t)))
+          Left(ZIO.unit)
+      end try
+
+  private def failureMessage(failure: AwaitFailure): String = failure match
+    case AwaitFailure.Rejected(error) => PgErrors.from(error).message
+    case AwaitFailure.Thrown(cause)   => PgErrors.message(cause)
+
 end NodeSession
+
+private enum AwaitFailure:
+  case Rejected(error: PgDatabaseError)
+  case Thrown(cause: Throwable)
 
 private final class PgLease(
     val client: PgClient,
@@ -196,7 +238,7 @@ private final class NodeConnection(
   private def queryResult(command: SqlCommand): IO[SaferisError, PgResult] =
     val sql    = PgWire.render(command)
     val values = PgWire.parameters(command.pieces)
-    promise(Some(sql), lease.client.query(PgWire.queryConfig(sql, values))).flatMap: value =>
+    promise(Some(sql), lease.client.querySettled(PgWire.queryConfig(sql, values))).flatMap: value =>
       ZIO.fromEither(PgWire.ensureSingle(value))
 
   private def openCursor(command: SqlCommand): PgCursor =
@@ -211,32 +253,38 @@ private final class NodeConnection(
         var cancelled = false
         cursor.read(
           NodeSession.Batch,
-          (err: js.Any, rows: js.Any, result: PgResult) =>
+          (
+              err: js.UndefOr[PgDatabaseError],
+              rows: js.Array[js.Array[js.UndefOr[String]]],
+              result: PgResult,
+          ) =>
             if !cancelled then
               val effect =
-                if js.isUndefined(err) || (err eq null) then
-                  (ZIO.fromEither(cursorRows(result, rows)) <* NodeSession.cursorReads.update(_ + 1))
-                    .ensuring(lease.busy.set(false))
-                else
-                  // The portal is dead. Close would wait for a readyForQuery that already arrived.
-                  lease.destroy.set(true) *> lease.busy.set(true) *>
-                    ZIO.fail(classify(PgPromises.asThrowable(err), Some(sql)))
+                // pg-cursor passes null, not undefined, when the batch succeeded.
+                err.toOption.filter(_ != null) match
+                  case None =>
+                    (ZIO.fromEither(cursorRows(result, rows)) <* NodeSession.onBatch)
+                      .ensuring(lease.busy.set(false))
+                  case Some(error) =>
+                    // The portal is dead. Close would wait for a readyForQuery that already arrived.
+                    lease.destroy.set(true) *> lease.busy.set(true) *>
+                      ZIO.fail(classify(PgErrors.from(error), Some(sql)))
               register(effect)
             else (),
         )
         Left(ZIO.succeed { cancelled = true })
   end readBatch
 
-  private def cursorRows(result: PgResult, raw: js.Any): Either[SaferisError, Chunk[SqlRow]] =
-    if raw == null || js.isUndefined(raw) then Right(Chunk.empty)
+  private def cursorRows(
+      result: PgResult,
+      rows: js.Array[js.Array[js.UndefOr[String]]],
+  ): Either[SaferisError, Chunk[SqlRow]] =
+    if rows == null || js.isUndefined(rows) || rows.length == 0 then Right(Chunk.empty)
     else
-      val rows = raw.asInstanceOf[js.Array[js.Array[js.Any]]]
-      if rows.length == 0 then Right(Chunk.empty)
-      else
-        val fields = result.fields
-        (0 until rows.length).foldLeft[Either[SaferisError, Chunk[SqlRow]]](Right(Chunk.empty)):
-          case (Left(err), _)  => Left(err)
-          case (Right(acc), i) => PgWire.readCursorRow(fields, rows(i)).map(acc :+ _)
+      val fields = result.fields
+      (0 until rows.length).foldLeft[Either[SaferisError, Chunk[SqlRow]]](Right(Chunk.empty)):
+        case (Left(err), _)  => Left(err)
+        case (Right(acc), i) => PgWire.readCursorRow(fields, rows(i)).map(acc :+ _)
 
   /** A missing `readyForQuery` must not pin the uninterruptible finalizer. Two seconds, on the caller clock. */
   private def closeCursor(cursor: PgCursor): UIO[Unit] =
@@ -246,7 +294,7 @@ private final class NodeConnection(
         val close =
           ZIO.asyncInterrupt[Any, Nothing, Unit]: register =>
             var closed = false
-            cursor.close: (_: js.Any) =>
+            cursor.close: (_: js.UndefOr[PgDatabaseError]) =>
               if !closed then
                 closed = true
                 register(ZIO.unit)
@@ -262,19 +310,23 @@ private final class NodeConnection(
     protocolResult(statement).unit
 
   private def protocolResult(statement: String): IO[SaferisError, PgResult] =
-    promise(None, lease.client.query(PgWire.queryConfig(statement, js.Array()))).flatMap: value =>
+    promise(None, lease.client.querySettled(PgWire.queryConfig(statement, js.Array()))).flatMap: value =>
       ZIO.fromEither(PgWire.ensureSingle(value))
 
-  private def promise[A](sql: Option[SqlText], thunk: => js.Promise[A]): IO[SaferisError, A] =
+  private def promise[A](sql: Option[SqlText], settled: => PgSettled[A]): IO[SaferisError, A] =
     lease.busy.set(true).uninterruptible *>
-      PgPromises
-        .complete(Some(lease.busy), thunk, _ => ())
-        .mapError(t => classify(t, sql))
+      NodeSession
+        .awaitSettled(settled, _ => (), lease.busy.set(false))
+        .mapError(failure => failureError(failure, sql))
         .tapError(markBroken)
+
+  private def failureError(failure: AwaitFailure, sql: Option[SqlText]): SaferisError = failure match
+    case AwaitFailure.Rejected(error) => classify(PgErrors.from(error), sql)
+    case AwaitFailure.Thrown(cause)   => SaferisError.Unexpected(PgErrors.message(cause))
 
   private def markBroken(err: SaferisError): UIO[Unit] =
     ZIO.when(PgErrors.broken(err))(lease.destroy.set(true)).unit
 
-  private def classify(t: Throwable, sql: Option[SqlText]): SaferisError =
-    SqlState.classify(PgErrors.info(t), sql, config.retry)
+  private def classify(error: ServerError, sql: Option[SqlText]): SaferisError =
+    SqlState.classify(error, sql, config.retry)
 end NodeConnection

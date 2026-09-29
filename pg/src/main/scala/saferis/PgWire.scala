@@ -28,34 +28,29 @@ private[pg] object PgWire:
   val getTypeParser: js.Function2[js.Any, js.Any, js.Function1[js.Any, js.Any]] =
     (_: js.Any, _: js.Any) => rawParser
 
-  val rawTypes: js.Object =
-    js.Dynamic.literal("getTypeParser" -> getTypeParser)
+  val rawTypes: PgTypeParsers = new PgTypeParsers(getTypeParser)
 
   /** `rowMode` stays `array` so the OID decode does not change. Batch size is the `read` argument. */
-  def cursorConfig: js.Object =
-    js.Dynamic.literal(
-      "rowMode" -> "array",
-      "types"   -> rawTypes,
-    )
+  def cursorConfig: PgCursorOptions = new PgCursorOptions("array", rawTypes)
 
-  def poolConfig(config: PgConfig): js.Object =
+  def poolConfig(config: PgConfig): PgPoolOptions =
     val connection = config.connection
-    js.Dynamic.literal(
-      "host"                    -> connection.host,
-      "port"                    -> connection.port.toDouble,
-      "database"                -> connection.database,
-      "user"                    -> connection.user,
-      "password"                -> reveal(connection.password),
-      "max"                     -> config.poolSize.toDouble,
-      "ssl"                     -> sslValue(connection.ssl),
-      "connectionTimeoutMillis" -> connection.connectTimeout.toMillis.toDouble,
-      "options"                 -> connection.startupOptions(Required),
-      // A peer that vanished without a reset otherwise leaves a query, including an uninterruptible COMMIT, waiting
-      // forever. Keepalive probes turn that into a socket error.
-      "keepAlive"                   -> true,
-      "keepAliveInitialDelayMillis" -> KeepAliveDelayMillis,
-      "allowExitOnIdle"             -> true,
-      "types"                       -> rawTypes,
+    // A peer that vanished without a reset otherwise leaves a query, including an uninterruptible COMMIT, waiting
+    // forever. Keepalive probes turn that into a socket error.
+    new PgPoolOptions(
+      max = config.poolSize.toDouble,
+      host = connection.host,
+      port = connection.port.toDouble,
+      database = connection.database,
+      user = connection.user,
+      password = reveal(connection.password),
+      ssl = sslValue(connection.ssl),
+      connectionTimeoutMillis = connection.connectTimeout.toMillis.toDouble,
+      options = connection.startupOptions(Required),
+      keepAlive = true,
+      keepAliveInitialDelayMillis = KeepAliveDelayMillis,
+      allowExitOnIdle = true,
+      types = rawTypes,
     )
   end poolConfig
 
@@ -71,27 +66,17 @@ private[pg] object PgWire:
   private val skipHostname: js.Function2[js.Any, js.Any, js.UndefOr[js.Any]] =
     (_, _) => js.undefined
 
-  def sslValue(mode: SslMode): js.Any = mode match
-    case SslMode.Disable =>
-      false.asInstanceOf[js.Any]
-    case SslMode.Require =>
-      js.Dynamic.literal(rejectUnauthorized = false)
+  def sslValue(mode: SslMode): Boolean | PgSslOptions = mode match
+    case SslMode.Disable      => false
+    case SslMode.Require      => new PgSslOptions(rejectUnauthorized = false)
     case SslMode.VerifyCa(ca) =>
       // rejectUnauthorized alone is verify-full. verify-ca skips the hostname check.
-      js.Dynamic.literal(
-        rejectUnauthorized = true,
-        ca = ca.text,
-        checkServerIdentity = skipHostname,
-      )
+      new PgSslOptions(rejectUnauthorized = true, ca = ca.text, checkServerIdentity = skipHostname)
     case SslMode.VerifyFull(ca) =>
-      js.Dynamic.literal(rejectUnauthorized = true, ca = ca.text)
+      new PgSslOptions(rejectUnauthorized = true, ca = ca.text)
 
-  def queryConfig(sql: String, values: js.Array[js.Any]): js.Object =
-    js.Dynamic.literal(
-      "text"    -> sql,
-      "values"  -> values,
-      "rowMode" -> "array",
-    )
+  def queryConfig(sql: String, values: js.Array[js.Any]): PgQuery =
+    new PgQuery(sql, values, "array")
 
   def render(command: SqlCommand): SqlText =
     command.render: (index, tpe) =>
@@ -123,22 +108,24 @@ private[pg] object PgWire:
     values
 
   def ensureSingle(result: PgResult): Either[SaferisError, PgResult] =
-    if js.Array.isArray(result.asInstanceOf[js.Any]) then
-      Left(SaferisError.Unexpected("multiple statements are not one command"))
+    if js.Array.isArray(result) then Left(SaferisError.Unexpected("multiple statements are not one command"))
     else Right(result)
 
   def rowCount(result: PgResult): Either[SaferisError, Long] =
     ensureSingle(result).map: single =>
-      val raw = single.asInstanceOf[js.Dynamic].rowCount
-      if js.isUndefined(raw) || (raw eq null) then 0L
-      else raw.asInstanceOf[Double].toLong
+      single.rowCount.toOption match
+        case Some(count) =>
+          count match
+            case n: Double => n.toLong
+            case null      => 0L
+        case None => 0L
 
   def readRows(result: PgResult): Either[SaferisError, Chunk[SqlRow]] =
     ensureSingle(result).flatMap: single =>
       readFields(single)
 
   /** One portal row. `fields` come from the cursor result, not from a buffered `PgResult`. */
-  def readCursorRow(fields: js.Array[PgField], row: js.Array[js.Any]): Either[SaferisError, SqlRow] =
+  def readCursorRow(fields: js.Array[PgField], row: js.Array[js.UndefOr[String]]): Either[SaferisError, SqlRow] =
     if fields == null || js.isUndefined(fields) then Left(SaferisError.Unexpected("cursor result has no fields"))
     else
       val labels = Chunk.fromIterator(Iterator.tabulate(fields.length)(i => fieldName(fields(i))))
@@ -160,7 +147,7 @@ private[pg] object PgWire:
   private def readGrid(
       labels: Chunk[ColumnName],
       oids: Array[Int],
-      grid: js.Array[js.Array[js.Any]],
+      grid: js.Array[js.Array[js.UndefOr[String]]],
   ): Either[SaferisError, Chunk[SqlRow]] =
     val rows                         = Chunk.newBuilder[SqlRow]
     var index                        = 0
@@ -176,7 +163,7 @@ private[pg] object PgWire:
   private def readRow(
       labels: Chunk[ColumnName],
       oids: Array[Int],
-      row: js.Array[js.Any],
+      row: js.Array[js.UndefOr[String]],
   ): Either[SaferisError, SqlRow] =
     if row.length != oids.length then
       Left(
@@ -198,16 +185,16 @@ private[pg] object PgWire:
     ColumnName(if name == null then "" else name)
 
   /** SQL null is `Null` before any JSON parse. JSON null arrives as the text `null`. */
-  private def readCell(oid: Int, label: ColumnName, raw: js.Any): Either[SaferisError, SqlValue] =
-    if isJsNull(raw) then Right(SqlValue.Null(PgText.sqlType(oid).getOrElse(SqlType.Other(ServerType.Oid(oid)))))
-    else if js.typeOf(raw) != "string" then
-      Left(SaferisError.DecodingError(label, PgText.typeLabel(oid), s"expected raw text for oid $oid"))
-    else
-      PgText
-        .decode(oid, raw.asInstanceOf[String])
-        .left
-        .map: detail =>
-          SaferisError.DecodingError(label, PgText.typeLabel(oid), detail)
+  private def readCell(oid: Int, label: ColumnName, raw: js.UndefOr[String]): Either[SaferisError, SqlValue] =
+    raw.toOption.filter(_ != null) match
+      case None =>
+        Right(SqlValue.Null(PgText.sqlType(oid).getOrElse(SqlType.Other(ServerType.Oid(oid)))))
+      case Some(text) =>
+        PgText
+          .decode(oid, text)
+          .left
+          .map: detail =>
+            SaferisError.DecodingError(label, PgText.typeLabel(oid), detail)
 
   private def bind(value: SqlValue): js.Any = value match
     case SqlValue.Null(_)            => jsNull
@@ -225,7 +212,4 @@ private[pg] object PgWire:
 
   /** JS null. Stays inside the bind. Callers see `SqlValue.Null`, not this. */
   private def jsNull: js.Any = null
-
-  private def isJsNull(raw: js.Any): Boolean =
-    js.isUndefined(raw) || (raw eq null)
 end PgWire

@@ -14,7 +14,7 @@ object EsmProbe:
     // Reachable so the linker keeps `@JSImport("pg")` and `@JSImport("pg-cursor")`.
     // Not called: constructing a pool would hold the Node event loop.
     if args.contains("--open") then
-      val pool   = new PgPool(js.Dynamic.literal("max" -> 1.0))
+      val pool   = new PgPool(new PgPoolOptions(max = 1))
       val cursor = new PgCursor("select 1", js.Array(), PgWire.cursorConfig)
       val _      = (pool, cursor)
     println(loaded())

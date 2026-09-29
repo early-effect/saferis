@@ -5,16 +5,10 @@ import saferis.postgres.PostgresSqlState
 
 import scala.scalajs.js
 
-/** Reads `code`, `constraint`, and `message` off a rejected `pg` value. */
+/** Reads `code`, `constraint`, and `message` off a `pg` error. */
 private[pg] object PgErrors:
-  def info(t: Throwable): ServerError =
-    t match
-      case js.JavaScriptException(value) => fromDynamic(value)
-      case other                         => ServerError(SqlCondition.Connection, messageOf(other))
-
   def message(t: Throwable): String =
-    val text = info(t).message
-    if text.nonEmpty then text else "connection failed"
+    Option(t.getMessage).filter(_.nonEmpty).getOrElse(t.getClass.getName)
 
   /** A dead socket must not go back to the pool. Connection errors and class `57` shutdown are dead. A message that
     * merely mentions a connection is not.
@@ -25,34 +19,25 @@ private[pg] object PgErrors:
     case _: SaferisError.Shutdown        => true
     case _                               => false
 
+  def from(error: PgDatabaseError): ServerError =
+    reported(text(error.code), text(error.message).getOrElse("connection failed"), text(error.constraint))
+
   /** A transport code (`ECONNRESET`, `EPIPE`) is not a SQLSTATE. The socket failed, so the condition is `Connection`
     * and `sqlState` stays empty. The message keeps the code.
     */
-  private def fromDynamic(value: Any): ServerError =
-    if value == null then ServerError(SqlCondition.Connection, "connection failed")
-    else
-      val dyn        = value.asInstanceOf[js.Dynamic]
-      val message    = text(dyn, "message").getOrElse(value.toString)
-      val code       = text(dyn, "code")
-      val parsed     = code.flatMap(SqlState.parse)
-      val constraint = text(dyn, "constraint").map(ConstraintName(_))
-      parsed match
-        case Some(state) =>
-          PostgresSqlState(
-            ServerError(SqlCondition.fromSqlState(Some(state)), message, Some(state)),
-            constraint,
-          )
-        case None =>
-          val textMessage = code.fold(message)(c => s"$message ($c)")
-          ServerError(SqlCondition.Connection, textMessage)
+  private[pg] def reported(code: Option[String], message: String, constraint: Option[String]): ServerError =
+    val named = constraint.map(ConstraintName(_))
+    code.flatMap(SqlState.parse) match
+      case Some(state) =>
+        PostgresSqlState(
+          ServerError(SqlCondition.fromSqlState(Some(state)), message, Some(state)),
+          named,
+        )
+      case None =>
+        val textMessage = code.fold(message)(c => s"$message ($c)")
+        ServerError(SqlCondition.Connection, textMessage)
+  end reported
 
-  private def text(dyn: js.Dynamic, name: String): Option[String] =
-    val value = dyn.selectDynamic(name)
-    if js.isUndefined(value) || (value eq null) then None
-    else
-      val raw = value.asInstanceOf[js.Any].toString
-      if raw.isEmpty then None else Some(raw)
-
-  private def messageOf(t: Throwable): String =
-    Option(t.getMessage).filter(_.nonEmpty).getOrElse(t.getClass.getName)
+  private def text(value: js.UndefOr[String]): Option[String] =
+    value.toOption.filter(raw => raw != null && raw.nonEmpty)
 end PgErrors
