@@ -50,13 +50,12 @@ object MySQLDialect
       case SqlType.Array(_)        => "json"
       case SqlType.Other(_)        => "text"
 
-  // === MySQL-specific Auto-increment and Primary Key Support ===
-
-  def autoIncrementClause(isGenerated: Boolean, isPrimaryKey: Boolean, hasCompoundKey: Boolean): SqlText = SqlText:
-    if isGenerated && isPrimaryKey && !hasCompoundKey then " auto_increment primary key"
-    else if isGenerated then " auto_increment"
-    else if isPrimaryKey && !hasCompoundKey then " primary key"
-    else ""
+  def generatedKey(key: GeneratedKey): SqlText = SqlText:
+    key match
+      case GeneratedKey.IdentityPrimaryKey => " auto_increment primary key"
+      case GeneratedKey.Identity           => " auto_increment"
+      case GeneratedKey.PrimaryKey         => " primary key"
+      case GeneratedKey.Plain              => ""
 
   // === MySQL-specific Index Creation ===
   // MySQL doesn't support IF NOT EXISTS for indexes in older versions

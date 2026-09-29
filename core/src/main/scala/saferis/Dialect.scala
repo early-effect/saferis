@@ -1,5 +1,22 @@
 package saferis
 
+/** How a column participates in key generation. A compound key is never [[GeneratedKey.IdentityPrimaryKey]]: the
+  * primary key is a table constraint, so the column is [[GeneratedKey.Identity]] or [[GeneratedKey.Plain]].
+  */
+enum GeneratedKey:
+  case Plain
+  case PrimaryKey
+  case Identity
+  case IdentityPrimaryKey
+
+object GeneratedKey:
+  def column(isGenerated: Boolean, isKey: Boolean, compound: Boolean): GeneratedKey =
+    if compound then if isGenerated then GeneratedKey.Identity else GeneratedKey.Plain
+    else if isGenerated && isKey then GeneratedKey.IdentityPrimaryKey
+    else if isGenerated then GeneratedKey.Identity
+    else if isKey then GeneratedKey.PrimaryKey
+    else GeneratedKey.Plain
+
 /** Trait representing a database dialect that provides database-specific type mappings and SQL generation.
   *
   * This allows the library to support multiple databases by providing different implementations for each database's
@@ -17,20 +34,9 @@ trait Dialect:
   /** Default length for variable-length types like VARCHAR */
   val DefaultVarcharLength: Int = 255
 
-  // === Auto-increment and Primary Key Support ===
-
-  /** Returns the SQL clause for auto-increment/generated primary key columns.
-    *
-    * @param isGenerated
-    *   Whether the column is marked as generated
-    * @param isPrimaryKey
-    *   Whether this column is a primary key
-    * @param hasCompoundKey
-    *   Whether the table has a compound primary key
-    * @return
-    *   SQL clause for auto-increment behavior (e.g., "GENERATED ALWAYS AS IDENTITY", "AUTO_INCREMENT", etc.)
+  /** The column clause for this [[GeneratedKey]]. A dialect with no identity or primary-key syntax returns empty SQL.
     */
-  def autoIncrementClause(isGenerated: Boolean, isPrimaryKey: Boolean, hasCompoundKey: Boolean): SqlText
+  def generatedKey(key: GeneratedKey): SqlText
 
   /** Returns the SQL clause for primary key constraint on a single column.
     *

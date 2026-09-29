@@ -46,14 +46,12 @@ object SQLiteDialect
       case SqlType.Uuid                                        => "uuid"
       case SqlType.Array(_) | SqlType.Other(_)                 => "text"
 
-  // === Auto-increment Syntax ===
-  override def autoIncrementClause(isGenerated: Boolean, isKey: Boolean, hasDefault: Boolean): SqlText = SqlText:
-    (isGenerated, isKey, hasDefault) match
-      case (true, true, false)  => " primary key autoincrement"
-      case (true, true, true)   => " autoincrement"
-      case (false, true, false) => " primary key"
-      case (true, false, false) => " autoincrement"
-      case _                    => ""
+  def generatedKey(key: GeneratedKey): SqlText = SqlText:
+    key match
+      case GeneratedKey.IdentityPrimaryKey => " primary key autoincrement"
+      case GeneratedKey.Identity           => " autoincrement"
+      case GeneratedKey.PrimaryKey         => " primary key"
+      case GeneratedKey.Plain              => ""
 
   // === Index Operations ===
   // SQLite supports partial indexes (WHERE clause)

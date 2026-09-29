@@ -44,10 +44,11 @@ object SparkDialect
       case SqlType.Array(_)        => "array<string>"
       case SqlType.Other(_)        => "string"
 
-  // === Spark SQL Auto-increment and Primary Key Support ===
-  // Spark SQL does not support auto-increment or primary key constraints in standard DDL
-  // Some distributions (like Databricks) may support GENERATED ALWAYS AS IDENTITY
-  def autoIncrementClause(isGenerated: Boolean, isPrimaryKey: Boolean, hasCompoundKey: Boolean): SqlText = ???
+  /** Spark SQL has no identity clause and no primary-key clause. */
+  def generatedKey(key: GeneratedKey): SqlText =
+    key match
+      case GeneratedKey.Plain | GeneratedKey.PrimaryKey | GeneratedKey.Identity | GeneratedKey.IdentityPrimaryKey =>
+        SqlText("")
 
   // === Spark SQL uses backticks for identifier escaping ===
   // This is critical: backticks are ONLY for identifiers (tables, columns, aliases)

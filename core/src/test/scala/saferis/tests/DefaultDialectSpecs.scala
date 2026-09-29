@@ -13,7 +13,9 @@ object DefaultDialectSpecs extends ZIOSpecDefault:
     },
     test("Default dialect provides PostgreSQL-specific features") {
       val dialect = summon[Dialect]
-      assertTrue(dialect.autoIncrementClause(true, true, false) == " generated always as identity primary key") &&
+      assertTrue(
+        dialect.generatedKey(GeneratedKey.IdentityPrimaryKey) == " generated always as identity primary key"
+      ) &&
       assertTrue(dialect.identifierQuote == "\"") &&
       assertTrue(dialect.columnType(SqlType.VarChar) == "varchar(255)")
     },

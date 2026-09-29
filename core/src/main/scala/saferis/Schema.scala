@@ -65,14 +65,14 @@ final case class Schema[A](instance: Instance[A]):
 
     // Column definitions - use col.label directly (unquoted) for column names
     val columnDefs = cols.map { col =>
-      val autoIncrement = dialect.autoIncrementClause(col.isGenerated, col.isKey, hasCompoundKey)
+      val autoIncrement = dialect.generatedKey(GeneratedKey.column(col.isGenerated, col.isKey, hasCompoundKey))
       val nullClause    = if col.isNullable then "" else " not null"
       val defaultClause = col.defaultClause.map(" " + _).getOrElse("")
       s"${dialect.escapeIdentifier(col.label)} ${col.columnType}$autoIncrement${nullClause}${defaultClause}"
     }
 
-    // Primary key constraint - only needed for compound keys
-    // For single keys, autoIncrementClause already adds " primary key"
+    // Primary key constraint - only needed for compound keys.
+    // A single key's generatedKey clause already includes "primary key".
     val pkConstraint = Option.when(hasCompoundKey) {
       dialect.compoundPrimaryKeyClause(keyColumns.map(_.label))
     }

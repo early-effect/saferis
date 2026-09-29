@@ -9,27 +9,29 @@ import zio.test.*
 object DialectSpecs extends ZIOSpecDefault:
 
   val spec = suite("Dialect Support")(
-    test("PostgreSQL dialect provides correct auto-increment clause") {
+    test("PostgreSQL spells each GeneratedKey") {
       val dialect = summon[Dialect]
       assertTrue(dialect.name == "PostgreSQL") &&
-      assertTrue(dialect.autoIncrementClause(true, true, false) == " generated always as identity primary key") &&
-      assertTrue(dialect.autoIncrementClause(true, true, true) == " generated always as identity") &&
-      assertTrue(dialect.autoIncrementClause(false, true, false) == " primary key") &&
-      assertTrue(dialect.autoIncrementClause(false, false, false) == "")
+      assertTrue(
+        dialect.generatedKey(GeneratedKey.IdentityPrimaryKey) == " generated always as identity primary key"
+      ) &&
+      assertTrue(dialect.generatedKey(GeneratedKey.Identity) == " generated always as identity") &&
+      assertTrue(dialect.generatedKey(GeneratedKey.PrimaryKey) == " primary key") &&
+      assertTrue(dialect.generatedKey(GeneratedKey.Plain) == "")
     },
-    test("MySQL dialect provides correct auto-increment clause") {
+    test("MySQL spells each GeneratedKey") {
       assertTrue(MySQLDialect.name == "MySQL") &&
-      assertTrue(MySQLDialect.autoIncrementClause(true, true, false) == " auto_increment primary key") &&
-      assertTrue(MySQLDialect.autoIncrementClause(true, true, true) == " auto_increment") &&
-      assertTrue(MySQLDialect.autoIncrementClause(false, true, false) == " primary key") &&
-      assertTrue(MySQLDialect.autoIncrementClause(false, false, false) == "")
+      assertTrue(MySQLDialect.generatedKey(GeneratedKey.IdentityPrimaryKey) == " auto_increment primary key") &&
+      assertTrue(MySQLDialect.generatedKey(GeneratedKey.Identity) == " auto_increment") &&
+      assertTrue(MySQLDialect.generatedKey(GeneratedKey.PrimaryKey) == " primary key") &&
+      assertTrue(MySQLDialect.generatedKey(GeneratedKey.Plain) == "")
     },
-    test("SQLite dialect provides correct auto-increment clause") {
+    test("SQLite spells each GeneratedKey, and AUTOINCREMENT is the identity primary key") {
       assertTrue(SQLiteDialect.name == "SQLite") &&
-      assertTrue(SQLiteDialect.autoIncrementClause(true, true, false) == " primary key autoincrement") &&
-      assertTrue(SQLiteDialect.autoIncrementClause(false, true, false) == " primary key") &&
-      assertTrue(SQLiteDialect.autoIncrementClause(true, false, false) == " autoincrement") &&
-      assertTrue(SQLiteDialect.autoIncrementClause(false, false, false) == "")
+      assertTrue(SQLiteDialect.generatedKey(GeneratedKey.IdentityPrimaryKey) == " primary key autoincrement") &&
+      assertTrue(SQLiteDialect.generatedKey(GeneratedKey.Identity) == " autoincrement") &&
+      assertTrue(SQLiteDialect.generatedKey(GeneratedKey.PrimaryKey) == " primary key") &&
+      assertTrue(SQLiteDialect.generatedKey(GeneratedKey.Plain) == "")
     },
     test("Dialects have different column type mappings") {
       val pgDialect = summon[Dialect]

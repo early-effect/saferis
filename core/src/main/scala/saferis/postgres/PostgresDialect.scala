@@ -47,13 +47,12 @@ object PostgresDialect
       case SqlType.Array(element)  => s"${columnType(element)}[]"
       case SqlType.Other(_)        => "text"
 
-  // === PostgreSQL-specific Auto-increment and Primary Key Support ===
-
-  def autoIncrementClause(isGenerated: Boolean, isPrimaryKey: Boolean, hasCompoundKey: Boolean): SqlText = SqlText:
-    if isGenerated && isPrimaryKey && !hasCompoundKey then " generated always as identity primary key"
-    else if isGenerated then " generated always as identity"
-    else if isPrimaryKey && !hasCompoundKey then " primary key"
-    else ""
+  def generatedKey(key: GeneratedKey): SqlText = SqlText:
+    key match
+      case GeneratedKey.IdentityPrimaryKey => " generated always as identity primary key"
+      case GeneratedKey.Identity           => " generated always as identity"
+      case GeneratedKey.PrimaryKey         => " primary key"
+      case GeneratedKey.Plain              => ""
 
   // === PostgreSQL-specific Query Features ===
   // PostgreSQL uses double quotes for identifier escaping

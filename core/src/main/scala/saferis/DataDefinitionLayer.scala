@@ -19,7 +19,7 @@ object DataDefinitionLayer:
       val baseType      = col.columnType
       val notNullClause = if !col.isNullable then " not null" else ""
       val defaultClause = col.defaultClause.map(d => s" $d").getOrElse("")
-      val autoIncrement = dialect.autoIncrementClause(col.isGenerated, col.isKey, hasCompoundKey)
+      val autoIncrement = dialect.generatedKey(GeneratedKey.column(col.isGenerated, col.isKey, hasCompoundKey))
       s"${dialect.escapeIdentifier(col.label)} $baseType$notNullClause$defaultClause$autoIncrement"
     }
 
@@ -75,7 +75,7 @@ object DataDefinitionLayer:
       val baseType      = col.columnType
       val notNullClause = if !col.isNullable then " not null" else ""
       val defaultClause = col.defaultClause.map(d => s" $d").getOrElse("")
-      val autoIncrement = dialect.autoIncrementClause(col.isGenerated, col.isKey, hasCompoundKey)
+      val autoIncrement = dialect.generatedKey(GeneratedKey.column(col.isGenerated, col.isKey, hasCompoundKey))
       s"${dialect.escapeIdentifier(col.label)} $baseType$notNullClause$defaultClause$autoIncrement"
     }
 

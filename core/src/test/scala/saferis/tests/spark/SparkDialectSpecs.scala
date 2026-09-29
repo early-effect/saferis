@@ -24,6 +24,15 @@ object SparkDialectSpecs extends ZIOSpecDefault:
           dialect.escapeIdentifier(ColumnName("column`name")) == "`column``name`"
       )
     },
+    test("Spark has no identity or primary-key clause") {
+      val dialect = summon[Dialect]
+      assertTrue(
+        dialect.generatedKey(GeneratedKey.Plain) == "" &&
+          dialect.generatedKey(GeneratedKey.PrimaryKey) == "" &&
+          dialect.generatedKey(GeneratedKey.Identity) == "" &&
+          dialect.generatedKey(GeneratedKey.IdentityPrimaryKey) == ""
+      )
+    },
     test("Spark type mappings") {
       val dialect = summon[Dialect]
       assertTrue(
