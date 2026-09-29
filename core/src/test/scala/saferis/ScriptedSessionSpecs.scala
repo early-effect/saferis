@@ -18,24 +18,18 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
         calls.count(_.startsWith("exec:")) == 2,
       )
     ,
-    test("catching a statement failure makes the next command 25P02 and does not send it"):
+    test("catching a statement failure sends the next command and commits"):
       for
         log  <- Ref.make(Chunk.empty[String])
         exit <- run(log):
           transact(sql"boom".execute.catchAll(_ => ZIO.succeed(0L)) *> sql"select later".execute).exit
         calls <- log.get
-        aborted = exit match
-          case Exit.Failure(cause) =>
-            cause.failureOption match
-              case Some(SaferisError.QueryError(detail)) =>
-                detail.sqlState == SqlState.parse("25P02") && detail.sql.exists(_.contains("later"))
-              case _ => false
-          case _ => false
       yield assertTrue(
-        aborted,
+        exit.isSuccess,
         calls.exists(_.contains("boom")),
-        !calls.exists(_.contains("later")),
-        calls.contains("rollback"),
+        calls.exists(_.contains("later")),
+        calls.contains("commit"),
+        !calls.contains("rollback"),
       )
     ,
     test("a failed body rolls back and does not commit"):
@@ -69,7 +63,7 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
         calls <- log.get
       yield assertTrue(calls.contains("begin"), calls.contains("rollback"), !calls.contains("commit"))
     ,
-    test("catching a failed stream still fails the transaction"):
+    test("catching a failed stream commits"):
       for
         log <- Ref.make(Chunk.empty[String])
         script = new Script(log, failCommit = false, failCursor = true)
@@ -80,6 +74,23 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
               .stream(SqlCommand(Chunk(SqlPiece.Text(SqlText("stream-boom"))), None))(read)
               .runDrain
               .catchAll(_ => ZIO.unit)
+        ).provide(ZLayer.succeed(SqlSession.pooled(ZIO.succeed(script)))).exit
+        calls <- log.get
+      yield assertTrue(
+        exit.isSuccess,
+        calls.exists(_.startsWith("cursor:")),
+        calls.contains("commit"),
+        !calls.contains("rollback"),
+      )
+    ,
+    test("an uncaught stream failure rolls back and does not commit"):
+      for
+        log <- Ref.make(Chunk.empty[String])
+        script = new Script(log, failCommit = false, failCursor = true)
+        exit <- transact(
+          ZIO.serviceWithZIO[SqlSession]: session =>
+            val read: SqlRow => Either[SaferisError, Int] = _ => Right(1)
+            session.stream(SqlCommand(Chunk(SqlPiece.Text(SqlText("stream-boom"))), None))(read).runDrain
         ).provide(ZLayer.succeed(SqlSession.pooled(ZIO.succeed(script)))).exit
         calls <- log.get
       yield assertTrue(

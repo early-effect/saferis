@@ -278,7 +278,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
             case _ => false
         yield assertTrue(captured.contains(1L), count.contains(0L), outerFailed)
       ,
-      test("catching a statement failure rolls back and the next command is 25P02"):
+      test("catching a statement failure aborts the transaction and the next command is 25P02"):
         for
           pg     <- ZIO.service[PostgresTestContainer]
           heard  <- Ref.make(Chunk.empty[String])
@@ -302,16 +302,19 @@ object PgSessionSpecs extends ZIOSpecDefault:
           ).provide(listening(pg.config(defaultTimeout = Some(30.seconds)), new Recording(heard)))
           (exit, captured, count) = result
           aborted                 = captured match
-            case Some(Left(SaferisError.QueryError(detail))) =>
-              detail.sqlState == SqlState.parse("25P02") && detail.sql.exists(_.contains("later_count"))
+            case Some(Left(SaferisError.Aborted(detail))) =>
+              detail.sqlState.contains(PostgresSqlState.InFailedTransaction) &&
+              detail.message.contains("current transaction is aborted") &&
+              detail.sql.exists(_.contains("later_count"))
             case _ => false
-          recorded = exit match
+          rejected = exit match
             case Exit.Failure(cause) =>
               cause.failureOption match
-                case Some(_: SaferisError.SyntaxError) => true
-                case _                                 => false
+                case Some(SaferisError.Aborted(detail)) =>
+                  detail.sqlState.isEmpty && detail.message == "commit reported ROLLBACK"
+                case _ => false
             case _ => false
-        yield assertTrue(aborted, recorded, count.contains(0L)),
+        yield assertTrue(aborted, rejected, count.contains(0L)),
     )
 
   private def onSession[A](

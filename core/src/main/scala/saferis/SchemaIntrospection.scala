@@ -53,10 +53,10 @@ object SchemaIntrospection:
     val tableName = instance.tableName
     val issues    = ListBuffer.empty[SchemaIssue]
 
-    // Stored catalog name equals the folded label. Do not fold the catalog name.
+    // Saferis quotes the label, so the stored catalog name is that label. Do not fold it.
     instance.columns.foreach { col =>
       val columnLabel = col.label
-      dbTable.columns.find(_.name == folded(columnLabel)) match
+      dbTable.columns.find(_.name == columnLabel) match
         case None =>
           issues += SchemaIssue.MissingColumn(tableName, columnLabel, col.columnType)
         case Some(dbCol) =>
@@ -70,11 +70,11 @@ object SchemaIntrospection:
     }
 
     val expectedKeys = instance.columns.filter(_.isKey).map(_.label)
-    if expectedKeys.nonEmpty && expectedKeys.map(folded).sorted != dbTable.primaryKeyColumns.sorted then
+    if expectedKeys.nonEmpty && expectedKeys.sorted != dbTable.primaryKeyColumns.sorted then
       issues += SchemaIssue.PrimaryKeyMismatch(tableName, expectedKeys, dbTable.primaryKeyColumns)
 
     if options.checkExtraColumns then
-      val expectedColumnNames = instance.columns.map(col => folded(col.label)).toSet
+      val expectedColumnNames = instance.columns.map(_.label).toSet
       dbTable.columns.foreach { dbCol =>
         if !expectedColumnNames.contains(dbCol.name) then
           issues += SchemaIssue.ExtraColumn(tableName, dbCol.name, dbCol.dataType)
@@ -142,11 +142,9 @@ object SchemaIntrospection:
     issues.toList
   end compare
 
-  /** Fold the Scala label. The catalog name is already the spelling the database stored. */
-  private def folded(name: ColumnName): ColumnName = name.folded
-
+  /** The catalog name is the spelling the database stored. Saferis quotes the label, so that spelling is the label. */
   private def storedMatches(stored: Seq[ColumnName], expected: Seq[ColumnName]): Boolean =
-    stored == expected.map(folded)
+    stored == expected
 
   private def findMatchingIndex(
       indexes: Seq[DatabaseIndex],

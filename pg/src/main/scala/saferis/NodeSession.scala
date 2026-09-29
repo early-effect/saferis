@@ -147,11 +147,11 @@ private final class NodeConnection(
         ZIO
           .when(result.command == "ROLLBACK"):
             ZIO.fail(
-              SaferisError.QueryError(
+              SaferisError.Aborted(
                 ServerDetail(
                   "commit reported ROLLBACK",
                   Some(SqlText("COMMIT")),
-                  SqlState.parse("25P02"),
+                  None,
                   None,
                   None,
                 )

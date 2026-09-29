@@ -17,12 +17,15 @@ object Databases extends SaferisDocSpecSuite:
 
 Each adapter names a `SqlCondition` from a code the server actually sent. The SQLSTATE and the message stay as the server sent them, so `UniqueViolation` means a unique violation on every database without inventing a Postgres code for MySQL or SQLite. Every shipped adapter runs one conformance suite, provided as a layer, and so does a database you bring (see [Getting Started](getting-started.html)).
 
+Portable code does not continue after a statement error. Postgres will not let it. MySQL, SQLite, and H2 will.
+
 This page says what each adapter does that the others do not.""",
     section("PostgreSQL")(
       md"""- **Streams** read through a server-side cursor. Over JDBC a pool stream opens a read transaction with a fetch size of 256, because pgjdbc only honors a fetch size with autocommit off, so a long stream holds that transaction open. On Node the stream pulls 256 rows per `pg-cursor` read.
 - **Arrays, enums, `jsonb`, `RETURNING`, and upsert** are available. The query builder's `.inList` binds one array parameter, `= ANY($$1)`.
 - **`Schema.verify`** reads `information_schema` and `pg_catalog`.
 - **Node** always sets `DateStyle=ISO`, which its decoding depends on; a `DateStyle` in `PgConnectionConfig.parameters` is replaced. The pool turns on TCP keepalive, so a peer that vanished fails a `COMMIT` instead of hanging it. npm `pg@8.16.3` and `pg-cursor@2.22.0` are required at run time.
+- **A statement error aborts the transaction.** The next command is `Aborted` with SQLSTATE `25P02`, and `COMMIT` is rejected. Catching the error does not clear that.
 - **Node transport failures** (`ECONNRESET`, `EPIPE`) are `SaferisError.ConnectionLost`. They are not a SQLSTATE, so `sqlState` is empty, and the message keeps the code. A JDBC `IOException` is the same: `ConnectionLost` with no SQLSTATE."""
     ),
     section("MySQL")(
@@ -31,6 +34,7 @@ This page says what each adapter does that the others do not.""",
 - **DDL**: `Numeric` is `decimal(65, 30)`, `Timestamp` is `datetime(6)`, `TimestampTz` is `timestamp(6)`, and `Time` is `time(6)`. `import saferis.mysql.given` makes a `UUID` a `char(36)`.
 - **Tables created by Saferis 0.19** used `decimal` (which is `decimal(10,0)`) and `timestamp` for `LocalDateTime` too. A `LocalDateTime` field on such a `timestamp` column now reads as an instant and fails to decode; change the column to `datetime(6)` or the field to `Instant`.
 - **Errors**: the errno picks the condition and the Connector/J SQLSTATE stays on the error. 1062 is unique, 1451 and 1452 foreign key, 1048 not null, 3819 check, 1213 deadlock, and 3024 canceled. The message is MySQL's sentence.
+- **A statement error leaves the transaction open.** A caught unique violation can be followed by another statement, and commit persists.
 - **No array parameters**: the query builder binds `IN (...)`, and binding an array fails with `SaferisError.Unsupported`. MySQL has no `RETURNING` or upsert capability.
 - **`Schema.verify`** reads `information_schema`, with names folded to lower case as MySQL compares them."""
     ),
@@ -41,11 +45,14 @@ This page says what each adapter does that the others do not.""",
 - **Tables created by Saferis 0.19** declared booleans as `integer`, every float and decimal as `real`, and dates and timestamps as `text`. On those columns a boolean or date/time field fails to decode; recreate those tables from the current DDL. Floats and doubles still read correctly, because a `real` column reads as the 8-byte double SQLite stores.
 - **`ddl.addColumn`** names the column. It used to emit `alter table t add column <type>` with no name, which SQLite rejects.
 - **Errors**: the result code names the condition. Unique and primary key, foreign key, not null, and check are those violations. Busy and locked are `SerializationFailure`. Interrupt is `Timeout`. Any other result code, including `SQLITE_ERROR`, is `QueryError`. The message is SQLite's sentence. A SQLSTATE is not invented.
+- **A statement error leaves the transaction open.** A caught unique violation can be followed by another statement, and commit persists.
 - **`Schema.verify`** reads the pragma table functions. SQLite does not keep the names of unique or foreign-key constraints, so those match by columns and `strictNameMatching` cannot match their names.
 - **No array parameters**: binding one fails with `SaferisError.Unsupported`."""
     ),
     section("H2")(
-      md"""H2 is here for fast in-memory tests of code that runs on another database in production. `H2Jdbc.memory("name")` is a `DataSource` for a named in-memory database that lives until the JVM exits, with `DATABASE_TO_LOWER` set so unquoted names fold to lower case as they do on PostgreSQL. `H2Dialect` renders H2's own SQL and claims no optional capability, so the query builder binds `IN (...)`, and there is no `RETURNING`, upsert, or `Schema.verify`. JSON binds as UTF-8 bytes, which H2 reads as JSON text."""
+      md"""H2 is here for fast in-memory tests of code that runs on another database in production. `H2Jdbc.memory("name")` is a `DataSource` for a named in-memory database that lives until the JVM exits, with `DATABASE_TO_LOWER` set so unquoted names fold to lower case as they do on PostgreSQL. `H2Dialect` renders H2's own SQL and claims no optional capability, so the query builder binds `IN (...)`, and there is no `RETURNING`, upsert, or `Schema.verify`. JSON binds as UTF-8 bytes, which H2 reads as JSON text.
+
+A statement error leaves the transaction open. A caught unique violation can be followed by another statement, and commit persists."""
     ),
   )
 end Databases

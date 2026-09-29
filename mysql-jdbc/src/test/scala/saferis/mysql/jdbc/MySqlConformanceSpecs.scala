@@ -6,6 +6,7 @@ import saferis.tests.Capability
 import saferis.tests.DatabaseTarget
 import saferis.tests.MySqlTestContainer
 import saferis.tests.SqlSessionConformance
+import saferis.tests.TransactionConformance
 
 import com.mysql.cj.jdbc.MysqlDataSource
 import zio.*
@@ -38,5 +39,6 @@ object MySqlConformanceSpecs extends ZIOSpecDefault:
     suite("mysql")(
       SqlSessionConformance.suite,
       MySqlValueSpecs.spec,
+      TransactionConformance.continuesAfterUniqueViolation,
     ).provideShared(MySqlTestContainer.live >>> session, target) @@ TestAspect.sequential
 end MySqlConformanceSpecs

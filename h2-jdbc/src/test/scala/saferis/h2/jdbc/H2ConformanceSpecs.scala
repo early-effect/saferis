@@ -7,6 +7,7 @@ import saferis.h2.H2Dialect
 import saferis.h2.given
 import saferis.tests.DatabaseTarget
 import saferis.tests.SqlSessionConformance
+import saferis.tests.TransactionConformance
 
 import zio.{test as _, *}
 import zio.json.*
@@ -79,7 +80,7 @@ object H2ConformanceSpecs extends ZIOSpecDefault:
 
   /** H2 proves itself by providing its session and target to the common suite, with no Docker. */
   def spec =
-    suite("h2")(SqlSessionConformance.suite, values)
+    suite("h2")(SqlSessionConformance.suite, values, TransactionConformance.continuesAfterUniqueViolation)
       .provideShared(H2Jdbc.memory("saferis_h2") >>> H2Jdbc.layer(), ZLayer.succeed(DatabaseTarget(H2Dialect)))
       @@ TestAspect.sequential
 end H2ConformanceSpecs

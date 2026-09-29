@@ -176,7 +176,7 @@ ddl.createTable[MyTable](createIndexes = false)
           // Create a partial index for pending jobs with retry times
           _ <- ddl.createIndex[Job](
             IndexName("idx_pending_retry"),
-            Seq(ColumnName("retryat")),
+            Seq(ColumnName("retryAt")),
             where = Some(SqlText("status = 'pending'")),
           )
           _    <- dml.insert(Job(-1, "pending", Some(java.time.Instant.now())))

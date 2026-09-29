@@ -4,6 +4,7 @@ import saferis.*
 import saferis.ddl.*
 import saferis.jdbc.JdbcSessionConfig
 import saferis.dml.*
+import saferis.postgres.PostgresSqlState
 import saferis.postgres.given
 import saferis.tests.DataSourceProvider
 import zio.*
@@ -274,7 +275,7 @@ object TransactorSpecs extends ZIOSpecDefault:
             case _ => false
         yield assertTrue(syntax, count.contains(0L))
 
-      test("catching a statement failure still rolls back and the next command is 25P02"):
+      test("catching a statement failure aborts the transaction and the next command is 25P02"):
         for
           _    <- sql"drop table if exists test_abort_txn".dml
           _    <- sql"create table test_abort_txn (id integer primary key)".dml
@@ -290,15 +291,18 @@ object TransactorSpecs extends ZIOSpecDefault:
           captured <- seen.get
           count    <- sql"select count(*) from test_abort_txn".queryValue[Long]
           aborted = captured match
-            case Some(Left(SaferisError.QueryError(detail))) => detail.sqlState == SqlState.parse("25P02")
-            case _                                           => false
-          recorded = exit match
+            case Some(Left(SaferisError.Aborted(detail))) =>
+              detail.sqlState.contains(PostgresSqlState.InFailedTransaction) &&
+              detail.message.contains("current transaction is aborted")
+            case _ => false
+          rejected = exit match
             case Exit.Failure(cause) =>
               cause.failureOption match
-                case Some(_: SaferisError.SyntaxError) => true
-                case _                                 => false
+                case Some(SaferisError.Aborted(detail)) =>
+                  detail.sqlState.contains(PostgresSqlState.InFailedTransaction)
+                case _ => false
             case _ => false
-        yield assertTrue(aborted, recorded, count.contains(0L))
+        yield assertTrue(aborted, rejected, count.contains(0L))
   end transactionSuite
 
   val concurrencyTestsUnlimited =

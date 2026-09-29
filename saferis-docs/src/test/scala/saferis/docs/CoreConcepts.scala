@@ -170,6 +170,8 @@ val result: ZIO[SqlSession, SaferisError, Chunk[User]] =
 
 Open a transaction with `transact`. Nested `transact` joins the outer transaction: one commit, one rollback. See [Statement Timeouts](statement-timeouts.html) for `defaultTimeout`.
 
+Portable code does not continue after a statement error. Let the effect fail and `transact` rolls the transaction back. Postgres will not let you continue: the next command is `Aborted` with SQLSTATE `25P02`, and `COMMIT` is rejected. MySQL, SQLite, and H2 will: a caught unique violation can be followed by another statement, and the commit persists.
+
 Once `COMMIT` is sent, the session waits for the answer and an interrupt does not cut it off, because an abandoned commit leaves you not knowing whether it happened. The statement timeout does not cover `COMMIT`, so the bound on that wait is the socket. On Node the pool turns on TCP keepalive. On JDBC set your driver's socket timeout on the `DataSource` (pgjdbc `socketTimeout`, Connector/J `socketTimeout`) so a peer that vanished without a reset fails the commit instead of hanging it."""
     ),
   )

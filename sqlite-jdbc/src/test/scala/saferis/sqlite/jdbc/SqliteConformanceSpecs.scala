@@ -5,6 +5,7 @@ import saferis.sqlite.SQLiteDialect
 import saferis.tests.Capability
 import saferis.tests.DatabaseTarget
 import saferis.tests.SqlSessionConformance
+import saferis.tests.TransactionConformance
 
 import org.sqlite.SQLiteDataSource
 import zio.*
@@ -38,5 +39,6 @@ object SqliteConformanceSpecs extends ZIOSpecDefault:
     suite("sqlite")(
       SqlSessionConformance.suite,
       SqliteValueSpecs.spec,
+      TransactionConformance.continuesAfterUniqueViolation,
     ).provideShared(session, target) @@ TestAspect.sequential
 end SqliteConformanceSpecs

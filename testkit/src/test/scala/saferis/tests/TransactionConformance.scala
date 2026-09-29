@@ -59,35 +59,6 @@ object TransactionConformance:
           count    <- sql"select count(*) from conformance_nested".queryValue[Long]
         yield assertTrue(captured.contains(1L), count.contains(0L), exit.isFailure)
       ,
-      test("catching a statement failure makes the next command 25P02"):
-        for
-          _    <- sql"drop table if exists conformance_abort".dml
-          _    <- sql"create table conformance_abort (id integer primary key)".dml
-          seen <- Ref.make[Option[Either[SaferisError, Option[Long]]]](None)
-          exit <- transact(
-            for
-              _     <- sql"insert into conformance_abort (id) values (1)".dml
-              _     <- sql"deli meat from conformance_abort".dml.catchAll(_ => ZIO.succeed(0L))
-              later <- sql"select count(*) from conformance_abort".queryValue[Long].either
-              _     <- seen.set(Some(later))
-            yield ()
-          ).exit
-          captured <- seen.get
-          count    <- sql"select count(*) from conformance_abort".queryValue[Long]
-          aborted = captured match
-            case Some(Left(SaferisError.QueryError(detail))) => detail.sqlState == SqlState.parse("25P02")
-            case _                                           => false
-          // The first statement error, not the synthetic 25P02. SQLite's SQLITE_ERROR is QueryError.
-          recorded = exit match
-            case Exit.Failure(cause) =>
-              cause.failureOption match
-                case Some(SaferisError.QueryError(detail)) =>
-                  detail.sqlState != SqlState.parse("25P02") && detail.message.nonEmpty
-                case Some(err) => err.message.nonEmpty
-                case None      => false
-            case _ => false
-        yield assertTrue(aborted, recorded, count.contains(0L))
-      ,
       test("a unique violation keeps the server message"):
         for
           _    <- sql"drop table if exists conformance_uniq".dml
@@ -102,7 +73,7 @@ object TransactionConformance:
                 case _                                          => false
             case _ => false
       ,
-      test("catching a failed stream inside transact does not commit"):
+      test("a failed stream inside transact rolls back"):
         for
           _    <- sql"drop table if exists conformance_stream_abort".dml
           _    <- sql"create table conformance_stream_abort (id integer primary key)".dml
@@ -111,10 +82,32 @@ object TransactionConformance:
               _       <- sql"insert into conformance_stream_abort (id) values (1)".dml
               command <- sql"select * from conformance_stream_missing".toCommand
               _       <- ZIO.serviceWithZIO[SqlSession]: session =>
-                session.stream(command)(_ => Right(())).runDrain.catchAll(_ => ZIO.unit)
+                session.stream(command)(_ => Right(())).runDrain
             yield 1
           ).exit
           count <- sql"select count(*) from conformance_stream_abort".queryValue[Long]
         yield assertTrue(exit.isFailure, count.contains(0L)),
     )
+
+  /** MySQL, SQLite, and H2 keep the transaction open after a constraint failure. Postgres does not, so this stays off
+    * the portable suite.
+    */
+  def continuesAfterUniqueViolation =
+    test("a caught unique violation leaves the transaction open and the commit persists"):
+      for
+        _      <- sql"drop table if exists conformance_continue".dml
+        _      <- sql"create table conformance_continue (id integer primary key)".dml
+        caught <- Ref.make(false)
+        _      <- transact(
+          for
+            _ <- sql"insert into conformance_continue (id) values (1)".dml
+            _ <- sql"insert into conformance_continue (id) values (1)".dml.catchAll(_ => caught.set(true).as(0L))
+            _ <- sql"insert into conformance_continue (id) values (2)".dml
+          yield ()
+        )
+        did   <- caught.get
+        one   <- sql"select id from conformance_continue where id = 1".queryValue[Int]
+        two   <- sql"select id from conformance_continue where id = 2".queryValue[Int]
+        count <- sql"select count(*) from conformance_continue".queryValue[Long]
+      yield assertTrue(did, one.contains(1), two.contains(2), count.contains(2L))
 end TransactionConformance

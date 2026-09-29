@@ -5,6 +5,7 @@ import saferis.jdbc.JdbcSession
 import saferis.jdbc.StandardJdbcAdapter
 import saferis.tests.DatabaseTarget
 import saferis.tests.SqlSessionConformance
+import saferis.tests.TransactionConformance
 
 import org.h2.jdbcx.JdbcDataSource
 import zio.*
@@ -63,6 +64,9 @@ object BringYourOwnDatabaseSpecs extends ZIOSpecDefault:
 
   /** A database brought from outside `saferis` proves itself the same way the shipped ones do. */
   def spec =
-    suite("h2, brought from outside saferis")(SqlSessionConformance.suite)
+    suite("h2, brought from outside saferis")(
+      SqlSessionConformance.suite,
+      TransactionConformance.continuesAfterUniqueViolation,
+    )
       .provideShared(dataSource >>> JdbcSession.layer(H2Adapter), target)
 end BringYourOwnDatabaseSpecs
