@@ -45,6 +45,18 @@ flowchart LR
 | `UpsertSupport` | `Upsert` DSL (`Upsert[A].values(...).onConflict(_.col)`) |
 | `IndexIfNotExistsSupport` | Conditional index creation |
 
+Which shipped dialect has the trait:
+
+| Database | Returning | JSON | Arrays | Upsert | Index IF NOT EXISTS |
+|----------|-----------|------|--------|--------|---------------------|
+| PostgreSQL | yes | yes | yes | yes | yes |
+| MySQL | | yes | | | |
+| SQLite | yes | | | | |
+| H2 | | | | | |
+| Spark | | yes | yes | | |
+
+On a database without the trait, use the portable form: `insert` instead of `insertReturning`, `.inList` instead of an array parameter, and a separate `UPDATE` instead of `Upsert`. The method will not compile against that dialect.
+
 ## Using SpecializedDML
 
 The `SpecializedDML` object provides type-safe operations that only compile when the dialect supports them:""",

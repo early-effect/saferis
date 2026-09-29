@@ -52,7 +52,10 @@ object TypeSupport extends SaferisDocSpecSuite:
 | `java.time.LocalDate` | `date` | Date |
 | `java.time.LocalTime` | `time` | Time |
 | `java.time.ZonedDateTime` | `timestamptz` | TimestampTz |
-| `java.time.OffsetDateTime` | `timestamptz` | TimestampTz |""",
+| `java.time.OffsetDateTime` | `timestamptz` | TimestampTz |
+| `java.time.OffsetTime` | `timetz` | TimeTz |
+
+These names (`TimestampTz`, `TimeTz`, `Integer`, `Json`) are the shared types. A dialect spells them: Postgres `timestamptz` and `timetz`, MySQL ISO text for `TimeTz` because it has no zoned time. See [Dialect System](dialect-system.html). `OffsetTime` keeps its offset.""",
       exampleZIO {
         (for
           _ <- ddl.createTable[Event](ifNotExists = true)
@@ -98,8 +101,8 @@ object TypeSupport extends SaferisDocSpecSuite:
 | `BigDecimal` | `numeric` |
 | `Option[T]` | Same as `T`, nullable |"""
     ),
-    section("JSON/JSONB Support")(
-      md"""Saferis provides `Json[A]` for storing arbitrary types as JSON in the database. This maps to `JSONB` in PostgreSQL and `JSON` in MySQL.
+    section("JSON")(
+      md"""`Json[A]` stores a Scala value as JSON. PostgreSQL spells that column `jsonb`. MySQL, SQLite, and H2 spell it `json`.
 
 ```scala
 // Define a type to store as JSON - needs JsonCodec
@@ -110,7 +113,7 @@ case class Metadata(tags: List[String], version: Int) derives JsonCodec
 case class JsonEvent(
   @generated @key id: Int,
   name: String,
-  metadata: Json[Metadata]  // Stored as JSONB in PostgreSQL
+  metadata: Json[Metadata]  // jsonb on PostgreSQL, json elsewhere
 ) derives Table
 ```""",
       exampleZIO {
@@ -138,7 +141,7 @@ case class JsonEvent(
 A JSON column decodes as `Json[A]`, not as `String`: `Decoder[String]` reads text columns only. Store the JSON as `Text` if you want the raw document as a string.""",
     ),
     section("Integer Widths")(
-      md"""Integer decoders read by value, not by column width. `Decoder[Int]` accepts an `int8` value that fits, so `select count(*)` decodes as `Int` on PostgreSQL, and every SQLite integer (which SQLite stores as 64 bits) decodes as `Short`, `Int`, or `Long`. A value that does not fit fails with a `DecodingError` instead of wrapping."""
+      md"""Integer decoders read by value, not by column width. `Decoder[Int]` accepts a `bigint` that fits, so `select count(*)` decodes as `Int` on PostgreSQL, and every SQLite integer (which SQLite stores as 64 bits) decodes as `Short`, `Int`, or `Long`. A value that does not fit fails with a `DecodingError` instead of wrapping. The shared cases are `SmallInt`, `Integer`, and `BigInt`."""
     ),
     section("Enumerations")(
       md"""`Codec.enumeration` binds a database enumeration by its labels. For a parameterless Scala 3 enum, the case names are the labels:

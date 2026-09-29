@@ -17,8 +17,8 @@ object GettingStarted extends SaferisDocSpecSuite:
 
 ```scala
 libraryDependencies ++= Seq(
-  "rocks.earlyeffect" %% "saferis" % "0.18.0",
-  "rocks.earlyeffect" %% "saferis-postgres-jdbc" % "0.18.0",
+  "rocks.earlyeffect" %% "saferis" % "0.19.1",
+  "rocks.earlyeffect" %% "saferis-postgres-jdbc" % "0.19.1",
 )
 ```
 
@@ -37,8 +37,8 @@ A Node application depends on the Scala.js artifacts and on npm packages. The ve
 
 ```scala
 libraryDependencies ++= Seq(
-  "rocks.earlyeffect" %%% "saferis" % "0.18.0",
-  "rocks.earlyeffect" %%% "saferis-postgres-node" % "0.18.0",
+  "rocks.earlyeffect" %%% "saferis" % "0.19.1",
+  "rocks.earlyeffect" %%% "saferis-postgres-node" % "0.19.1",
 )
 ```
 
