@@ -132,8 +132,8 @@ zipxCapabilities ++= {
       env = Map("TESTCONTAINERS_RYUK_DISABLED" -> EnvValue.plain("true")),
     ),
     // Every publishing row, then sonaRelease once. docs and root do not publish.
-    ZipxCentral.release
-      .withCondition(upstream),
+    ZipxCentral.snapshots.andCondition(upstream),
+    ZipxCentral.pullRequestSnapshots("snapshots"),
     ZipxGitHubPackages
       .sharedRegistry(
         // 0.1.6 dropped the `repository` param, which used to become this fork gate implicitly.
@@ -147,6 +147,7 @@ zipxCapabilities ++= {
     ZipxDocs.pages().andCondition(upstream),
   )
 }
+zipxReleaseWorkflow := Some(ZipxCentral.releases)
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
     "-deprecation",
