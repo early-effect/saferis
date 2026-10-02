@@ -13,6 +13,17 @@ object MyVersions extends ZipxVersions:
   val sbt: SbtVersion     = SbtVersion("2.1.0-M3")
   val scala: ScalaVersion = ScalaVersion("3.9.0")
 
+  val release = ShipGroup("saferis", "0.20.1")(
+    "core",
+    "postgres",
+    "jdbc",
+    "mysqlJdbc",
+    "h2Jdbc",
+    "sqliteJdbc",
+    "postgresJdbc",
+    "pgJS",
+  )
+
   val zio             = Lib("dev.zio", "zio", "2.1.26")
   val zioStreams      = zio.mod("zio-streams")
   val zioJson         = Lib("dev.zio", "zio-json", "1.1.0")
@@ -36,7 +47,6 @@ object MyVersions extends ZipxVersions:
   val scalafmt       = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
   val specularPlugin = Plugin("rocks.earlyeffect", "sbt-specular", "0.17.0")
   val scalafix       = Plugin("ch.epfl.scala", "sbt-scalafix", "0.14.7")
-  val dynverCi       = Plugin("rocks.earlyeffect", "sbt-dynver-ci", "0.2.3")
   val scoverage      = Plugin("org.scoverage", "sbt-scoverage", "2.4.4")
   val scalajs        = Plugin("org.scala-js", "sbt-scalajs", "1.22.0")
   val scalaNative    = Plugin("org.scala-native", "sbt-scala-native", "0.5.12")
