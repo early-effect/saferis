@@ -10,7 +10,7 @@ import zipx.*
   * release, so it does not pin an older zio-json.
   */
 object MyVersions extends ZipxVersions:
-  val sbt: SbtVersion     = SbtVersion("2.1.0-M2")
+  val sbt: SbtVersion     = SbtVersion("2.1.0-M3")
   val scala: ScalaVersion = ScalaVersion("3.9.0")
 
   val zio             = Lib("dev.zio", "zio", "2.1.26")
