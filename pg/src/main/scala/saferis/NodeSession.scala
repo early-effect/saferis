@@ -154,13 +154,13 @@ private final class NodeConnection(
   def execute(command: SqlCommand): IO[SaferisError, Long] =
     scoped(command)(runExec(command))
 
-  def query(command: SqlCommand): IO[SaferisError, Chunk[SqlRow]] =
-    scoped(command)(runRows(command))
+  def query(command: SqlCommand, columns: ResultColumns): IO[SaferisError, Chunk[SqlRow]] =
+    scoped(command)(runRows(command, columns))
 
-  def queryAtMostOne(command: SqlCommand): IO[SaferisError, Option[SqlRow]] =
-    scoped(command)(runRows(command).map(_.headOption))
+  def queryAtMostOne(command: SqlCommand, columns: ResultColumns): IO[SaferisError, Option[SqlRow]] =
+    scoped(command)(runRows(command, columns).map(_.headOption))
 
-  def cursor(command: SqlCommand): ZStream[Any, SaferisError, SqlRow] =
+  def cursor(command: SqlCommand, columns: ResultColumns): ZStream[Any, SaferisError, SqlRow] =
     ZStream.unwrapScoped:
       for
         inside <- lease.began.get
@@ -170,7 +170,7 @@ private final class NodeConnection(
         _      <- ZIO.addFinalizer(closeCursor(portal))
       yield
         val pulls = ZStream.repeatZIOChunkOption:
-          readBatch(portal, command)
+          readBatch(portal, command, columns)
             .mapError(Some(_))
             .flatMap: rows =>
               if rows.isEmpty then ZIO.fail(None) else ZIO.succeed(rows)
@@ -232,8 +232,8 @@ private final class NodeConnection(
   private def runExec(command: SqlCommand): IO[SaferisError, Long] =
     queryResult(command).flatMap(result => ZIO.fromEither(PgWire.rowCount(result)))
 
-  private def runRows(command: SqlCommand): IO[SaferisError, Chunk[SqlRow]] =
-    queryResult(command).flatMap(result => ZIO.fromEither(PgWire.readRows(result)))
+  private def runRows(command: SqlCommand, columns: ResultColumns): IO[SaferisError, Chunk[SqlRow]] =
+    queryResult(command).flatMap(result => ZIO.fromEither(PgWire.readRows(result, columns)))
 
   private def queryResult(command: SqlCommand): IO[SaferisError, PgResult] =
     val sql    = PgWire.render(command)
@@ -246,7 +246,11 @@ private final class NodeConnection(
     val values = PgWire.parameters(command.pieces)
     lease.client.submit(new PgCursor(sql, values, PgWire.cursorConfig))
 
-  private def readBatch(cursor: PgCursor, command: SqlCommand): IO[SaferisError, Chunk[SqlRow]] =
+  private def readBatch(
+      cursor: PgCursor,
+      command: SqlCommand,
+      columns: ResultColumns,
+  ): IO[SaferisError, Chunk[SqlRow]] =
     val sql = command.inspection
     lease.busy.set(true) *>
       ZIO.asyncInterrupt[Any, SaferisError, Chunk[SqlRow]]: register =>
@@ -263,7 +267,7 @@ private final class NodeConnection(
                 // pg-cursor passes null, not undefined, when the batch succeeded.
                 err.toOption.filter(_ != null) match
                   case None =>
-                    (ZIO.fromEither(cursorRows(result, rows)) <* NodeSession.onBatch)
+                    (ZIO.fromEither(cursorRows(result, rows, columns)) <* NodeSession.onBatch)
                       .ensuring(lease.busy.set(false))
                   case Some(error) =>
                     // The portal is dead. Close would wait for a readyForQuery that already arrived.
@@ -278,13 +282,14 @@ private final class NodeConnection(
   private def cursorRows(
       result: PgResult,
       rows: js.Array[js.Array[js.UndefOr[String]]],
+      columns: ResultColumns,
   ): Either[SaferisError, Chunk[SqlRow]] =
     if rows == null || js.isUndefined(rows) || rows.length == 0 then Right(Chunk.empty)
     else
       val fields = result.fields
       (0 until rows.length).foldLeft[Either[SaferisError, Chunk[SqlRow]]](Right(Chunk.empty)):
         case (Left(err), _)  => Left(err)
-        case (Right(acc), i) => PgWire.readCursorRow(fields, rows(i)).map(acc :+ _)
+        case (Right(acc), i) => PgWire.readCursorRow(fields, rows(i), columns).map(acc :+ _)
 
   /** A missing `readyForQuery` must not pin the uninterruptible finalizer. Two seconds, on the caller clock. */
   private def closeCursor(cursor: PgCursor): UIO[Unit] =

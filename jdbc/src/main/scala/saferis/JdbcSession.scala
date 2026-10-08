@@ -86,16 +86,16 @@ private final class JdbcConnection(
     val sql = render(command)
     runExec(command, sql, command.timeout)
 
-  def query(command: SqlCommand): IO[SaferisError, Chunk[SqlRow]] =
+  def query(command: SqlCommand, columns: ResultColumns): IO[SaferisError, Chunk[SqlRow]] =
     val sql = render(command)
-    runRows(command, sql, command.timeout)
+    runRows(command, sql, command.timeout, columns)
 
-  def queryAtMostOne(command: SqlCommand): IO[SaferisError, Option[SqlRow]] =
+  def queryAtMostOne(command: SqlCommand, columns: ResultColumns): IO[SaferisError, Option[SqlRow]] =
     val sql = render(command)
-    runAtMostOne(command, sql, command.timeout)
+    runAtMostOne(command, sql, command.timeout, columns)
 
-  def cursor(command: SqlCommand): ZStream[Any, SaferisError, SqlRow] =
-    runCursor(command, render(command), command.timeout)
+  def cursor(command: SqlCommand, columns: ResultColumns): ZStream[Any, SaferisError, SqlRow] =
+    runCursor(command, render(command), command.timeout, columns)
 
   def begin: IO[SaferisError, Unit] =
     driver(None, ZIO.attemptBlocking(conn.setAutoCommit(false))) *>
@@ -127,18 +127,23 @@ private final class JdbcConnection(
     withStatement(conn, command, sql, timeout, None): ps =>
       blocking(Some(sql), ps)(ps.executeLargeUpdate())
 
-  private def runRows(command: SqlCommand, sql: SqlText, timeout: Option[Duration])(using
+  private def runRows(command: SqlCommand, sql: SqlText, timeout: Option[Duration], columns: ResultColumns)(using
       Trace
   ): IO[SaferisError, Chunk[SqlRow]] =
     withStatement(conn, command, sql, timeout, None): ps =>
       ZIO.acquireReleaseWith(
         blocking(Some(sql), ps)(ps.executeQuery())
       )(rs => ZIO.attemptBlocking(rs.close()).ignore): rs =>
-        driver(Some(sql), ZIO.attemptBlocking(JdbcReads.materialize(adapter, rs))).flatMap:
+        driver(Some(sql), ZIO.attemptBlocking(JdbcReads.materialize(adapter, rs, columns))).flatMap:
           case Left(err)   => ZIO.fail(err)
           case Right(rows) => ZIO.succeed(rows)
 
-  private def runAtMostOne(command: SqlCommand, sql: SqlText, timeout: Option[Duration])(using
+  private def runAtMostOne(
+      command: SqlCommand,
+      sql: SqlText,
+      timeout: Option[Duration],
+      columns: ResultColumns,
+  )(using
       Trace
   ): IO[SaferisError, Option[SqlRow]] =
     withStatement(conn, command, sql, timeout, None): ps =>
@@ -148,7 +153,10 @@ private final class JdbcConnection(
         driver(Some(sql), ZIO.attemptBlocking(rs.next())).flatMap: hasRow =>
           if !hasRow then ZIO.succeed(None)
           else
-            driver(Some(sql), ZIO.attemptBlocking(JdbcReads.readRow(adapter, rs, JdbcReads.columns(rs)))).flatMap:
+            driver(
+              Some(sql),
+              ZIO.attemptBlocking(JdbcReads.readRow(adapter, rs, JdbcReads.columns(rs), columns)),
+            ).flatMap:
               case Left(err)  => ZIO.fail(err)
               case Right(row) => ZIO.succeed(Some(row))
 
@@ -156,6 +164,7 @@ private final class JdbcConnection(
       command: SqlCommand,
       sql: SqlText,
       timeout: Option[Duration],
+      columns: ResultColumns,
   ): ZStream[Any, SaferisError, SqlRow] =
     ZStream.unwrapScoped:
       for
@@ -169,7 +178,7 @@ private final class JdbcConnection(
         rs <- ZIO.acquireRelease(
           blocking(Some(sql), ps)(ps.executeQuery())
         )(rs => ZIO.attemptBlocking(rs.close()).ignore)
-        columns <- driver(Some(sql), ZIO.attemptBlocking(JdbcReads.columns(rs)))
+        described <- driver(Some(sql), ZIO.attemptBlocking(JdbcReads.columns(rs)))
       yield
         val pulls = ZStream.repeatZIOOption:
           driver(Some(sql), ZIO.attemptBlocking(rs.next()))
@@ -177,7 +186,7 @@ private final class JdbcConnection(
             .flatMap: hasNext =>
               if !hasNext then ZIO.fail(None)
               else
-                driver(Some(sql), ZIO.attemptBlocking(JdbcReads.readRow(adapter, rs, columns)))
+                driver(Some(sql), ZIO.attemptBlocking(JdbcReads.readRow(adapter, rs, described, columns)))
                   .mapError(err => Some(err))
                   .flatMap:
                     case Left(err)  => ZIO.fail(Some(err))
@@ -271,21 +280,32 @@ private object JdbcReads:
         )
   end columns
 
-  def materialize(adapter: JdbcAdapter, rs: ResultSet): Either[SaferisError, Chunk[SqlRow]] =
+  def materialize(
+      adapter: JdbcAdapter,
+      rs: ResultSet,
+      selected: ResultColumns,
+  ): Either[SaferisError, Chunk[SqlRow]] =
     val described                    = columns(rs)
     val rows                         = Chunk.newBuilder[SqlRow]
     var failed: Option[SaferisError] = None
     while failed.isEmpty && rs.next() do
-      readRow(adapter, rs, described) match
+      readRow(adapter, rs, described, selected) match
         case Left(err)  => failed = Some(err)
         case Right(row) => rows += row
     failed.fold[Either[SaferisError, Chunk[SqlRow]]](Right(rows.result()))(Left(_))
   end materialize
 
-  def readRow(adapter: JdbcAdapter, rs: ResultSet, columns: Chunk[JdbcColumn]): Either[SaferisError, SqlRow] =
-    columns
+  def readRow(
+      adapter: JdbcAdapter,
+      rs: ResultSet,
+      columns: Chunk[JdbcColumn],
+      selected: ResultColumns,
+  ): Either[SaferisError, SqlRow] =
+    val chosen = ResultColumns.indexes(columns.map(_.label), selected).map(columns(_))
+    chosen
       .foldLeft[Either[SaferisError, Chunk[SqlValue]]](Right(Chunk.empty)):
         case (Left(err), _)       => Left(err)
         case (Right(acc), column) => adapter.read(rs, column).map(acc :+ _)
-      .map(values => SqlRow(columns.map(_.label), values))
+      .map(values => SqlRow(chosen.map(_.label), values))
+  end readRow
 end JdbcReads

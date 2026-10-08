@@ -387,7 +387,7 @@ final case class Query1Ready[A: Table](
   /** Build the SQL fragment for this query */
   def build: SqlFragment =
     val selectClause =
-      if selectColumns.isEmpty then SqlFragment.text("*")
+      if selectColumns.isEmpty then SelectList.starOrNamed(Seq(baseInstance))
       else SqlFragment(Placeholder.join(selectColumns.map(column => SqlFragment.ident(column.label))))
 
     // For derived tables, use (subquery) as alias; otherwise use table as alias
@@ -870,7 +870,7 @@ final case class Query2Ready[A: Table, B: Table](
       case None =>
         SqlFragment.tableRef(t1.tableName, t1.alias)
 
-    var result = SqlFragment.text("select * from ").append(from)
+    var result = SelectList.selectFrom(Seq(t1, t2)).append(from)
 
     // Add joins
     for join <- joins do
@@ -1160,7 +1160,7 @@ final case class Query3Ready[A: Table, B: Table, C: Table](
     seek(column, SeekDir.Gt, value, sortOrder)
 
   def build: SqlFragment =
-    var result = SqlFragment.text("select * from ").append(SqlFragment.tableRef(t1.tableName, t1.alias))
+    var result = SelectList.selectFrom(Seq(t1, t2, t3)).append(SqlFragment.tableRef(t1.tableName, t1.alias))
 
     for join <- joins do
       result = result
@@ -1363,7 +1363,7 @@ final case class Query4Ready[A: Table, B: Table, C: Table, D: Table](
     seek(column, SeekDir.Gt, value, sortOrder)
 
   def build: SqlFragment =
-    var result = SqlFragment.text("select * from ").append(SqlFragment.tableRef(t1.tableName, t1.alias))
+    var result = SelectList.selectFrom(Seq(t1, t2, t3, t4)).append(SqlFragment.tableRef(t1.tableName, t1.alias))
 
     for join <- joins do
       result = result
@@ -1602,7 +1602,8 @@ final case class Query5Ready[
     seek(column, SeekDir.Gt, value, sortOrder)
 
   def build: SqlFragment =
-    var result = SqlFragment.text("select * from ").append(SqlFragment.tableRef(t1.tableName, t1.alias))
+    var result =
+      SelectList.selectFrom(Seq(t1, t2, t3, t4, t5)).append(SqlFragment.tableRef(t1.tableName, t1.alias))
 
     for join <- joins do
       result = result

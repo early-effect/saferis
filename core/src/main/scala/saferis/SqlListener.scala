@@ -52,19 +52,13 @@ object SqlListener:
     def exec(command: SqlCommand): zio.IO[SaferisError, Long] =
       timed(command, inner.exec(command), identity)
 
-    def query[A](command: SqlCommand)(
-        read: SqlRow => Either[SaferisError, A]
-    ): zio.IO[SaferisError, zio.Chunk[A]] =
+    def query[A](command: SqlCommand)(read: RowRead[A]): zio.IO[SaferisError, zio.Chunk[A]] =
       timed(command, inner.query(command)(read), rows => rows.length.toLong)
 
-    def queryAtMostOne[A](command: SqlCommand)(
-        read: SqlRow => Either[SaferisError, A]
-    ): zio.IO[SaferisError, Option[A]] =
+    def queryAtMostOne[A](command: SqlCommand)(read: RowRead[A]): zio.IO[SaferisError, Option[A]] =
       timed(command, inner.queryAtMostOne(command)(read), row => if row.isDefined then 1L else 0L)
 
-    def stream[A](command: SqlCommand)(
-        read: SqlRow => Either[SaferisError, A]
-    ): ZStream[Any, SaferisError, A] =
+    def stream[A](command: SqlCommand)(read: RowRead[A]): ZStream[Any, SaferisError, A] =
       ZStream.unwrap:
         for
           start <- Clock.nanoTime

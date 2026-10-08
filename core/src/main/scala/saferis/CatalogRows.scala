@@ -46,7 +46,7 @@ private[saferis] object CatalogRows:
       Trace
   ): ZIO[SqlSession, SaferisError, Chunk[A]] =
     fragment.toCommand.flatMap: command =>
-      ZIO.serviceWithZIO[SqlSession](_.query(command)(read))
+      ZIO.serviceWithZIO[SqlSession](_.query(command)(RowRead.all(read)))
 
   private def cell[A: Decoder](row: SqlRow, label: String, expected: String): Either[SaferisError, A] =
     row

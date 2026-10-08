@@ -31,7 +31,14 @@ object ColumnName:
   def apply(name: String): ColumnName = name
   given SqlName[ColumnName] with
     def text(name: ColumnName): String = name
-  extension (name: ColumnName) def folded: ColumnName = name.toLowerCase(java.util.Locale.ROOT)
+  extension (name: ColumnName)
+    /** The comparison `SqlRow.get` and [[ResultColumns.indexes]] share. JDBC label lookup is case-insensitive.
+      *
+      * Not named `matches`: [[ColumnName]] is a `String`, and `String.matches` is a regular expression.
+      */
+    def matchesLabel(other: ColumnName): Boolean = name.equalsIgnoreCase(other)
+    def folded: ColumnName                       = name.toLowerCase(java.util.Locale.ROOT)
+end ColumnName
 
 /** A field of a Scala case class. Not a column name: `@label` can make those differ. */
 opaque type FieldName <: String = String

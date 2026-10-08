@@ -60,9 +60,12 @@ case class Product(
 | Annotation | Purpose |
 |------------|---------|
 | `@tableName("name")` | Specifies the SQL table name |
+| `@projectColumns` | Select this table's columns instead of `*` |
 | `@key` | Marks a primary key column |
 | `@generated` | Marks an auto-generated column (identity/auto-increment) |
 | `@label("column_name")` | Maps field to a different column name |
+
+`@projectColumns` goes on the case class, beside `@tableName`. `Query` and `getByKey` then list that table's columns. Insert, update, and schema verify ignore it: a database column the case class does not name still fails verify. A `sql"select *"` you wrote is not rewritten. The driver still reads only the columns the row type names.
 
 For indexes, unique constraints, and foreign keys, use the [Schema DSL](ddl.html#schema-dsl-for-indexes-and-constraints).
 

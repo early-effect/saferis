@@ -12,18 +12,12 @@ import zio.stream.ZStream
 trait SqlSession:
   def exec(command: SqlCommand): IO[SaferisError, Long]
 
-  def query[A](command: SqlCommand)(
-      read: SqlRow => Either[SaferisError, A]
-  ): IO[SaferisError, Chunk[A]]
+  def query[A](command: SqlCommand)(read: RowRead[A]): IO[SaferisError, Chunk[A]]
 
   /** Execute, decode at most one row, and close. A later row is not read. */
-  def queryAtMostOne[A](command: SqlCommand)(
-      read: SqlRow => Either[SaferisError, A]
-  ): IO[SaferisError, Option[A]]
+  def queryAtMostOne[A](command: SqlCommand)(read: RowRead[A]): IO[SaferisError, Option[A]]
 
-  def stream[A](command: SqlCommand)(
-      read: SqlRow => Either[SaferisError, A]
-  ): ZStream[Any, SaferisError, A]
+  def stream[A](command: SqlCommand)(read: RowRead[A]): ZStream[Any, SaferisError, A]
 
   /** Run `body` on this transaction. A nested call joins: no second BEGIN and no inner commit. */
   def transact[R, A](body: ZIO[SqlSession & R, SaferisError, A]): ZIO[R, SaferisError, A]
@@ -44,9 +38,9 @@ end SqlSession
   */
 trait SqlConnection:
   def execute(command: SqlCommand): IO[SaferisError, Long]
-  def query(command: SqlCommand): IO[SaferisError, Chunk[SqlRow]]
-  def queryAtMostOne(command: SqlCommand): IO[SaferisError, Option[SqlRow]]
-  def cursor(command: SqlCommand): ZStream[Any, SaferisError, SqlRow]
+  def query(command: SqlCommand, columns: ResultColumns): IO[SaferisError, Chunk[SqlRow]]
+  def queryAtMostOne(command: SqlCommand, columns: ResultColumns): IO[SaferisError, Option[SqlRow]]
+  def cursor(command: SqlCommand, columns: ResultColumns): ZStream[Any, SaferisError, SqlRow]
   def begin: IO[SaferisError, Unit]
   def commit: IO[SaferisError, Unit]
   def rollback: UIO[Unit]
