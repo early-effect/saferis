@@ -53,12 +53,12 @@ final case class Column[R](
   def sqlType: SqlType = writable.sqlType
 
   private[saferis] def read(row: SqlRow): Either[SaferisError, (FieldName, R)] =
-    def fail(detail: String) = Left(SaferisError.DecodingError(label, TypeName(sqlType.toString), detail))
+    def fail(reason: DecodeError) = Left(SaferisError.DecodingError(label, TypeName(sqlType.toString), reason))
     row.get(label) match
-      case Left(err)    => fail(err.detail)
+      case Left(reason) => fail(reason)
       case Right(value) =>
         readable.decode(value) match
-          case Left(err)      => fail(err.detail)
+          case Left(reason)   => fail(reason)
           case Right(decoded) => Right(name -> decoded)
 
   private[saferis] def withTableAlias(alias: Option[Alias]): Column[R] = copy(tableAlias = alias)

@@ -31,10 +31,10 @@ object Json:
 
   given decoder[A: JsonCodec]: Decoder[Json[A]] with
     def decode(value: SqlValue): Either[DecodeError, Json[A]] = value match
+      case SqlValue.Null(_)    => Left(DecodeError.Null)
       case SqlValue.Json(json) =>
-        summon[JsonCodec[A]].decoder.decodeJson(json).left.map(e => DecodeError(s"Failed to decode JSON: $e"))
-      case SqlValue.Null(_) => Left(DecodeError("null value"))
-      case other            => Left(DecodeError(s"expected jsonb, found ${other.productPrefix}"))
+        summon[JsonCodec[A]].decoder.decodeJson(json).left.map(DecodeError.Json(_))
+      case other => Left(DecodeError.Mismatch(TypeName("jsonb"), other))
 
   given codec[A](using JsonCodec[A]): Codec[Json[A]] = new Codec[Json[A]]:
     val encoder: Encoder[Json[A]] = Json.encoder[A]

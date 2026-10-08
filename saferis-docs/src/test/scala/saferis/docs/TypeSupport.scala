@@ -138,10 +138,12 @@ case class JsonEvent(
 - Binds as `jsonb` on PostgreSQL and as a `json` column on MySQL, SQLite, and H2
 - Provides `.value` extension to unwrap: `event.metadata.value` returns `Metadata`
 
-A JSON column decodes as `Json[A]`, not as `String`: `Decoder[String]` reads text columns only. Store the JSON as `Text` if you want the raw document as a string.""",
+A JSON column decodes as `Json[A]`, not as `String`. `Decoder[String]` reads text, and also the canonical rendering of a number, a boolean, a date, or a uuid. It does not read `jsonb` or `bytea`. Store the JSON as `Text` if you want the raw document as a string.""",
     ),
     section("Integer Widths")(
-      md"""Integer decoders read by value, not by column width. `Decoder[Int]` accepts a `bigint` that fits, so `select count(*)` decodes as `Int` on PostgreSQL, and every SQLite integer (which SQLite stores as 64 bits) decodes as `Short`, `Int`, or `Long`. A value that does not fit fails with a `DecodingError` instead of wrapping. The shared cases are `SmallInt`, `Integer`, and `BigInt`."""
+      md"""Integer decoders read by value, not by column width. `Decoder[Int]` accepts a `bigint` that fits, so `select count(*)` decodes as `Int` on PostgreSQL, and every SQLite integer (which SQLite stores as 64 bits) decodes as `Short`, `Int`, or `Long`. A whole `numeric`, an integral `varchar` or `text` (`123`, `123.0`, `1e2`), and a float that is that exact integer decode too. A fraction, a value that does not fit, or text that is not an integer fails with a `DecodingError` instead of wrapping or truncating.
+
+`String` also reads the canonical text of an integer, a `numeric`, a boolean, a date, or a uuid. `Text` is the strict text column: it reads `varchar` and `text` only."""
     ),
     section("Enumerations")(
       md"""`Codec.enumeration` binds a database enumeration by its labels. For a parameterless Scala 3 enum, the case names are the labels:

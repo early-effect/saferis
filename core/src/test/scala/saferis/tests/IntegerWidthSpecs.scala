@@ -17,7 +17,8 @@ object IntegerWidthSpecs extends ZIOSpecDefault:
     ,
     test("an int8 outside int4 fails instead of wrapping"):
       check(Gen.long.filter(n => n > Int.MaxValue || n < Int.MinValue)): n =>
-        assertTrue(decode[Int](SqlValue.BigInt(n)).isLeft)
+        val cell = SqlValue.BigInt(n)
+        assertTrue(decode[Int](cell) == Left(DecodeError.OutOfRange(TypeName("int4"), cell)))
     ,
     test("any narrower integer decodes as Long"):
       check(Gen.short, Gen.int): (s, i) =>
@@ -38,10 +39,28 @@ object IntegerWidthSpecs extends ZIOSpecDefault:
         assertTrue(back.exists(b => b == f || (b.isNaN && f.isNaN)))
     ,
     test("a float8 that is not exactly a Float fails instead of rounding"):
-      assertTrue(decode[Float](SqlValue.DoublePrecision(0.1)).isLeft)
+      val cell = SqlValue.DoublePrecision(0.1)
+      assertTrue(decode[Float](cell) == Left(DecodeError.Lossy(TypeName("float4"), cell)))
     ,
-    test("text is still not an integer"):
-      assertTrue(decode[Int](SqlValue.Text("1")).isLeft)
+    test("non-numeric text is not an integer"):
+      val cell = SqlValue.Text("1a")
+      assertTrue(decode[Int](cell) == Left(DecodeError.InvalidText(TypeName("int4"), "1a")))
+    ,
+    test("integral text and a whole numeric decode as that long"):
+      check(Gen.long): n =>
+        assertTrue(
+          decode[Long](SqlValue.Text(n.toString)) == Right(n),
+          decode[Long](SqlValue.VarChar(n.toString)) == Right(n),
+          decode[Long](SqlValue.Numeric(BigDecimal(n))) == Right(n),
+          decode[Long](SqlValue.Numeric(BigDecimal(s"$n.0"))) == Right(n),
+        )
+    ,
+    test("a long decodes as Double exactly when toDouble is still that long"):
+      check(Gen.long): n =>
+        val cell  = SqlValue.BigInt(n)
+        val exact = BigDecimal.exact(n.toDouble) == BigDecimal(n)
+        val got   = decode[Double](cell)
+        assertTrue(got == (if exact then Right(n.toDouble) else Left(DecodeError.Lossy(TypeName("float8"), cell))))
     ,
     test("an integer decoder succeeds exactly when the value fits, at any width"):
       check(Gen.long): n =>

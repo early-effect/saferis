@@ -31,11 +31,10 @@ object MySQLCodecSpecs extends ZIOSpecDefault:
 
       assertTrue(literal == "'550e8400-e29b-41d4-a716-446655440000'")
     },
-    test("MySQL UUID decoder is available") {
-      import saferis.mysql.given
-
+    test("UUID text decodes on the shared decoder") {
+      val id      = UUID.fromString("550e8400-e29b-41d4-a716-446655440000")
       val decoder = summon[Decoder[UUID]]
-      assertTrue(decoder != null)
+      assertTrue(decoder.decode(SqlValue.Text(id.toString)) == Right(id))
     },
     test("Can create table with UUID column using MySQL dialect") {
       import saferis.mysql.given

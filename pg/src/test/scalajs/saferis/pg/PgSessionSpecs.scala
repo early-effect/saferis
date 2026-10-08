@@ -153,7 +153,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
           summon[RowDecoder[Long]]
             .decode(row)
             .left
-            .map(err => SaferisError.DecodingError(ColumnName("value"), TypeName("Long"), err.detail))
+            .map(err => SaferisError.DecodingError(ColumnName("value"), TypeName("Long"), err))
         for
           command <- sql"select ${pastBigInt}".toCommand
           session <- ZIO.service[SqlSession]
@@ -165,7 +165,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
           summon[RowDecoder[Int]]
             .decode(row)
             .left
-            .map(err => SaferisError.DecodingError(ColumnName("n"), TypeName("Int"), err.detail))
+            .map(err => SaferisError.DecodingError(ColumnName("n"), TypeName("Int"), err))
         for
           pg     <- ZIO.service[PostgresTestContainer]
           events <- Ref.make(Chunk.empty[String])
@@ -185,7 +185,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
           summon[RowDecoder[Int]]
             .decode(row)
             .left
-            .map(err => SaferisError.DecodingError(ColumnName("n"), TypeName("Int"), err.detail))
+            .map(err => SaferisError.DecodingError(ColumnName("n"), TypeName("Int"), err))
         val counted =
           for
             reads   <- Ref.make(0)

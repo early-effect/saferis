@@ -12,9 +12,8 @@ import java.time.OffsetDateTime
 import java.time.OffsetTime
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
+import java.time.format.DateTimeParseException
 import java.util.UUID
-
-final case class DecodeError(detail: String)
 
 trait Decoder[A]:
   self =>
@@ -28,10 +27,24 @@ trait RowDecoder[A]:
   def decode(row: SqlRow): Either[DecodeError, A]
 
 object Decoder:
-  private def reject(expected: String, value: SqlValue): Left[DecodeError, Nothing] =
-    value match
-      case SqlValue.Null(_) => Left(DecodeError("null value"))
-      case other            => Left(DecodeError(s"expected $expected, found ${other.productPrefix}"))
+  private val int2        = TypeName("int2")
+  private val int4        = TypeName("int4")
+  private val int8        = TypeName("int8")
+  private val float4      = TypeName("float4")
+  private val float8      = TypeName("float8")
+  private val numeric     = TypeName("numeric")
+  private val bigint      = TypeName("bigint")
+  private val bool        = TypeName("bool")
+  private val date        = TypeName("date")
+  private val uuidName    = TypeName("uuid")
+  private val varchar     = TypeName("varchar")
+  private val bytea       = TypeName("bytea")
+  private val jsonb       = TypeName("jsonb")
+  private val timestamptz = TypeName("timestamptz")
+  private val timestamp   = TypeName("timestamp")
+  private val time        = TypeName("time")
+  private val timetz      = TypeName("timetz")
+  private val arrayName   = TypeName("array")
 
   given option[A](using decoder: Decoder[A]): Decoder[Option[A]] with
     def decode(value: SqlValue): Either[DecodeError, Option[A]] = value match
@@ -40,127 +53,259 @@ object Decoder:
 
   given string: Decoder[String] with
     def decode(value: SqlValue): Either[DecodeError, String] = value match
-      case SqlValue.VarChar(v)  => Right(v)
-      case SqlValue.Text(v)     => Right(v)
-      case SqlValue.Other(_, v) => Right(v)
-      case other                => reject("varchar", other)
+      case SqlValue.Null(_) => Left(DecodeError.Null)
+      case other            =>
+        rendered(other) match
+          case Some(text) => Right(text)
+          case None       => Left(DecodeError.Mismatch(varchar, other))
 
   /** Any integer width, when the value fits. SQLite stores every integer as 64 bits, and `count(*)` is `int8` on
-    * Postgres, so the column width alone does not decide the Scala type.
+    * Postgres, so the column width alone does not decide the Scala type. Whole numerics, exact finite floats, and
+    * integral text are the same integer spelled another way.
     */
-  private def integral(value: SqlValue): Option[Long] = value match
-    case SqlValue.SmallInt(v) => Some(v.toLong)
-    case SqlValue.Integer(v)  => Some(v.toLong)
-    case SqlValue.BigInt(v)   => Some(v)
-    case _                    => None
+  private def integral(expected: TypeName, value: SqlValue): Either[DecodeError, BigInt] = value match
+    case SqlValue.Null(_)            => Left(DecodeError.Null)
+    case SqlValue.SmallInt(v)        => Right(BigInt(v.toLong))
+    case SqlValue.Integer(v)         => Right(BigInt(v))
+    case SqlValue.BigInt(v)          => Right(BigInt(v))
+    case SqlValue.Numeric(v)         => whole(v).toRight(DecodeError.Lossy(expected, value))
+    case SqlValue.Real(v)            => integralFloat(expected, value, v.toDouble)
+    case SqlValue.DoublePrecision(v) => integralFloat(expected, value, v)
+    case SqlValue.VarChar(text)      => integralText(expected, text)
+    case SqlValue.Text(text)         => integralText(expected, text)
+    case other                       => Left(DecodeError.Mismatch(expected, other))
 
-  private def fits(expected: String, value: SqlValue, min: Long, max: Long): Either[DecodeError, Long] =
-    integral(value) match
-      case Some(v) if v >= min && v <= max => Right(v)
-      case Some(v)                         => Left(DecodeError(s"$v does not fit in $expected"))
-      case None                            => reject(expected, value)
+  /** Fractional text is not an integer spelling. A fractional `Numeric` is [[DecodeError.Lossy]]. */
+  private def integralText(expected: TypeName, text: String): Either[DecodeError, BigInt] =
+    parseDecimal(text).flatMap(whole) match
+      case Some(n) => Right(n)
+      case None    => Left(DecodeError.InvalidText(expected, text))
+
+  private def integralFloat(expected: TypeName, value: SqlValue, number: Double): Either[DecodeError, BigInt] =
+    if number.isFinite then whole(BigDecimal.exact(number)).toRight(DecodeError.Lossy(expected, value))
+    else Left(DecodeError.Lossy(expected, value))
+
+  private def fits(expected: TypeName, value: SqlValue, min: BigInt, max: BigInt): Either[DecodeError, Long] =
+    integral(expected, value).flatMap: n =>
+      if n >= min && n <= max then Right(n.toLong)
+      else Left(DecodeError.OutOfRange(expected, value))
 
   given short: Decoder[Short] with
     def decode(value: SqlValue): Either[DecodeError, Short] =
-      fits("int2", value, Short.MinValue.toLong, Short.MaxValue.toLong).map(_.toShort)
+      fits(int2, value, BigInt(Short.MinValue), BigInt(Short.MaxValue)).map(_.toShort)
 
   given int: Decoder[Int] with
     def decode(value: SqlValue): Either[DecodeError, Int] =
-      fits("int4", value, Int.MinValue.toLong, Int.MaxValue.toLong).map(_.toInt)
+      fits(int4, value, BigInt(Int.MinValue), BigInt(Int.MaxValue)).map(_.toInt)
 
   given long: Decoder[Long] with
     def decode(value: SqlValue): Either[DecodeError, Long] =
-      fits("int8", value, Long.MinValue, Long.MaxValue)
+      fits(int8, value, BigInt(Long.MinValue), BigInt(Long.MaxValue))
+
+  given bigInt: Decoder[BigInt] with
+    def decode(value: SqlValue): Either[DecodeError, BigInt] =
+      integral(bigint, value)
 
   given boolean: Decoder[Boolean] with
     def decode(value: SqlValue): Either[DecodeError, Boolean] = value match
-      case SqlValue.Bool(v) => Right(v)
-      case other            => reject("bool", other)
+      case SqlValue.Null(_)          => Left(DecodeError.Null)
+      case SqlValue.Bool(v)          => Right(v)
+      case SqlValue.VarChar("true")  => Right(true)
+      case SqlValue.VarChar("false") => Right(false)
+      case SqlValue.Text("true")     => Right(true)
+      case SqlValue.Text("false")    => Right(false)
+      case SqlValue.VarChar(text)    => Left(DecodeError.InvalidText(bool, text))
+      case SqlValue.Text(text)       => Left(DecodeError.InvalidText(bool, text))
+      case other                     => Left(DecodeError.Mismatch(bool, other))
+  end boolean
 
   /** A `float8` decodes when it is exactly a `Float`, as every value written from a `Float` is. SQLite stores every
-    * `real` as 8 bytes, so this is how a `Float` column reads there. Anything else fails instead of rounding.
+    * `real` as 8 bytes, so this is how a `Float` column reads there. Anything else fails instead of rounding. A
+    * `numeric` or numeric text becomes the nearest finite float. An integer is accepted only when it is that float.
     */
   given float: Decoder[Float] with
     def decode(value: SqlValue): Either[DecodeError, Float] = value match
+      case SqlValue.Null(_)                                                  => Left(DecodeError.Null)
       case SqlValue.Real(v)                                                  => Right(v)
       case SqlValue.DoublePrecision(v) if v.isNaN || v.toFloat.toDouble == v => Right(v.toFloat)
-      case SqlValue.DoublePrecision(v) => Left(DecodeError(s"$v is not exactly a float4"))
-      case other                       => reject("float4", other)
+      case SqlValue.DoublePrecision(_)                                       => Left(DecodeError.Lossy(float4, value))
+      case SqlValue.SmallInt(v)                                              => exactFloat(value, BigInt(v.toLong))
+      case SqlValue.Integer(v)                                               => exactFloat(value, BigInt(v))
+      case SqlValue.BigInt(v)                                                => exactFloat(value, BigInt(v))
+      case SqlValue.Numeric(v)                                               => nearestFloat(value, v)
+      case SqlValue.VarChar(text)                                            => textFloat(value, text)
+      case SqlValue.Text(text)                                               => textFloat(value, text)
+      case other => Left(DecodeError.Mismatch(float4, other))
+  end float
 
+  /** Decimal to binary float is the nearest finite IEEE value. Overflow is loss. An exact decimal is a `BigDecimal`. An
+    * integer is a `Double` only when `toDouble` is still that integer.
+    */
   given double: Decoder[Double] with
     def decode(value: SqlValue): Either[DecodeError, Double] = value match
+      case SqlValue.Null(_)            => Left(DecodeError.Null)
       case SqlValue.DoublePrecision(v) => Right(v)
       case SqlValue.Real(v)            => Right(v.toDouble)
-      case other                       => reject("float8", other)
+      case SqlValue.SmallInt(v)        => exactDouble(value, BigInt(v.toLong))
+      case SqlValue.Integer(v)         => exactDouble(value, BigInt(v))
+      case SqlValue.BigInt(v)          => exactDouble(value, BigInt(v))
+      case SqlValue.Numeric(v)         => nearestDouble(value, v)
+      case SqlValue.VarChar(text)      => textDouble(value, text)
+      case SqlValue.Text(text)         => textDouble(value, text)
+      case other                       => Left(DecodeError.Mismatch(float8, other))
+  end double
 
   given bigDecimal: Decoder[BigDecimal] with
-    def decode(value: SqlValue): Either[DecodeError, BigDecimal] = value match
-      case SqlValue.Numeric(v) => Right(v)
-      case other               => reject("numeric", other)
-
-  given bigInt: Decoder[BigInt] with
-    def decode(value: SqlValue): Either[DecodeError, BigInt] = value match
-      case SqlValue.Numeric(v) => Right(v.toBigInt)
-      case other               => reject("numeric", other)
+    def decode(value: SqlValue): Either[DecodeError, BigDecimal] =
+      decimal(value)
 
   given chunkByte: Decoder[Chunk[Byte]] with
     def decode(value: SqlValue): Either[DecodeError, Chunk[Byte]] = value match
+      case SqlValue.Null(_)   => Left(DecodeError.Null)
       case SqlValue.Binary(v) => Right(v)
-      case other              => reject("bytea", other)
+      case other              => Left(DecodeError.Mismatch(bytea, other))
 
   given instant: Decoder[Instant] with
     def decode(value: SqlValue): Either[DecodeError, Instant] = value match
+      case SqlValue.Null(_)        => Left(DecodeError.Null)
       case SqlValue.TimestampTz(v) => Right(v)
-      case other                   => reject("timestamptz", other)
+      case other                   => Left(DecodeError.Mismatch(timestamptz, other))
 
   given localDateTime: Decoder[LocalDateTime] with
     def decode(value: SqlValue): Either[DecodeError, LocalDateTime] = value match
+      case SqlValue.Null(_)      => Left(DecodeError.Null)
       case SqlValue.Timestamp(v) => Right(v)
-      case other                 => reject("timestamp", other)
+      case other                 => Left(DecodeError.Mismatch(timestamp, other))
 
   given localDate: Decoder[LocalDate] with
     def decode(value: SqlValue): Either[DecodeError, LocalDate] = value match
-      case SqlValue.Date(v) => Right(v)
-      case other            => reject("date", other)
+      case SqlValue.Null(_)    => Left(DecodeError.Null)
+      case SqlValue.Date(v)    => Right(v)
+      case SqlValue.VarChar(t) => parseDate(t)
+      case SqlValue.Text(t)    => parseDate(t)
+      case other               => Left(DecodeError.Mismatch(date, other))
 
   given localTime: Decoder[LocalTime] with
     def decode(value: SqlValue): Either[DecodeError, LocalTime] = value match
+      case SqlValue.Null(_) => Left(DecodeError.Null)
       case SqlValue.Time(v) => Right(v)
-      case other            => reject("time", other)
+      case other            => Left(DecodeError.Mismatch(time, other))
 
   given offsetTime: Decoder[OffsetTime] with
     def decode(value: SqlValue): Either[DecodeError, OffsetTime] = value match
+      case SqlValue.Null(_)   => Left(DecodeError.Null)
       case SqlValue.TimeTz(v) => Right(v)
-      case other              => reject("timetz", other)
+      case other              => Left(DecodeError.Mismatch(timetz, other))
 
   given zonedDateTime: Decoder[ZonedDateTime] with
     def decode(value: SqlValue): Either[DecodeError, ZonedDateTime] = value match
+      case SqlValue.Null(_)        => Left(DecodeError.Null)
       case SqlValue.TimestampTz(v) => Right(ZonedDateTime.ofInstant(v, ZoneOffset.UTC))
-      case other                   => reject("timestamptz", other)
+      case other                   => Left(DecodeError.Mismatch(timestamptz, other))
 
   given offsetDateTime: Decoder[OffsetDateTime] with
     def decode(value: SqlValue): Either[DecodeError, OffsetDateTime] = value match
+      case SqlValue.Null(_)        => Left(DecodeError.Null)
       case SqlValue.TimestampTz(v) => Right(OffsetDateTime.ofInstant(v, ZoneOffset.UTC))
-      case other                   => reject("timestamptz", other)
+      case other                   => Left(DecodeError.Mismatch(timestamptz, other))
 
-  given defaultUuidDecoder: Decoder[UUID] = postgres.uuidDecoder
+  given uuid: Decoder[UUID] with
+    def decode(value: SqlValue): Either[DecodeError, UUID] = value match
+      case SqlValue.Null(_)    => Left(DecodeError.Null)
+      case SqlValue.Uuid(v)    => Right(v)
+      case SqlValue.VarChar(t) => parseUuid(t)
+      case SqlValue.Text(t)    => parseUuid(t)
+      case other               => Left(DecodeError.Mismatch(uuidName, other))
 
   /** A Postgres array column. `Chunk[Byte]` stays `bytea` ([[chunkByte]]). */
   given array[A](using element: Decoder[A], notBytes: NotGiven[A =:= Byte]): Decoder[Chunk[A]] with
     def decode(value: SqlValue): Either[DecodeError, Chunk[A]] = value match
+      case SqlValue.Null(_)          => Left(DecodeError.Null)
       case SqlValue.Array(_, values) =>
         values.foldLeft[Either[DecodeError, Chunk[A]]](Right(Chunk.empty)):
           case (Left(err), _)       => Left(err)
           case (Right(acc), member) => element.decode(member).map(acc :+ _)
-      case other => reject("array", other)
+      case other => Left(DecodeError.Mismatch(arrayName, other))
 
   def fromJsonCodec[T](using codec: zio.json.JsonCodec[T]): Decoder[T] =
     new Decoder[T]:
       def decode(value: SqlValue): Either[DecodeError, T] = value match
-        case SqlValue.Json(json) =>
-          codec.decoder.decodeJson(json).left.map(e => DecodeError(s"Failed to decode JSON: $e"))
-        case SqlValue.Null(_) => Left(DecodeError("null value"))
-        case other            => Left(DecodeError(s"expected jsonb, found ${other.productPrefix}"))
+        case SqlValue.Null(_)    => Left(DecodeError.Null)
+        case SqlValue.Json(json) => codec.decoder.decodeJson(json).left.map(DecodeError.Json(_))
+        case other               => Left(DecodeError.Mismatch(jsonb, other))
+
+  private def rendered(value: SqlValue): Option[String] = value match
+    case SqlValue.VarChar(v)  => Some(v)
+    case SqlValue.Text(v)     => Some(v)
+    case SqlValue.Other(_, v) => Some(v)
+    case SqlValue.SmallInt(v) => Some(v.toString)
+    case SqlValue.Integer(v)  => Some(v.toString)
+    case SqlValue.BigInt(v)   => Some(v.toString)
+    case SqlValue.Numeric(v)  => Some(v.bigDecimal.toPlainString)
+    case SqlValue.Bool(v)     => Some(if v then "true" else "false")
+    case SqlValue.Date(v)     => Some(v.toString)
+    case SqlValue.Uuid(v)     => Some(v.toString)
+    case _                    => None
+
+  private def parseDecimal(text: String): Option[BigDecimal] =
+    try Some(BigDecimal(text))
+    catch case _: NumberFormatException => None
+
+  private def whole(value: BigDecimal): Option[BigInt] =
+    try Some(BigInt(value.bigDecimal.toBigIntegerExact))
+    catch case _: ArithmeticException => None
+
+  private def decimal(value: SqlValue): Either[DecodeError, BigDecimal] = value match
+    case SqlValue.Null(_)            => Left(DecodeError.Null)
+    case SqlValue.Numeric(v)         => Right(v)
+    case SqlValue.SmallInt(v)        => Right(BigDecimal(v.toLong))
+    case SqlValue.Integer(v)         => Right(BigDecimal(v))
+    case SqlValue.BigInt(v)          => Right(BigDecimal(v))
+    case SqlValue.Real(v)            => finiteDecimal(value, v.toDouble)
+    case SqlValue.DoublePrecision(v) => finiteDecimal(value, v)
+    case SqlValue.VarChar(text)      => parseDecimal(text).toRight(DecodeError.InvalidText(numeric, text))
+    case SqlValue.Text(text)         => parseDecimal(text).toRight(DecodeError.InvalidText(numeric, text))
+    case other                       => Left(DecodeError.Mismatch(numeric, other))
+
+  private def finiteDecimal(value: SqlValue, number: Double): Either[DecodeError, BigDecimal] =
+    if number.isFinite then Right(BigDecimal.exact(number))
+    else Left(DecodeError.Lossy(numeric, value))
+
+  private def nearestDouble(value: SqlValue, number: BigDecimal): Either[DecodeError, Double] =
+    val decoded = number.bigDecimal.doubleValue
+    if decoded.isFinite then Right(decoded) else Left(DecodeError.Lossy(float8, value))
+
+  private def nearestFloat(value: SqlValue, number: BigDecimal): Either[DecodeError, Float] =
+    val decoded = number.bigDecimal.floatValue
+    if decoded.isFinite then Right(decoded) else Left(DecodeError.Lossy(float4, value))
+
+  private def exactDouble(value: SqlValue, number: BigInt): Either[DecodeError, Double] =
+    val decoded = number.bigInteger.doubleValue
+    if decoded.isFinite && BigDecimal.exact(decoded) == BigDecimal(number) then Right(decoded)
+    else Left(DecodeError.Lossy(float8, value))
+
+  private def exactFloat(value: SqlValue, number: BigInt): Either[DecodeError, Float] =
+    val decoded = number.bigInteger.floatValue
+    if decoded.isFinite && BigDecimal.exact(decoded.toDouble) == BigDecimal(number) then Right(decoded)
+    else Left(DecodeError.Lossy(float4, value))
+
+  private def textDouble(value: SqlValue, text: String): Either[DecodeError, Double] =
+    parseDecimal(text) match
+      case Some(number) => nearestDouble(value, number)
+      case None         => Left(DecodeError.InvalidText(float8, text))
+
+  private def textFloat(value: SqlValue, text: String): Either[DecodeError, Float] =
+    parseDecimal(text) match
+      case Some(number) => nearestFloat(value, number)
+      case None         => Left(DecodeError.InvalidText(float4, text))
+
+  private def parseDate(text: String): Either[DecodeError, LocalDate] =
+    try Right(LocalDate.parse(text))
+    catch case _: DateTimeParseException => Left(DecodeError.InvalidText(date, text))
+
+  private def parseUuid(text: String): Either[DecodeError, UUID] =
+    try Right(UUID.fromString(text))
+    catch case _: IllegalArgumentException => Left(DecodeError.InvalidText(uuidName, text))
 
 end Decoder
 
@@ -170,11 +315,11 @@ object RowDecoder:
       row.at(0).flatMap(cell.decode)
 
   private def cell[A](row: SqlRow, index: Int)(using decoder: Decoder[A]): Either[DecodeError, A] =
-    row.at(index).flatMap(decoder.decode).left.map(err => DecodeError(s"column ${index + 1}: ${err.detail}"))
+    row.at(index).flatMap(decoder.decode).left.map(err => DecodeError.At(index + 1, err))
 
   private def width(row: SqlRow, expected: Int): Either[DecodeError, Unit] =
     if row.width == expected then Right(())
-    else Left(DecodeError(s"Expected exactly $expected columns in result set, got ${row.width}"))
+    else Left(DecodeError.Width(expected, row.width))
 
   given tuple2[A, B](using decoderA: Decoder[A], decoderB: Decoder[B]): RowDecoder[(A, B)] with
     def decode(row: SqlRow): Either[DecodeError, (A, B)] =

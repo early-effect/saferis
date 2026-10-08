@@ -64,7 +64,7 @@ object Codec:
     val decoder: Decoder[Option[A]] = Decoder.option[A](using c.decoder)
 
   given defaultUuidCodec: Codec[UUID] =
-    make(Encoder.defaultUuidEncoder, Decoder.defaultUuidDecoder)
+    make(Encoder.defaultUuidEncoder, Decoder.uuid)
 
   /** A database enumeration: its labels travel as text. On Postgres the value binds as [[SqlValue.Other]], uncast, so
     * the server infers the enum type; MySQL and SQLite store the label in an `enum` or text column. It decodes from
@@ -82,12 +82,14 @@ object Codec:
         def encode(a: E): SqlValue = SqlValue.Other(server, encodeName(a))
       val decoder: Decoder[E] = new Decoder[E]:
         def decode(value: SqlValue): Either[DecodeError, E] =
-          val text = value match
-            case SqlValue.Other(_, t) => Some(t)
-            case SqlValue.Text(t)     => Some(t)
-            case SqlValue.VarChar(t)  => Some(t)
-            case _                    => None
-          text.flatMap(decodeName).toRight(DecodeError(s"not a $typeName"))
+          def label(text: String): Either[DecodeError, E] =
+            decodeName(text).toRight(DecodeError.UnknownLabel(typeName, text))
+          value match
+            case SqlValue.Null(_)     => Left(DecodeError.Null)
+            case SqlValue.Other(_, t) => label(t)
+            case SqlValue.Text(t)     => label(t)
+            case SqlValue.VarChar(t)  => label(t)
+            case other                => Left(DecodeError.Mismatch(typeName, other))
     end new
   end enumeration
 

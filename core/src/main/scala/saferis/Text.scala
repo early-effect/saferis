@@ -26,10 +26,10 @@ object Text:
 
   given decoder: Decoder[Text] with
     def decode(value: SqlValue): Either[DecodeError, Text] = value match
+      case SqlValue.Null(_)    => Left(DecodeError.Null)
       case SqlValue.VarChar(v) => Right(v)
       case SqlValue.Text(v)    => Right(v)
-      case SqlValue.Null(_)    => Left(DecodeError("null value"))
-      case other               => Left(DecodeError(s"expected text, found ${other.productPrefix}"))
+      case other               => Left(DecodeError.Mismatch(TypeName("text"), other))
 
   given codec: Codec[Text] = new Codec[Text]:
     val encoder: Encoder[Text] = Text.encoder

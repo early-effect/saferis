@@ -53,7 +53,7 @@ private[saferis] object CatalogRows:
       .get(ColumnName(label))
       .flatMap(summon[Decoder[A]].decode)
       .left
-      .map(err => SaferisError.DecodingError(ColumnName(label), TypeName(expected), err.detail))
+      .map(err => SaferisError.DecodingError(ColumnName(label), TypeName(expected), err))
 
   /** A boolean column, or an integer where the catalog has no boolean type (MySQL). Non-zero is true. */
   private def flag(row: SqlRow, label: String): Either[SaferisError, Boolean] =
@@ -68,7 +68,11 @@ private[saferis] object CatalogRows:
         .parse(spelling)
         .toRight(
           SaferisError
-            .DecodingError(ColumnName(label), TypeName("foreign key action"), s"unknown action '$spelling'")
+            .DecodingError(
+              ColumnName(label),
+              TypeName("foreign key action"),
+              DecodeError.UnknownLabel(TypeName("foreign key action"), spelling),
+            )
         )
 
   def readTable(row: SqlRow): Either[SaferisError, TableName] =
