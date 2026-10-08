@@ -66,7 +66,12 @@ final case class Instance[A](
           .foldLeft(sql"where $c = $a"):
             case (acc, (c, a)) =>
               acc :+ sql" and $c = $a"
-    TypedFragment(sql"select * from $this $whereClause")
+    val body     = sql"from $this $whereClause"
+    val fragment =
+      if tableEvidence.projectColumns then
+        SqlFragment.text("select ").append(SelectList.namedColumns(this)).append(SqlFragment.text(" ")).append(body)
+      else sql"select * from $this $whereClause"
+    TypedFragment(fragment)
   end applyDynamic
 
   /** Set a user-provided alias on this instance - use via `instance as "alias"` */

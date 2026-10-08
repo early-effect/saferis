@@ -47,7 +47,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
     ZLayer.fromZIO(ZIO.serviceWith[PostgresTestContainer](configure)) >>> NodeSession.layer
 
   /** One row from a long cursor, then the scope ends, then another statement on the same pool. */
-  private def pullOneThenSelect(read: SqlRow => Either[SaferisError, Int]) =
+  private def pullOneThenSelect(read: RowRead[Int]) =
     ZIO
       .scoped {
         for
@@ -115,7 +115,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
       test("JSON null is jsonb text and SQL null is Null"):
         for
           command <- sql"select 'null'::jsonb, null::jsonb".toCommand
-          rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(row => Right(row)))
+          rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(RowRead.all(row => Right(row))))
           row = rows.head
         yield assertTrue(
           row.at(0) == Right(SqlValue.Json(JsonText("null"))),
@@ -133,13 +133,13 @@ object PgSessionSpecs extends ZIOSpecDefault:
       test("duplicate labels keep the first cell"):
         for
           command <- sql"select ${1} as a, ${2} as a".toCommand
-          rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(row => Right(row)))
+          rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(RowRead.all(row => Right(row))))
         yield assertTrue(rows.head.get(ColumnName("a")) == Right(SqlValue.Integer(1)))
       ,
       test("an unknown oid is Other and String reads its text"):
         for
           command <- sql"select '1 day'::interval".toCommand
-          rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(row => Right(row)))
+          rows    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(RowRead.all(row => Right(row))))
           text    <- sql"select '1 day'::interval".queryValue[String]
           cell = rows.head.at(0)
         yield assertTrue:
@@ -149,7 +149,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
             case _ => false
       ,
       test("stream emits rows through the server cursor"):
-        val read: SqlRow => Either[SaferisError, Long] = row =>
+        val read = RowRead.all: (row: SqlRow) =>
           summon[RowDecoder[Long]]
             .decode(row)
             .left
@@ -161,7 +161,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
         yield assertTrue(rows == Chunk(pastBigInt))
       ,
       test("closing the stream scope releases the checkout") {
-        val read: SqlRow => Either[SaferisError, Int] = row =>
+        val read = RowRead.all: (row: SqlRow) =>
           summon[RowDecoder[Int]]
             .decode(row)
             .left
@@ -181,7 +181,7 @@ object PgSessionSpecs extends ZIOSpecDefault:
         end for
       },
       test("take(10) of a million rows reads one cursor batch"):
-        val read: SqlRow => Either[SaferisError, Int] = row =>
+        val read = RowRead.all: (row: SqlRow) =>
           summon[RowDecoder[Int]]
             .decode(row)
             .left

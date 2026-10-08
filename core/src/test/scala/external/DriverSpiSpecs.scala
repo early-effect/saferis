@@ -2,6 +2,8 @@ package external
 
 import saferis.*
 
+import scala.annotation.unused
+
 import zio.*
 import zio.stream.ZStream
 import zio.test.*
@@ -19,13 +21,13 @@ private object ProbeConnection extends SqlConnection:
   def execute(command: SqlCommand): IO[SaferisError, Long] =
     ZIO.succeed(1L)
 
-  def query(command: SqlCommand): IO[SaferisError, Chunk[SqlRow]] =
+  def query(@unused command: SqlCommand, @unused columns: ResultColumns): IO[SaferisError, Chunk[SqlRow]] =
     ZIO.succeed(Chunk.empty)
 
-  def queryAtMostOne(command: SqlCommand): IO[SaferisError, Option[SqlRow]] =
+  def queryAtMostOne(@unused command: SqlCommand, @unused columns: ResultColumns): IO[SaferisError, Option[SqlRow]] =
     ZIO.succeed(None)
 
-  def cursor(command: SqlCommand): ZStream[Any, SaferisError, SqlRow] =
+  def cursor(@unused command: SqlCommand, @unused columns: ResultColumns): ZStream[Any, SaferisError, SqlRow] =
     ZStream.empty
 
   def begin: IO[SaferisError, Unit] =

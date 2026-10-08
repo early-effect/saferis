@@ -2,6 +2,7 @@ package saferis.pg
 
 import saferis.ColumnName
 import saferis.DecodeError
+import saferis.ResultColumns
 import saferis.SaferisError
 import saferis.SqlCommand
 import saferis.SqlPiece
@@ -121,19 +122,23 @@ private[pg] object PgWire:
             case null      => 0L
         case None => 0L
 
-  def readRows(result: PgResult): Either[SaferisError, Chunk[SqlRow]] =
+  def readRows(result: PgResult, columns: ResultColumns): Either[SaferisError, Chunk[SqlRow]] =
     ensureSingle(result).flatMap: single =>
-      readFields(single)
+      readFields(single, columns)
 
   /** One portal row. `fields` come from the cursor result, not from a buffered `PgResult`. */
-  def readCursorRow(fields: js.Array[PgField], row: js.Array[js.UndefOr[String]]): Either[SaferisError, SqlRow] =
+  def readCursorRow(
+      fields: js.Array[PgField],
+      row: js.Array[js.UndefOr[String]],
+      columns: ResultColumns,
+  ): Either[SaferisError, SqlRow] =
     if fields == null || js.isUndefined(fields) then Left(SaferisError.Unexpected("cursor result has no fields"))
     else
       val labels = Chunk.fromIterator(Iterator.tabulate(fields.length)(i => fieldName(fields(i))))
       val oids   = Array.tabulate(fields.length)(i => fields(i).dataTypeID.toInt)
-      readRow(labels, oids, row)
+      readRow(labels, oids, row, columns)
 
-  private def readFields(result: PgResult): Either[SaferisError, Chunk[SqlRow]] =
+  private def readFields(result: PgResult, columns: ResultColumns): Either[SaferisError, Chunk[SqlRow]] =
     val fields = result.fields
     if fields == null || js.isUndefined(fields) then Left(SaferisError.Unexpected("query result has no fields"))
     else
@@ -142,19 +147,20 @@ private[pg] object PgWire:
       val oids   = Array.tabulate(width)(i => fields(i).dataTypeID.toInt)
       val grid   = result.rows
       if grid == null || js.isUndefined(grid) then Right(Chunk.empty)
-      else readGrid(labels, oids, grid)
+      else readGrid(labels, oids, grid, columns)
   end readFields
 
   private def readGrid(
       labels: Chunk[ColumnName],
       oids: Array[Int],
       grid: js.Array[js.Array[js.UndefOr[String]]],
+      columns: ResultColumns,
   ): Either[SaferisError, Chunk[SqlRow]] =
     val rows                         = Chunk.newBuilder[SqlRow]
     var index                        = 0
     var failed: Option[SaferisError] = None
     while index < grid.length && failed.isEmpty do
-      readRow(labels, oids, grid(index)) match
+      readRow(labels, oids, grid(index), columns) match
         case Left(err)  => failed = Some(err)
         case Right(row) => rows += row
       index += 1
@@ -165,6 +171,7 @@ private[pg] object PgWire:
       labels: Chunk[ColumnName],
       oids: Array[Int],
       row: js.Array[js.UndefOr[String]],
+      columns: ResultColumns,
   ): Either[SaferisError, SqlRow] =
     if row.length != oids.length then
       Left(
@@ -175,11 +182,12 @@ private[pg] object PgWire:
         )
       )
     else
-      val cells = (0 until oids.length).foldLeft[Either[SaferisError, Chunk[SqlValue]]](Right(Chunk.empty)):
+      val keep  = ResultColumns.indexes(labels, columns)
+      val cells = keep.foldLeft[Either[SaferisError, Chunk[SqlValue]]](Right(Chunk.empty)):
         case (Left(err), _)  => Left(err)
         case (Right(acc), i) =>
           readCell(oids(i), labels(i), row(i)).map(acc :+ _)
-      cells.map(values => SqlRow(labels, values))
+      cells.map(values => SqlRow(keep.map(labels(_)), values))
 
   private def fieldName(field: PgField): ColumnName =
     val name = field.name

@@ -28,6 +28,17 @@ object QuerySpecs extends ZIOSpecDefault:
   @tableName("categories")
   final case class Category(@generated @key id: Int, name: String) derives Table
 
+  @tableName("users_partial")
+  @projectColumns
+  final case class PartialUser(@key id: Int, name: String) derives Table
+
+  @tableName("details")
+  final case class Detail(@key id: Int, userId: Int, note: String) derives Table
+
+  @tableName("details_partial")
+  @projectColumns
+  final case class DetailPartial(@key id: Int, note: String) derives Table
+
   val spec = suite("Unified Query API")(
     suite("Query1 - Single table")(
       test("Query[A] creates aliased table query") {
@@ -700,6 +711,73 @@ object QuerySpecs extends ZIOSpecDefault:
           !sql.contains("prd.foo_ref"),
           sql.contains("name"),
           sql.contains("\"prd\".\"foo\""),
+        )
+      },
+    ),
+    suite("projectColumns")(
+      test("an annotated table lists its columns in field order") {
+        val sql = Query[PartialUser].all.build.sql
+        assertTrue(
+          sql == "select \"users_partial_ref_1\".\"id\", \"users_partial_ref_1\".\"name\" from \"users_partial\" as \"users_partial_ref_1\""
+        )
+      },
+      test("a join projects the annotated side and keeps alias star for the other") {
+        val sql = Query[PartialUser]
+          .innerJoin[Detail]
+          .on(_.id)
+          .eq(_.userId)
+          .endJoin
+          .all
+          .build
+          .sql
+        assertTrue(
+          sql == "select \"users_partial_ref_1\".\"id\", \"users_partial_ref_1\".\"name\", \"details_ref_1\".* from \"users_partial\" as \"users_partial_ref_1\" inner join \"details\" as \"details_ref_1\" on \"users_partial_ref_1\".\"id\" = \"details_ref_1\".\"userId\""
+        )
+      },
+      test("a join of two annotated tables lists both and has no star") {
+        val sql = Query[PartialUser]
+          .innerJoin[DetailPartial]
+          .on(_.id)
+          .eq(_.id)
+          .endJoin
+          .all
+          .build
+          .sql
+        assertTrue(
+          sql == "select \"users_partial_ref_1\".\"id\", \"users_partial_ref_1\".\"name\", \"details_partial_ref_1\".\"id\", \"details_partial_ref_1\".\"note\" from \"users_partial\" as \"users_partial_ref_1\" inner join \"details_partial\" as \"details_partial_ref_1\" on \"users_partial_ref_1\".\"id\" = \"details_partial_ref_1\".\"id\"",
+          !sql.contains("*"),
+        )
+      },
+      test("an explicit select stays the bare column list") {
+        val sql = Query[PartialUser].select(_.id).build.sql
+        assertTrue(
+          sql.startsWith("select \"id\" from \"users_partial\""),
+          !sql.contains("*"),
+        )
+      },
+      test("getByKey on an annotated table lists its columns") {
+        val plain   = Table[PartialUser].getByKey(1).sql
+        val aliased = (Table[PartialUser] as "u").getByKey(1).sql
+        assertTrue(
+          plain == "select \"id\", \"name\" from \"users_partial\" where \"id\" = $1",
+          aliased == "select \"u\".\"id\", \"u\".\"name\" from \"users_partial\" as \"u\" where \"u\".\"id\" = $1",
+        )
+      },
+      test("an annotated derived table lists its columns and leaves the inner star") {
+        @tableName("paid_orders")
+        @projectColumns
+        final case class Paid(userId: Int, amount: BigDecimal) derives Table
+
+        val sql = Query
+          .from(Query[Order].where(_.status).eq("paid").selectAll[Paid], "paid_summary")
+          .all
+          .build
+          .sql
+        assertTrue(
+          sql.startsWith(
+            "select \"paid_summary\".\"userId\", \"paid_summary\".\"amount\" from (select * from \"orders\" as \"orders_ref_1\" where"
+          ),
+          sql.contains(") as \"paid_summary\""),
         )
       },
     ),

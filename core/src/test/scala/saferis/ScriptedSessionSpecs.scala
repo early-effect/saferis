@@ -1,5 +1,7 @@
 package saferis
 
+import scala.annotation.unused
+
 import zio.*
 import zio.test.*
 
@@ -69,7 +71,7 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
         script = new Script(log, failCommit = false, failCursor = true)
         exit <- transact(
           ZIO.serviceWithZIO[SqlSession]: session =>
-            val read: SqlRow => Either[SaferisError, Int] = _ => Right(1)
+            val read = RowRead.all[Int](_ => Right(1))
             session
               .stream(SqlCommand(Chunk(SqlPiece.Text(SqlText("stream-boom"))), None))(read)
               .runDrain
@@ -89,7 +91,7 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
         script = new Script(log, failCommit = false, failCursor = true)
         exit <- transact(
           ZIO.serviceWithZIO[SqlSession]: session =>
-            val read: SqlRow => Either[SaferisError, Int] = _ => Right(1)
+            val read = RowRead.all[Int](_ => Right(1))
             session.stream(SqlCommand(Chunk(SqlPiece.Text(SqlText("stream-boom"))), None))(read).runDrain
         ).provide(ZLayer.succeed(SqlSession.pooled(ZIO.succeed(script)))).exit
         calls <- log.get
@@ -121,13 +123,13 @@ object ScriptedSessionSpecs extends ZIOSpecDefault:
           .unit
           .as(1L)
 
-    def query(command: SqlCommand): IO[SaferisError, Chunk[SqlRow]] =
+    def query(command: SqlCommand, @unused columns: ResultColumns): IO[SaferisError, Chunk[SqlRow]] =
       note(s"query:${command.inspection}").as(Chunk.empty)
 
-    def queryAtMostOne(command: SqlCommand): IO[SaferisError, Option[SqlRow]] =
+    def queryAtMostOne(command: SqlCommand, @unused columns: ResultColumns): IO[SaferisError, Option[SqlRow]] =
       note(s"one:${command.inspection}").as(None)
 
-    def cursor(command: SqlCommand): zio.stream.ZStream[Any, SaferisError, SqlRow] =
+    def cursor(command: SqlCommand, @unused columns: ResultColumns): zio.stream.ZStream[Any, SaferisError, SqlRow] =
       zio.stream.ZStream.unwrap:
         note(s"cursor:${command.inspection}").as:
           if failCursor then

@@ -23,30 +23,25 @@ private final class PooledSession(
     val cmd = applied(command)
     on(_.execute(cmd))
 
-  def query[A](command: SqlCommand)(
-      read: SqlRow => Either[SaferisError, A]
-  ): IO[SaferisError, Chunk[A]] =
+  def query[A](command: SqlCommand)(read: RowRead[A]): IO[SaferisError, Chunk[A]] =
     val cmd = applied(command)
-    on(_.query(cmd)).flatMap(rows => ZIO.fromEither(decode(rows, read)))
+    on(_.query(cmd, read.columns)).flatMap(rows => ZIO.fromEither(decode(rows, read.decode)))
 
-  def queryAtMostOne[A](command: SqlCommand)(
-      read: SqlRow => Either[SaferisError, A]
-  ): IO[SaferisError, Option[A]] =
+  def queryAtMostOne[A](command: SqlCommand)(read: RowRead[A]): IO[SaferisError, Option[A]] =
     val cmd = applied(command)
-    on(_.queryAtMostOne(cmd)).flatMap:
+    on(_.queryAtMostOne(cmd, read.columns)).flatMap:
       case None      => ZIO.succeed(None)
-      case Some(row) => ZIO.fromEither(read(row).map(Some(_)))
+      case Some(row) => ZIO.fromEither(read.decode(row).map(Some(_)))
 
-  def stream[A](command: SqlCommand)(
-      read: SqlRow => Either[SaferisError, A]
-  ): ZStream[Any, SaferisError, A] =
+  def stream[A](command: SqlCommand)(read: RowRead[A]): ZStream[Any, SaferisError, A] =
     val cmd = applied(command)
     ZStream.unwrapScoped:
       lease match
         case Some(connection) =>
-          ZIO.succeed(connection.cursor(cmd).mapZIO(row => ZIO.fromEither(read(row))))
+          ZIO.succeed(connection.cursor(cmd, read.columns).mapZIO(row => ZIO.fromEither(read.decode(row))))
         case None =>
-          checkout.map(connection => connection.cursor(cmd).mapZIO(row => ZIO.fromEither(read(row))))
+          checkout.map: connection =>
+            connection.cursor(cmd, read.columns).mapZIO(row => ZIO.fromEither(read.decode(row)))
   end stream
 
   def transact[R, A](body: ZIO[SqlSession & R, SaferisError, A]): ZIO[R, SaferisError, A] =

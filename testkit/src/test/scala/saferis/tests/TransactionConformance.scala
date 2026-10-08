@@ -17,7 +17,7 @@ object TransactionConformance:
     test("a one second cap cancels a long statement"):
       for
         command <- statement.withTimeout(1.second).toCommand
-        exit    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(_ => Right(()))).exit
+        exit    <- ZIO.serviceWithZIO[SqlSession](_.query(command)(RowRead.all(_ => Right(())))).exit
       yield assertTrue:
         exit match
           case Exit.Failure(cause) =>
@@ -81,7 +81,7 @@ object TransactionConformance:
               _       <- sql"insert into conformance_stream_abort (id) values (1)".dml
               command <- sql"select * from conformance_stream_missing".toCommand
               _       <- ZIO.serviceWithZIO[SqlSession]: session =>
-                session.stream(command)(_ => Right(())).runDrain
+                session.stream(command)(RowRead.all(_ => Right(()))).runDrain
             yield 1
           ).exit
           count <- sql"select count(*) from conformance_stream_abort".queryValue[Long]

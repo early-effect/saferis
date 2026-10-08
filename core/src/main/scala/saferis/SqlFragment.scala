@@ -73,7 +73,7 @@ final class SqlFragment private (
   inline def queryValue[A](using
       decoder: RowDecoder[A]
   )(using Dialect)(using Trace): ZIO[SqlSession, SaferisError, Option[A]] =
-    val read: SqlRow => Either[SaferisError, A] = row =>
+    val read = RowRead.all: (row: SqlRow) =>
       decoder
         .decode(row)
         .left
@@ -160,15 +160,21 @@ object SqlFragment:
     new SqlFragment(SqlPieces.merge(b.result()), issues.result(), timeout)
   end interpolate
 
-  inline def readTable[E](using table: Table[E]): SqlRow => Either[SaferisError, E] = row =>
-    val decoded = table.columns.foldLeft[Either[SaferisError, List[(String, Any)]]](Right(Nil)): (acc, col) =>
-      acc.flatMap(pairs => col.read(row).map(pair => pair :: pairs))
-    decoded.flatMap: pairs =>
-      Macros
-        .make[E](pairs.reverse)
-        .left
-        .map: err =>
-          SaferisError.DecodingError(ColumnName(table.name), TypeName("row"), err)
+  inline def readTable[E](using table: Table[E]): RowRead[E] =
+    val labels = Chunk.fromIterable(table.columns.map(_.label))
+    RowRead(
+      ResultColumns.Labels(labels),
+      row =>
+        val decoded = table.columns.foldLeft[Either[SaferisError, List[(String, Any)]]](Right(Nil)): (acc, col) =>
+          acc.flatMap(pairs => col.read(row).map(pair => pair :: pairs))
+        decoded.flatMap: pairs =>
+          Macros
+            .make[E](pairs.reverse)
+            .left
+            .map: err =>
+              SaferisError.DecodingError(ColumnName(table.name), TypeName("row"), err),
+    )
+  end readTable
 
   /** `String.stripMargin`, walking text only. A parameter is content, so it ends the margin scan for that line. */
   private def stripPieces(pieces: Chunk[SqlPiece], marginChar: Char): Chunk[SqlPiece] =

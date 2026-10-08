@@ -12,7 +12,7 @@ final case class SqlRow(labels: Chunk[ColumnName], cells: Chunk[SqlValue]):
 
   /** Case-insensitive first match, which is what `ResultSet.getString(label)` does. */
   def get(label: ColumnName): Either[DecodeError, SqlValue] =
-    val index = labels.indexWhere(_.equalsIgnoreCase(label))
+    val index = labels.indexWhere(_.matchesLabel(label))
     if index < 0 then Left(DecodeError.MissingColumn(label))
     else at(index)
 end SqlRow

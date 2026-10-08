@@ -4,9 +4,17 @@ import scala.annotation.StaticAnnotation
 
 final case class tableName(name: String) extends StaticAnnotation
 
+/** Select this table's named columns instead of `*`. A table without it still renders `select *`. The flag is a
+  * select-list policy: insert, update, and schema verify still use [[Table.columns]].
+  */
+class projectColumns extends StaticAnnotation
+
 sealed trait Table[A]:
   private[saferis] def name: TableName
   def columns: Seq[Column[?]]
+
+  /** True when the case class carries [[projectColumns]]. */
+  def projectColumns: Boolean
   private[saferis] def columnMap: Map[String, Column[?]]       = columns.map(c => (c.name: String) -> c).toMap
   transparent inline def instance                              = Macros.instanceOf[A](alias = None)
   transparent inline def aliasedInstance(inline alias: String) =
@@ -78,9 +86,13 @@ object Table:
   transparent inline def apply[A](inline alias: String)(using table: Table[A]) =
     table.aliasedInstance(alias)
 
-  final case class Derived[A](name: TableName, columns: Seq[Column[?]]) extends Table[A]
+  final case class Derived[A](
+      name: TableName,
+      columns: Seq[Column[?]],
+      projectColumns: Boolean = false,
+  ) extends Table[A]
 
   inline def derived[A]: Table[A] =
-    Derived[A](Macros.nameOf[A], Macros.columnsOf[A])
+    Derived[A](Macros.nameOf[A], Macros.columnsOf[A], Macros.projectsColumns[A])
 
 end Table

@@ -29,6 +29,10 @@ object QueryBuilder extends SaferisDocSpecSuite:
   @tableName("qb_page_articles")
   case class Article(@generated @key id: Long, title: String, views: Int, published: Boolean) derives Table
 
+  @tableName("qb_run_ids")
+  @projectColumns
+  case class RunId(@key id: Long, startedAt: String) derives Table
+
   val articles = Table[Article]
 
   @tableName("qb_exec_users")
@@ -107,6 +111,20 @@ Query[SafetyUser].build
       }.assert(sql =>
         assertTrue(
           sql.toLowerCase.contains("order") && sql.toLowerCase.contains("limit") && sql.toLowerCase.contains("offset")
+        )
+      ),
+    ),
+    section("Columns the table names")(
+      md"""An unannotated table renders `select *`. That is the right statement when the case class maps the table.
+
+`@projectColumns` is for a case class that names a few columns of a wider table. The builder lists those columns, in field order, qualified by the table alias. A joined table without the annotation stays `alias.*`. An explicit `.select` still wins, and it stays a bare column list.
+
+The annotation is only a select list. Insert, update, and schema verify do not look at it. A `sql"select *"` you wrote is left as you wrote it. The driver still reads only the columns the row type names, so an extra result column is never decoded.""",
+      exampleValue {
+        Query[RunId].all.build.sql
+      }.assert(sql =>
+        assertTrue(
+          sql == """select "qb_run_ids_ref_1"."id", "qb_run_ids_ref_1"."startedAt" from "qb_run_ids" as "qb_run_ids_ref_1""""
         )
       ),
     ),

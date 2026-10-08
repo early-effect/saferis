@@ -21,6 +21,21 @@ object Macros:
       .getOrElse('{ TableName(${ Expr(tpe.typeSymbol.name) }) })
   end nameOfImpl
 
+  private[saferis] inline def projectsColumns[A]: Boolean = ${ projectsColumnsImpl[A] }
+
+  private def projectsColumnsImpl[A: Type](using Quotes): Expr[Boolean] =
+    import quotes.reflect.*
+    val annot = TypeRepr.of[projectColumns].typeSymbol
+    val has   = TypeRepr.of[A].typeSymbol.annotations.exists(term => annotationSymbol(term) == annot)
+    Expr(has)
+
+  private def annotationSymbol(using Quotes)(term: quotes.reflect.Term): quotes.reflect.Symbol =
+    import quotes.reflect.*
+    term match
+      case Apply(Select(New(tpt), _), _) => tpt.tpe.typeSymbol
+      case Select(New(tpt), _)           => tpt.tpe.typeSymbol
+      case other                         => other.tpe.typeSymbol
+
   private[saferis] inline def columnsOf[A]: Seq[Column[?]] = ${ columnsOfImpl[A] }
 
   // Scala field names that cannot be used because they would shadow Selectable trait methods
