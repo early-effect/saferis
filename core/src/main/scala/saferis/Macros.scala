@@ -428,11 +428,7 @@ object Macros:
         $args.toMap
           .get($name)
           .map(_.asInstanceOf[t])
-          .toRight(
-            DecodeError(
-              s"Error constructing instance of ${$typeNameExpr}. Could not find value for parameter ${$name}"
-            )
-          )
+          .toRight(DecodeError.MissingField($typeNameExpr, $name))
       }
     end read
 
@@ -459,9 +455,7 @@ object Macros:
       val values = $args
       if values.length != $expected then
         Left(
-          DecodeError(
-            s"wrong arity constructing ${$typeNameExpr}: expected ${$expected} values, got ${values.length}"
-          )
+          DecodeError.Arity($typeNameExpr, $expected, values.length)
         )
       else $built
     }

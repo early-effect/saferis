@@ -1,6 +1,7 @@
 package saferis.pg
 
 import saferis.ColumnName
+import saferis.DecodeError
 import saferis.SaferisError
 import saferis.SqlCommand
 import saferis.SqlPiece
@@ -170,7 +171,7 @@ private[pg] object PgWire:
         SaferisError.DecodingError(
           ColumnName(""),
           TypeName("row"),
-          s"width ${row.length} does not match ${oids.length} fields",
+          DecodeError.Width(oids.length, row.length),
         )
       )
     else
@@ -194,7 +195,7 @@ private[pg] object PgWire:
           .decode(oid, text)
           .left
           .map: detail =>
-            SaferisError.DecodingError(label, PgText.typeLabel(oid), detail)
+            SaferisError.DecodingError(label, PgText.typeLabel(oid), DecodeError.Unparsed(detail))
 
   private def bind(value: SqlValue): js.Any = value match
     case SqlValue.Null(_)            => jsNull

@@ -127,7 +127,10 @@ private object SqliteAdapter extends StandardJdbcAdapter:
       case None       => Right(SqlValue.Null(tpe))
       case Some(text) =>
         try Right(build(text))
-        catch case NonFatal(e) => Left(SaferisError.DecodingError(column.label, column.typeName, e.getMessage))
+        catch
+          case NonFatal(e) =>
+            val detail = Option(e.getMessage).filter(_.nonEmpty).getOrElse("unparsed value")
+            Left(SaferisError.DecodingError(column.label, column.typeName, DecodeError.Unparsed(detail)))
 
   /** SQLite has result codes, not SQLSTATEs. The driver's SQLSTATE, if any, stays on the error. */
   override def serverError(e: SQLException): ServerError =

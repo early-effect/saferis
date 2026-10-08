@@ -78,7 +78,7 @@ jobs:
           sbt-disk-cache: "false"
           cache-mode: save
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
-          cache-epoch: "74dfd5301d854a64"
+          cache-epoch: "4b6abc977499fb77"
       - name: cache-rehydrate
         run: sbt 'Test/compile'
   test:
@@ -105,7 +105,7 @@ jobs:
           sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
-          cache-epoch: "74dfd5301d854a64"
+          cache-epoch: "4b6abc977499fb77"
       - name: Pre-pull Postgres image
         run: |
           set -euo pipefail
@@ -170,7 +170,7 @@ jobs:
           sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
-          cache-epoch: "74dfd5301d854a64"
+          cache-epoch: "4b6abc977499fb77"
       - name: fmt
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -203,7 +203,7 @@ jobs:
           sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
-          cache-epoch: "74dfd5301d854a64"
+          cache-epoch: "4b6abc977499fb77"
       - name: workflow-check
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -236,7 +236,7 @@ jobs:
           sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
-          cache-epoch: "74dfd5301d854a64"
+          cache-epoch: "4b6abc977499fb77"
       - name: advisories
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
@@ -273,7 +273,7 @@ jobs:
           sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
-          cache-epoch: "74dfd5301d854a64"
+          cache-epoch: "4b6abc977499fb77"
       - name: Fetch PR base SHA
         run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
       - name: modver-suggest
@@ -311,7 +311,7 @@ jobs:
           sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
-          cache-epoch: "74dfd5301d854a64"
+          cache-epoch: "4b6abc977499fb77"
       - name: Fetch PR base SHA
         run: git fetch --no-tags origin "$ZIPX_MODVER_BASE_SHA"
       - name: modver-check
@@ -347,7 +347,7 @@ jobs:
           sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
-          cache-epoch: "74dfd5301d854a64"
+          cache-epoch: "4b6abc977499fb77"
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -422,7 +422,7 @@ jobs:
           sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
-          cache-epoch: "74dfd5301d854a64"
+          cache-epoch: "4b6abc977499fb77"
       - name: snapshots
         run: sbt 'zipxSnapshotPublish'
   snapshots-pr:
@@ -451,7 +451,7 @@ jobs:
           sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
-          cache-epoch: "74dfd5301d854a64"
+          cache-epoch: "4b6abc977499fb77"
       - name: snapshots-pr
         run: sbt 'zipxSnapshotPublish pr'
   github-packages:
@@ -483,7 +483,7 @@ jobs:
           sbt-disk-cache: "false"
           cache-mode: restore
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
-          cache-epoch: "74dfd5301d854a64"
+          cache-epoch: "4b6abc977499fb77"
       - name: github-packages
         run: sbt 'core/publish; coreJS/publish; coreNative/publish; postgres/publish; postgresJS/publish; postgresNative/publish; jdbc/publish; pgJS/publish; h2Jdbc/publish; mysqlJdbc/publish; postgresJdbc/publish; sqliteJdbc/publish'
   docs:

@@ -79,7 +79,7 @@ final class SqlFragment private (
         .left
         .map: err =>
           val column = if row.width == 1 then row.labels.headOption.getOrElse("0") else "0"
-          SaferisError.DecodingError(ColumnName(column), TypeName("value"), err.detail)
+          SaferisError.DecodingError(ColumnName(column), TypeName("value"), err)
     for
       command <- toCommand
       row     <- ZIO.serviceWithZIO[SqlSession](_.queryAtMostOne(command)(read))
@@ -168,7 +168,7 @@ object SqlFragment:
         .make[E](pairs.reverse)
         .left
         .map: err =>
-          SaferisError.DecodingError(ColumnName(table.name), TypeName("row"), err.detail)
+          SaferisError.DecodingError(ColumnName(table.name), TypeName("row"), err)
 
   /** `String.stripMargin`, walking text only. A parameter is content, so it ends the margin scan for that line. */
   private def stripPieces(pieces: Chunk[SqlPiece], marginChar: Char): Chunk[SqlPiece] =

@@ -58,8 +58,9 @@ object SaferisError:
 
   final case class ConnectionError(message: String) extends SaferisError
 
-  final case class DecodingError(columnName: ColumnName, expectedType: TypeName, detail: String) extends SaferisError:
-    def message = s"Failed to decode column '$columnName' as $expectedType: $detail"
+  final case class DecodingError(columnName: ColumnName, expectedType: TypeName, reason: DecodeError)
+      extends SaferisError:
+    def message = s"Failed to decode column '$columnName' as $expectedType: ${reason.message}"
 
   final case class EncodingError(parameterIndex: Int, detail: String) extends SaferisError:
     def message = s"Failed to encode parameter at index $parameterIndex: $detail"

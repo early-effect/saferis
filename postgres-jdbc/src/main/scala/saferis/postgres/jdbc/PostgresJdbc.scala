@@ -125,7 +125,12 @@ private object PostgresAdapter extends StandardJdbcAdapter:
         Option(rs.getString(column.index)) match
           case None       => Right(SqlValue.Null(tpe))
           case Some(text) =>
-            PgText.decode(oid, text).left.map(detail => SaferisError.DecodingError(column.label, name, detail))
+            PgText
+              .decode(oid, text)
+              .left
+              .map: detail =>
+                SaferisError.DecodingError(column.label, name, DecodeError.Unparsed(detail))
+    end match
   end readArray
 
   /** `createArrayOf` needs a name the server resolves. An array of a type known only by OID has none. */
