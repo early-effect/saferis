@@ -62,9 +62,9 @@ object BuildSite extends DocsSite:
 
   def pages: Vector[DocPage] = siteNav.pages
 
-  override def site: SiteModel =
+  override def site(settings: DocsSettings): SiteModel =
     EarlyEffectTheme
-      .brand(super.site)
+      .brand(super.site(settings))
       .copy(
         nav = Some(siteNav),
         pages = siteNav.pages,
@@ -79,7 +79,7 @@ a live PostgreSQL database (Testcontainers) when the site is built.
   override def layers: ZLayer[Any, Nothing, SiteBuilder] =
     EarlyEffectTheme.layers
 
-  override def afterBuild(out: Path, result: SiteOutput): Task[Unit] =
+  override def afterBuild(out: Path, result: SiteOutput): IO[SiteError, Unit] =
     val _ = result
     EarlyEffectTheme.writeLogo(out)
 end BuildSite
