@@ -7,31 +7,30 @@ import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.test.*
 
+/** Install coordinate. Judge the raw build version. Do not trust `displayVersion` after `-ci` was stripped. */
+object DocsVersion:
+  /** Last published tag. */
+  val published = "0.20.0"
+
+  /** A dynver distance (`-ci`, `+`, `SNAPSHOT`) is the next line. Anything else is advertised as written. */
+  def advertise(raw: String): String =
+    val trimmed  = raw.trim
+    val distance = trimmed.contains("-ci") || trimmed.contains("+") || trimmed.contains("SNAPSHOT")
+    if trimmed.nonEmpty && !distance then trimmed else published
+
+  /** `specular.meta.version` is the raw build version. Absent in unit tests, so those use [[published]]. */
+  def version: String =
+    sys.props.get("specular.meta.version").map(advertise).getOrElse(published)
+end DocsVersion
+
 /** The site front. Specular still emits a summary index; [[BuildSite]] copies this page over it. */
 object Front extends DocSpecSuite:
 
-  /** Release coordinate. The site JVM passes `specular.meta.displayVersion` when that value is installable. */
-  private object Install:
-    /** Last published tag. Used when the build version is a snapshot or a dynver distance. */
-    private val published = "0.20.0"
-
-    val version: String =
-      released(sys.props.get("specular.meta.displayVersion"))
-        .orElse(released(sys.props.get("specular.meta.version")))
-        .getOrElse(published)
-
-    val coordinate: String =
-      s"""libraryDependencies ++= Seq(
-         |  "rocks.earlyeffect" %% "saferis" % "$version",
-         |  "rocks.earlyeffect" %% "saferis-postgres-jdbc" % "$version",
-         |)""".stripMargin
-
-    private def released(raw: Option[String]): Option[String] =
-      raw.map(_.trim).filter(_.nonEmpty).filter(isRelease)
-
-    private def isRelease(raw: String): Boolean =
-      !raw.contains("SNAPSHOT") && !raw.contains("-ci") && !raw.contains("+")
-  end Install
+  private val coordinate: String =
+    s"""libraryDependencies ++= Seq(
+       |  "rocks.earlyeffect" %% "saferis" % "${DocsVersion.version}",
+       |  "rocks.earlyeffect" %% "saferis-postgres-jdbc" % "${DocsVersion.version}",
+       |)""".stripMargin
 
   private val orders =
     Mermaid("""erDiagram
@@ -143,7 +142,7 @@ val refused: Dialect & ReturningSupport = summon[Dialect]
       md"""The coordinate is the release this site advertises.
 
 ```scala
-${Install.coordinate}
+${coordinate}
 ```
 """
     ),
@@ -159,17 +158,20 @@ ${Install.coordinate}
     suite("Injection is a type error")(
       super.spec,
       test("install coordinate is a release") {
-        val version = Install.version
-        val line    = Install.coordinate
+        val version = DocsVersion.version
         assertTrue(
-          line.contains(version),
-          line.contains("rocks.earlyeffect"),
-          line.contains("%% \"saferis\""),
-          line.contains("saferis-postgres-jdbc"),
+          coordinate.contains(version),
+          coordinate.contains("rocks.earlyeffect"),
+          coordinate.contains("%% \"saferis\""),
+          coordinate.contains("saferis-postgres-jdbc"),
           !version.contains("-ci"),
           !version.contains("SNAPSHOT"),
-          !line.contains("-ci"),
-          !line.contains("SNAPSHOT"),
+          !coordinate.contains("-ci"),
+          !coordinate.contains("SNAPSHOT"),
+          DocsVersion.advertise("0.21.0-ci") == DocsVersion.published,
+          DocsVersion.advertise("0.20.0+7-abcdef") == DocsVersion.published,
+          DocsVersion.advertise("0.21.0-SNAPSHOT") == DocsVersion.published,
+          DocsVersion.advertise("0.20.0") == "0.20.0",
         )
       },
     )
