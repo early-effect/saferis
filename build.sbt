@@ -397,7 +397,15 @@ lazy val docs = project
     specularMetaProject   := Some(LocalProject("core")),
     specularArtifactKind  := "library",
     specularSiteDirectory := (ThisBuild / baseDirectory).value / "target" / "site",
-    // CI docs builds are dynver `-ci`; stripCi drops the suffix so install snippets show the last published tag.
-    specularDisplayVersion := stripCi,
+    // Do not strip -ci first. sbt-dynver-ci names the distance past v0.20.0 as 0.21.0-ci, and
+    // stripping that suffix yields 0.21.0, the next line, not a coordinate a reader can resolve.
+    // A raw version that contains -ci, +, or SNAPSHOT advertises the last published tag.
+    specularDisplayVersion := { raw =>
+      val distance = raw.contains("-ci") || raw.contains("+") || raw.contains("SNAPSHOT")
+      if raw.nonEmpty && !distance then raw else "0.20.0"
+    },
+    // Docs project only. The published artifacts do not depend on mermoid.
+    // sbt-scalajs 1.22 does not define %%%. On this JVM project %% is mermoid-ascent_3.
+    libraryDependencies += "rocks.earlyeffect" %% "mermoid-ascent" % "0.2.0",
     scalacOptions ~= (_.filterNot(_ == "-Wunused:all")),
   )

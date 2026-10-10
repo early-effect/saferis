@@ -3,9 +3,9 @@
 [![Scala CI](https://github.com/russwyte/saferis/actions/workflows/scala.yml/badge.svg)](https://github.com/russwyte/saferis/actions/workflows/scala.yml)
 [![Maven Repository](https://img.shields.io/maven-central/v/rocks.earlyeffect/saferis_3?logo=apachemaven)](https://mvnrepository.com/artifact/rocks.earlyeffect/saferis)
 
-*The name is derived from 'safe' and 'eris' (Greek for 'strife' or 'discord')*
+Injection is a type error.
 
-**Saferis mitigates the discord of unsafe SQL.** A type-safe, resource-safe SQL client library for Scala 3 and ZIO.
+[Docs](https://www.earlyeffect.rocks/saferis/)
 
 ## Key Features
 
