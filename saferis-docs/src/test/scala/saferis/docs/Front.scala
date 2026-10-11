@@ -7,16 +7,14 @@ import specular.*
 import specular.ziotest.DocSpecSuite
 import zio.test.*
 
-/** Install coordinate. Judge the raw build version. Do not trust `displayVersion` after `-ci` was stripped. */
+/** Install coordinate. Always the last published tag. A bare next version is not on Central. */
 object DocsVersion:
-  /** Last published tag. */
+  /** Last published tag. Update this in the release commit. */
   val published = "0.20.0"
 
-  /** A dynver distance (`-ci`, `+`, `SNAPSHOT`) is the next line. Anything else is advertised as written. */
+  /** Returns [[published]]. A bare next version, `-ci`, `+`, and `SNAPSHOT` are unpublished. */
   def advertise(raw: String): String =
-    val trimmed  = raw.trim
-    val distance = trimmed.contains("-ci") || trimmed.contains("+") || trimmed.contains("SNAPSHOT")
-    if trimmed.nonEmpty && !distance then trimmed else published
+    if raw.trim == published then published else published
 
   /** `specular.meta.version` is the raw build version. Absent in unit tests, so those use [[published]]. */
   def version: String =
@@ -160,6 +158,7 @@ ${coordinate}
       test("install coordinate is a release") {
         val version = DocsVersion.version
         assertTrue(
+          version == DocsVersion.published,
           coordinate.contains(version),
           coordinate.contains("rocks.earlyeffect"),
           coordinate.contains("%% \"saferis\""),
@@ -168,10 +167,10 @@ ${coordinate}
           !version.contains("SNAPSHOT"),
           !coordinate.contains("-ci"),
           !coordinate.contains("SNAPSHOT"),
+          DocsVersion.advertise("0.21.0") == DocsVersion.published,
           DocsVersion.advertise("0.21.0-ci") == DocsVersion.published,
-          DocsVersion.advertise("0.20.0+7-abcdef") == DocsVersion.published,
-          DocsVersion.advertise("0.21.0-SNAPSHOT") == DocsVersion.published,
-          DocsVersion.advertise("0.20.0") == "0.20.0",
+          DocsVersion.advertise("0.20.0+1-abc") == DocsVersion.published,
+          DocsVersion.advertise(DocsVersion.published) == DocsVersion.published,
         )
       },
     )
