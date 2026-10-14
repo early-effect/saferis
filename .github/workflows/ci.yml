@@ -141,9 +141,9 @@ jobs:
       - name: test
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
-            sbt 'cleanFull; core/testFull; coreJS/testFull; coreNative/testFull; postgres/testFull; postgresJS/testFull; postgresNative/testFull; jdbc/testFull; postgresJdbc/testFull; mysqlJdbc/testFull; sqliteJdbc/testFull; h2Jdbc/testFull; docs/specularSite'
+            sbt 'cleanFull; core/testFull; coreJS/testFull; coreNative/testFull; postgres/testFull; postgresJS/testFull; postgresNative/testFull; jdbc/testFull; h2Jdbc/testFull; suite/testFull; docs/specularSite'
           else
-            sbt 'core/testFull; coreJS/testFull; coreNative/testFull; postgres/testFull; postgresJS/testFull; postgresNative/testFull; jdbc/testFull; postgresJdbc/testFull; mysqlJdbc/testFull; sqliteJdbc/testFull; h2Jdbc/testFull; docs/specularSite'
+            sbt 'core/testFull; coreJS/testFull; coreNative/testFull; postgres/testFull; postgresJS/testFull; postgresNative/testFull; jdbc/testFull; h2Jdbc/testFull; suite/testFull; docs/specularSite'
           fi
         env:
           ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
@@ -374,9 +374,9 @@ jobs:
       - name: test-pg
         run: |
           if [ "$ZIPX_VERIFY_CLEAN_FULL" = "true" ]; then
-            sbt 'cleanFull; pgJS/testFull; pgEsm/pgEsmProbe'
+            sbt 'cleanFull; suiteJS/testFull; pgEsm/pgEsmProbe'
           else
-            sbt 'pgJS/testFull; pgEsm/pgEsmProbe'
+            sbt 'suiteJS/testFull; pgEsm/pgEsmProbe'
           fi
         env:
           ZIPX_VERIFY_CLEAN_FULL: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'clean') }}
@@ -485,7 +485,7 @@ jobs:
           purge: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'purge') }}
           cache-epoch: "4b6abc977499fb77"
       - name: github-packages
-        run: sbt 'core/publish; coreJS/publish; coreNative/publish; postgres/publish; postgresJS/publish; postgresNative/publish; jdbc/publish; pgJS/publish; h2Jdbc/publish; mysqlJdbc/publish; postgresJdbc/publish; sqliteJdbc/publish'
+        run: sbt 'core/publish; coreJS/publish; coreNative/publish; jdbc/publish; postgres/publish; postgresJS/publish; postgresNative/publish; h2Jdbc/publish; mysqlJdbc/publish; pgJS/publish; postgresJdbc/publish; sqliteJdbc/publish'
   docs:
     name: docs
     if: ((startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch')) && (github.repository == 'early-effect/saferis')
