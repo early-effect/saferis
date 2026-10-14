@@ -67,15 +67,16 @@ object MyVersions extends ZipxVersions:
   def postgresJdbcTest = library(zioLoggingSlf4j.test, postgresqlTc.test, zioJson.test)
   def mysqlJdbcLib     = library(provided(zio), provided(zioStreams), mysql)
   def mysqlJdbcTest    = library(zioLoggingSlf4j.test, zioJson.test)
-  def sqliteJdbcLib    = library(provided(zio), provided(zioStreams), sqlite)
-  def sqliteJdbcTest   = library(zioJson.test)
-  def h2JdbcLib        = library(provided(zio), provided(zioStreams), h2)
-  def h2JdbcTest       = library(zioJson.test)
-  def pgLib    = library(provided(zio), provided(zioStreams))
-  def docsLib  = library(zio, zioStreams)
+  def sqliteJdbcLib = library(provided(zio), provided(zioStreams), sqlite)
+  def sqliteJdbcTest = library(zioJson.test)
+  def h2JdbcLib      = library(provided(zio), provided(zioStreams), h2)
+  def pgLib          = library(provided(zio), provided(zioStreams))
+  def docsLib        = library(zio, zioStreams)
   // postgresql comes from saferis-postgres-jdbc's compile dependency. A second test-scoped copy is redundant.
-  def docsTest   = library(specularZioTest, specularTheme, postgresqlTc.test, slf4jNop.test)
-  def testkitJvm     = library(postgresqlTc, mysqlTc)
-  def testkitTest    = library(zioJson.test)
+  def docsTest = library(specularZioTest, specularTheme, postgresqlTc.test, slf4jNop.test)
+
+  /** Conformance helpers use zio-test and zio-json. The module is not published, so neither is forced on a driver. */
+  def testkitLib = library(zioTest, zioJson)
+  def testkitJvm = library(postgresqlTc, mysqlTc)
   def nativeJavaTime = library(scalaJavaTime, scalaJavaTimeTzdb)
 end MyVersions

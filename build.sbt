@@ -112,10 +112,8 @@ zipxCapabilities ++= {
         LocalProject("postgresJS") / testFull,
         LocalProject("postgresNative") / testFull,
         LocalProject("jdbc") / testFull,
-        LocalProject("postgresJdbc") / testFull,
-        LocalProject("mysqlJdbc") / testFull,
-        LocalProject("sqliteJdbc") / testFull,
         LocalProject("h2Jdbc") / testFull,
+        LocalProject("suite") / testFull,
         LocalProject("docs") / specularSite,
       ),
       // GHA VMs are disposable; skip Ryuk so Hub flakes on testcontainers/ryuk cannot fail CI.
@@ -126,7 +124,7 @@ zipxCapabilities ++= {
     // The `test` job must not wait on this one.
     Capability.once(
       name = CapabilityName("test-pg"),
-      command = zipxTasks.session(LocalProject("pgJS") / testFull, LocalProject("pgEsm") / pgEsmProbe),
+      command = zipxTasks.session(LocalProject("suiteJS") / testFull, LocalProject("pgEsm") / pgEsmProbe),
       extraSteps = pgJsCiSetup ++ prePullPostgres,
       // GHA VMs are disposable; skip Ryuk so Hub flakes on testcontainers/ryuk cannot fail CI.
       env = Map("TESTCONTAINERS_RYUK_DISABLED" -> EnvValue.plain("true")),
@@ -171,7 +169,7 @@ lazy val root = project
   .aggregate(
     (core.projectRefs ++ postgres.projectRefs ++ jdbc.projectRefs ++ postgresJdbc.projectRefs ++
       mysqlJdbc.projectRefs ++ sqliteJdbc.projectRefs ++ h2Jdbc.projectRefs ++ pg.projectRefs ++ testkit.projectRefs ++
-      Seq[sbt.ProjectReference](docs, pgEsm))*
+      Seq[sbt.ProjectReference](docs, pgEsm, suite, suiteJS))*
   )
   .settings(
     name           := "saferis-root",
@@ -216,18 +214,18 @@ lazy val postgres = (projectMatrix in file("postgres"))
   .jsPlatform(scalaVersions = scalaVersions)
   .nativePlatform(scalaVersions = scalaVersions, nativeCore)
 
-// Test container and the conformance suite. Not published: it starts Docker.
+// Containers and the shared conformance suites. Not published. The driver suite depends on this.
+// Production modules do not.
 lazy val testkit = (projectMatrix in file("testkit"))
-  .dependsOn(core)
+  .dependsOn(core, postgres)
   .settings(commonSettings)
   .settings(
     name           := "saferis-testkit",
-    description    := "Postgres test container and the driver conformance suite.",
+    description    := "Postgres test container and the driver conformance suites.",
     publish / skip := true,
+    zipxPublish    := Some(false),
     MyVersions.coreLib,
-    MyVersions.coreTest,
-    MyVersions.testkitTest,
-
+    MyVersions.testkitLib,
   )
   .jvmPlatform(scalaVersions = scalaVersions, MyVersions.testkitJvm)
   .jsPlatform(
@@ -255,13 +253,10 @@ lazy val testkit = (projectMatrix in file("testkit"))
 // java.sql session. No database driver. A JdbcAdapter supplies bind, read, and errors.
 lazy val jdbc = (projectMatrix in file("jdbc"))
   .dependsOn(core)
-  // The bring-your-own-database spec runs the portable conformance suite on H2, with no Docker.
-  .dependsOn(testkit % "test->compile;test->test")
   .settings(commonSettings)
   .settings(publishSettings)
   .settings(MyVersions.jdbcLib)
   .settings(MyVersions.coreTest)
-  .settings(MyVersions.jdbcTest)
   .settings(
     name        := "saferis-jdbc",
     description := "JDBC SqlSession. Database behavior is a JdbcAdapter.",
@@ -271,12 +266,9 @@ lazy val jdbc = (projectMatrix in file("jdbc"))
 // MySQL JdbcAdapter on Connector/J. Pull this and saferis-jdbc for MySQL.
 lazy val mysqlJdbc = (projectMatrix in file("mysql-jdbc"))
   .dependsOn(jdbc)
-  .dependsOn(testkit % "test->compile;test->test")
   .settings(commonSettings)
   .settings(publishSettings)
   .settings(MyVersions.mysqlJdbcLib)
-  .settings(MyVersions.coreTest)
-  .settings(MyVersions.mysqlJdbcTest)
   .settings(
     name        := "saferis-mysql-jdbc",
     description := "MySQL JdbcAdapter on Connector/J.",
@@ -286,12 +278,10 @@ lazy val mysqlJdbc = (projectMatrix in file("mysql-jdbc"))
 // H2 JdbcAdapter and dialect. Pull this and saferis-jdbc for fast in-memory tests.
 lazy val h2Jdbc = (projectMatrix in file("h2-jdbc"))
   .dependsOn(jdbc)
-  .dependsOn(testkit % "test->compile;test->test")
   .settings(commonSettings)
   .settings(publishSettings)
   .settings(MyVersions.h2JdbcLib)
   .settings(MyVersions.coreTest)
-  .settings(MyVersions.h2JdbcTest)
   .settings(
     name        := "saferis-h2-jdbc",
     description := "H2 JdbcAdapter and dialect, for fast in-memory tests.",
@@ -301,12 +291,9 @@ lazy val h2Jdbc = (projectMatrix in file("h2-jdbc"))
 // SQLite JdbcAdapter on sqlite-jdbc. Pull this and saferis-jdbc for SQLite.
 lazy val sqliteJdbc = (projectMatrix in file("sqlite-jdbc"))
   .dependsOn(jdbc)
-  .dependsOn(testkit % "test->compile;test->test")
   .settings(commonSettings)
   .settings(publishSettings)
   .settings(MyVersions.sqliteJdbcLib)
-  .settings(MyVersions.coreTest)
-  .settings(MyVersions.sqliteJdbcTest)
   .settings(
     name        := "saferis-sqlite-jdbc",
     description := "SQLite JdbcAdapter on sqlite-jdbc.",
@@ -315,14 +302,10 @@ lazy val sqliteJdbc = (projectMatrix in file("sqlite-jdbc"))
 
 // Postgres JdbcAdapter. The only JVM module that depends on pgjdbc and saferis-postgres.
 lazy val postgresJdbc = (projectMatrix in file("postgres-jdbc"))
-  .dependsOn(jdbc)
-  .dependsOn(postgres % "compile->compile;test->test")
-  .dependsOn(testkit % "test->compile;test->test")
+  .dependsOn(jdbc, postgres)
   .settings(commonSettings)
   .settings(publishSettings)
   .settings(MyVersions.postgresJdbcLib)
-  .settings(MyVersions.coreTest)
-  .settings(MyVersions.postgresJdbcTest)
   .settings(
     name        := "saferis-postgres-jdbc",
     description := "Postgres JdbcAdapter on pgjdbc.",
@@ -331,13 +314,10 @@ lazy val postgresJdbc = (projectMatrix in file("postgres-jdbc"))
 
 // Node pg driver. Scala.js only. Depends on the core JS row and the shared Postgres codec.
 lazy val pg = (projectMatrix in file("pg"))
-  .dependsOn(core)
-  .dependsOn(postgres % "compile->compile;test->test")
-  .dependsOn(testkit % "test->compile;test->test")
+  .dependsOn(core, postgres)
   .settings(commonSettings)
   .settings(publishSettings)
   .settings(MyVersions.pgLib)
-  .settings(MyVersions.coreTest)
   .settings(
     name        := "saferis-postgres-node",
     description := "Node pg SqlSession for Postgres.",
@@ -379,6 +359,42 @@ lazy val pgEsm = project
         .!
       if code != 0 then sys.error(s"ES module load exited $code")
     },
+  )
+
+// Driver specs. Depends on the production modules and on testkit. Not published.
+lazy val suite = project
+  .in(file("suite"))
+  .dependsOn(
+    jdbc.jvm(scala3Version),
+    h2Jdbc.jvm(scala3Version),
+    mysqlJdbc.jvm(scala3Version),
+    sqliteJdbc.jvm(scala3Version),
+    postgresJdbc.jvm(scala3Version),
+    testkit.jvm(scala3Version),
+  )
+  .settings(commonSettings)
+  .settings(
+    name           := "saferis-suite",
+    publish / skip := true,
+    zipxPublish    := Some(false),
+    MyVersions.coreTest,
+    MyVersions.jdbcTest,
+    MyVersions.mysqlJdbcTest,
+    MyVersions.sqliteJdbcTest,
+    MyVersions.postgresJdbcTest,
+  )
+
+lazy val suiteJS = project
+  .in(file("suite-js"))
+  .enablePlugins(ScalaJSPlugin)
+  .dependsOn(pg.js(scala3Version), testkit.js(scala3Version))
+  .settings(commonSettings)
+  .settings(
+    name           := "saferis-suite-js",
+    publish / skip := true,
+    zipxPublish    := Some(false),
+    scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.CommonJSModule)),
+    MyVersions.coreTest,
   )
 
 lazy val docs = project
