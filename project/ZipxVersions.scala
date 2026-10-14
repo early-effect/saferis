@@ -24,7 +24,7 @@ object MyVersions extends ZipxVersions:
     "pgJS",
   )
 
-  val zio             = Lib("dev.zio", "zio", "2.1.26")
+  val zio             = Lib("dev.zio", "zio", "2.1.27")
   val zioStreams      = zio.mod("zio-streams")
   val zioJson         = Lib("dev.zio", "zio-json", "1.1.0")
   val zioTest    = zio.mod("zio-test")
@@ -40,7 +40,7 @@ object MyVersions extends ZipxVersions:
   val slf4jNop     = Lib("org.slf4j", "slf4j-nop", "2.0.20").java
   val scaluzzi     = Lib("com.github.vovapolu", "scaluzzi", "0.1.23")
 
-  val specular        = Lib("rocks.earlyeffect", "specular-core", "0.20.0")
+  val specular        = Lib("rocks.earlyeffect", "specular-core", "0.21.0")
   val specularZioTest = specular.mod("specular-zio-test").test
   val specularTheme   = specular.mod("early-effect-docs-theme").test
 
@@ -48,7 +48,7 @@ object MyVersions extends ZipxVersions:
   val mermoidAscent = Lib("rocks.earlyeffect", "mermoid-ascent", "0.2.0")
 
   val scalafmt       = Plugin("org.scalameta", "sbt-scalafmt", "2.6.2")
-  val specularPlugin = Plugin("rocks.earlyeffect", "sbt-specular", "0.20.0")
+  val specularPlugin = Plugin("rocks.earlyeffect", "sbt-specular", "0.21.0")
   val scalafix       = Plugin("ch.epfl.scala", "sbt-scalafix", "0.14.9")
   val scoverage      = Plugin("org.scoverage", "sbt-scoverage", "2.4.4")
   val scalajs        = Plugin("org.scala-js", "sbt-scalajs", "1.22.0")
