@@ -70,7 +70,6 @@ object StreamSpecs:
               .runCollect
         yield assertTrue(result.size == 10) &&
           assertTrue(rowsProcessed.get() == 10)
-        end for
       },
       test("takeWhile stops iteration when condition fails") {
         for
@@ -216,7 +215,6 @@ object StreamSpecs:
               .tap(_ => ZIO.succeed(counter.incrementAndGet()))
               .runDrain
         yield assertTrue(counter.get() == 3)
-        end for
       },
       test("stream.zipWithIndex provides correct indices") {
         for

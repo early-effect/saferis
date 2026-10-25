@@ -238,8 +238,6 @@ object PgText:
           case Some(v) => Right(SqlValue.Uuid(v))
           case None    => bad(s"not a uuid: $text")
       case _ => Right(SqlValue.Other(ServerType.Oid(oid), text))
-    end match
-  end decodeScalar
 
   /** `None` is SQL null. Null is not an empty string. */
   def encode(value: SqlValue): Option[String] = value match
@@ -289,7 +287,6 @@ object PgText:
         out.append(c)
       out.append('"')
       out.toString
-  end quoteArrayElement
 
   private def decodeArray(element: Int, text: String): Either[String, SqlValue] =
     parseArray(text).flatMap: members =>
@@ -372,12 +369,9 @@ object PgText:
           i = end + 1
         else if text.charAt(end) == ',' then i = end + 1
         else error = Some(s"bad array near $end")
-      end if
-    end while
     if error.nonEmpty then Left(error.get)
     else if !closed then Left("unclosed array")
     else Right(out.result())
-  end parseMembers
 
   /** Index after a comma, or after a closing brace. Negative on a bad character. */
   private def separator(text: String, at: Int): Int =
@@ -417,10 +411,7 @@ object PgText:
           done = true
         i += 1
       else i += 1
-      end if
-    end while
     found
-  end matchingBrace
 
   private def quoted(text: String, at: Int): Either[String, (String, Int)] =
     val out                   = new StringBuilder
@@ -440,12 +431,9 @@ object PgText:
       else
         out.append(c)
         i += 1
-      end if
-    end while
     if error.nonEmpty then Left(error.get)
     else if !closed then Left("unclosed array quote")
     else Right((out.toString, i))
-  end quoted
 
   private def encodeFloat(v: Float): String =
     if v.isNaN then "NaN"
@@ -580,10 +568,7 @@ object PgText:
               out += value.toByte
               i += 4
             case None => error = Some(s"bad bytea escape at $i")
-      end if
-    end while
     error.fold[Either[String, Chunk[Byte]]](Right(out.result()))(Left(_))
-  end decodeEscape
 
   private def octal(text: String, at: Int): Option[Int] =
     if at + 3 > text.length then None

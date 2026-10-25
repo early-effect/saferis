@@ -27,7 +27,6 @@ private[saferis] object MySQLCatalog:
             fkRows     <- run(foreignKeyQuery(table))(readForeignKey)
             indexRows  <- run(indexQuery(table))(readIndex)
           yield Some(CatalogRows.table(stored, columnRows, keyRows, uniqueRows, fkRows, indexRows))
-  end introspect
 
   private final case class ParsedName(schema: Option[String], table: String)
 

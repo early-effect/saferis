@@ -36,7 +36,6 @@ private[pg] object PgErrors:
       case None =>
         val textMessage = code.fold(message)(c => s"$message ($c)")
         ServerError(SqlCondition.Connection, textMessage)
-  end reported
 
   private def text(value: js.UndefOr[String]): Option[String] =
     value.toOption.filter(raw => raw != null && raw.nonEmpty)

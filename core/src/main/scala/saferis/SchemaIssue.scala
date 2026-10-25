@@ -42,7 +42,6 @@ object SchemaIssue:
       val expected = if expectedNullable then "nullable" else "NOT NULL"
       val actual   = if actualNullable then "nullable" else "NOT NULL"
       s"Column '$columnName' in '$tableName': expected $expected, found $actual"
-  end NullabilityMismatch
 
   /** Primary key columns do not match */
   final case class PrimaryKeyMismatch(
@@ -75,7 +74,6 @@ object SchemaIssue:
       val uniqueStr = if isUnique then "unique " else ""
       val nameStr   = expectedName.fold("")(n => s"'$n' ")
       s"Missing ${uniqueStr}index ${nameStr}on (${columns.mkString(", ")}) in table '$tableName'"
-  end MissingIndex
 
   /** Index exists on correct columns but with different name */
   final case class IndexNameMismatch(
@@ -122,7 +120,6 @@ object SchemaIssue:
     def description: String =
       val nameStr = expectedName.fold("")(n => s"'$n' ")
       s"Missing foreign key ${nameStr}(${fromColumns.mkString(", ")}) -> $toTable(${toColumns.mkString(", ")}) in table '$tableName'"
-  end MissingForeignKey
 
   /** Foreign key exists but with different name */
   final case class ForeignKeyNameMismatch(
@@ -135,5 +132,4 @@ object SchemaIssue:
   ) extends SchemaIssue:
     def description: String =
       s"Foreign key (${fromColumns.mkString(", ")}) -> $toTable in '$tableName': expected name '$expectedName', found '$actualName'"
-  end ForeignKeyNameMismatch
 end SchemaIssue

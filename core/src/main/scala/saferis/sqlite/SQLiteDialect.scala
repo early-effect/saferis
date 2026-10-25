@@ -69,7 +69,6 @@ object SQLiteDialect
     SqlText(
       s"create index$ifNotExistsClause ${escapeIdentifier(indexName)} on ${escapeIdentifier(tableName)} ($columns)$whereClause"
     )
-  end createIndexSql
 
   override def dropIndexSql(indexName: IndexName, ifExists: Boolean = false): SqlText =
     val ifExistsClause = if ifExists then "if exists " else ""

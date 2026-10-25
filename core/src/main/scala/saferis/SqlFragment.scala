@@ -84,7 +84,6 @@ final class SqlFragment private (
       command <- toCommand
       row     <- ZIO.serviceWithZIO[SqlSession](_.queryAtMostOne(command)(read))
     yield row
-  end queryValue
 
   inline def queryStream[E](using table: Table[E])(using Dialect)(using Trace): ZStream[SqlSession, SaferisError, E] =
     val read = SqlFragment.readTable[E]
@@ -158,7 +157,6 @@ object SqlFragment:
       i += 1
     if i < decoded.length then b += SqlPiece.Text(SqlText(decoded(i)))
     new SqlFragment(SqlPieces.merge(b.result()), issues.result(), timeout)
-  end interpolate
 
   inline def readTable[E](using table: Table[E]): RowRead[E] =
     val labels = Chunk.fromIterable(table.columns.map(_.label))
@@ -174,7 +172,6 @@ object SqlFragment:
             .map: err =>
               SaferisError.DecodingError(ColumnName(table.name), TypeName("row"), err),
     )
-  end readTable
 
   /** `String.stripMargin`, walking text only. A parameter is content, so it ends the margin scan for that line. */
   private def stripPieces(pieces: Chunk[SqlPiece], marginChar: Char): Chunk[SqlPiece] =

@@ -44,7 +44,6 @@ enum SqlType:
   case Uuid
   case Array(element: SqlType)
   case Other(tpe: ServerType)
-end SqlType
 
 /** A bound value. Null carries its `SqlType` so the driver can bind a typed null. */
 enum SqlValue:
@@ -168,7 +167,6 @@ object SqlValue:
       if text.toFloat == v || sig == 9 then text
       else attempt(sig + 1)
     attempt(1)
-  end shortestFloat
 
   private def hex(bytes: Chunk[Byte]): String =
     val digits = "0123456789abcdef"

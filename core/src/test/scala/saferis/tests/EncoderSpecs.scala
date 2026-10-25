@@ -64,4 +64,3 @@ object EncoderSpecs extends ZIOSpecDefault:
       )
     },
   )
-end EncoderSpecs

@@ -91,7 +91,6 @@ object SchemaValidationSpecs:
           case SchemaIssue.ExtraColumn(_, "extra_col", _) => true
           case _                                          => false
         })
-        end for
       },
       test("verify succeeds with checkExtraColumns = false") {
         val schema  = Schema[User].build
@@ -282,7 +281,6 @@ object SchemaValidationSpecs:
             )
           )
         )
-        end for
       },
     ),
     suite("Unique constraint verification")(
@@ -356,7 +354,6 @@ object SchemaValidationSpecs:
           // Minimal should pass despite missing index/constraint and extra column
           _ <- (Schema(schema).verifyWith(VerifyOptions.minimal))
         yield assertCompletes
-        end for
       }
     ),
     suite("Dialects without catalogs")(

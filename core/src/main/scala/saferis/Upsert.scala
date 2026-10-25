@@ -68,7 +68,6 @@ final case class UpsertValuesReady[A: Table](
     val fieldName = Macros.extractFieldName[A, T](selector)
     val col       = fieldNamesToColumns(fieldName)
     UpsertConflictReady(tableName, fieldNamesToColumns, allColumns, entity, Vector(col.label))
-end UpsertValuesReady
 
 // ============================================================================
 // UpsertConflictReady - Has conflict columns, needs action (doUpdateAll/doNothing)
@@ -101,7 +100,6 @@ final case class UpsertConflictReady[A: Table](
       updateColumns,
       doNothing = false,
     )
-  end doUpdateAll
 
   /** DO NOTHING - only insert if no conflict */
   def doNothing: UpsertDoNothingReady[A] =
@@ -129,8 +127,6 @@ final case class UpsertDoNothingReady[A: Table](
       .append(SqlFragment.text(" values "))
       .append(table.insertPlaceholdersSql(entity))
       .append(SqlFragment.text(s" on conflict (${Upsert.conflicts(conflictColumns)}) do nothing"))
-  end build
-end UpsertDoNothingReady
 
 // ============================================================================
 // UpsertActionReady - Has DO UPDATE, can add WHERE or build
@@ -162,7 +158,6 @@ final case class UpsertActionReady[A: Table](
       .append(table.insertPlaceholdersSql(entity))
       .append(SqlFragment.text(s" on conflict (${Upsert.conflicts(conflictColumns)}) do update set "))
       .append(updateColumns)
-  end build
 
   /** Build with RETURNING clause (no WHERE) */
   transparent inline def returning(using (Dialect & UpsertSupport & ReturningSupport)): ReturningQuery[A] =
@@ -267,7 +262,6 @@ final case class UpsertWhereReady[A: Table](
     else
       val joined = Placeholder.join(wherePredicates, " or ")
       base.append(SqlFragment.text(" where ")).append(SqlFragment(joined))
-  end build
 
   /** Build with RETURNING clause */
   transparent inline def returning(using (Dialect & UpsertSupport & ReturningSupport)): ReturningQuery[A] =

@@ -37,7 +37,6 @@ object SqlCondition:
     case Some(code) if code.isDataException                  => SqlCondition.Data
     case Some(code) if code.isSyntaxOrAccessRule             => SqlCondition.Syntax
     case _                                                   => SqlCondition.Other
-end SqlCondition
 
 /** The server's own words, copied onto a [[SaferisError]]. Classification does not rewrite them. */
 final case class ServerDetail(

@@ -165,6 +165,5 @@ trait WhereBuilderOps[Parent, T]:
             .append(SqlFragment(Placeholder.join(distinct.map(value => Placeholder.param(encoder.encode(value))))))
             .append(SqlFragment.text(")"))
     addPredicate(predicate)
-  end membership
 
 end WhereBuilderOps

@@ -51,7 +51,6 @@ sealed trait Table[A]:
       SqlFragment(column).append(SqlFragment.text(" = ")).append(SqlFragment(placeholder))
     if setClauses.isEmpty then SqlFragment.empty
     else setClauses.reduce((left, right) => left.append(SqlFragment.text(", ")).append(right))
-  end updateSetClause
 
   private[saferis] inline def updateWhereClause(a: A): SqlFragment =
     val keyPlaceholders = Macros
@@ -68,7 +67,6 @@ sealed trait Table[A]:
           whereClauses.reduce((left, right) => left.append(SqlFragment.text(" and ")).append(right))
         )
     else SqlFragment.empty
-  end updateWhereClause
 
   private def parenthesize(columns: Seq[SqlFragment]): SqlFragment =
     SqlFragment.text("(").append(joinFragments(columns)).append(SqlFragment.text(")"))

@@ -36,6 +36,7 @@ object PostgresJdbc:
 
   def layer(config: JdbcSessionConfig = JdbcSessionConfig()): URLayer[DataSource, SqlSession] =
     JdbcSession.layer(adapter, config)
+end PostgresJdbc
 
 private object PostgresAdapter extends StandardJdbcAdapter:
   private val FetchSize = 256
@@ -110,8 +111,6 @@ private object PostgresAdapter extends StandardJdbcAdapter:
       case "uuid" => ref(SqlType.Uuid, rs.getObject(i, classOf[UUID]))(SqlValue.Uuid(_))(rs)
       case array if array.startsWith("_") || array.endsWith("[]") => readArray(rs, column)
       case _                                                      => other(rs, column)
-    end match
-  end read
 
   /** Array text through `PgText`, keyed by the element's OID. An element type `PgText` does not know is `Other`. */
   private def readArray(rs: ResultSet, column: JdbcColumn): Either[SaferisError, SqlValue] =
@@ -130,8 +129,6 @@ private object PostgresAdapter extends StandardJdbcAdapter:
               .left
               .map: detail =>
                 SaferisError.DecodingError(column.label, name, DecodeError.Unparsed(detail))
-    end match
-  end readArray
 
   /** `createArrayOf` needs a name the server resolves. An array of a type known only by OID has none. */
   private def arrayTypeName(tpe: SqlType): Either[SaferisError, TypeName] =

@@ -10,6 +10,7 @@ object SqlText:
   def apply(text: String): SqlText = text
 
   val empty: SqlText = ""
+end SqlText
 
 /** A column's type as DDL spells it (`varchar(255)`, `timestamptz`), or as a catalog reports it (`int4`). */
 opaque type ColumnType <: String = String

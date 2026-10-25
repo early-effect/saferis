@@ -194,7 +194,6 @@ final case class WhereGroupOrBuilder[A: Table, T](
           case AndGroup(conds) => AndGroup(conds :+ newCondition)
           case other           => AndGroup(Vector(other, newCondition))
     WhereGroupChain(builder, combined)
-  end complete
 
   private def completeUnary(operator: Operator): WhereGroupChain[A] =
     val condition    = UnaryCondition(alias, column, operator)
@@ -210,7 +209,6 @@ final case class WhereGroupOrBuilder[A: Table, T](
           case AndGroup(conds) => AndGroup(conds :+ newCondition)
           case other           => AndGroup(Vector(other, newCondition))
     WhereGroupChain(builder, combined)
-  end completeUnary
 
   /** Equals comparison */
   def eq(value: T)(using enc: Encoder[T]): WhereGroupChain[A] =

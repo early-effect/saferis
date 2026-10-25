@@ -49,6 +49,7 @@ final case class ColumnAggregate[T](function: AggregateFunction, column: Column[
   /** Wrap the aggregate in COALESCE with a default value */
   def coalesce(default: T)(using enc: Encoder[T]): CoalesceExpr[T] =
     CoalesceExpr(this, enc.encode(default))
+end ColumnAggregate
 
 /** COALESCE wrapper for aggregate expressions */
 final case class CoalesceExpr[T](expr: AggregateExpr[T], default: SqlValue) extends AggregateExpr[T]:
@@ -115,7 +116,6 @@ final case class AggregateQuery[A, T](
     else
       val whereJoined = Placeholder.join(wherePredicates, " and ")
       head.append(SqlFragment.text(" where ")).append(SqlFragment(whereJoined))
-  end build
 
   /** Execute and return the aggregate value */
   inline def queryValue[R](using RowDecoder[R], Dialect)(using Trace): ZIO[SqlSession, SaferisError, Option[R]] =

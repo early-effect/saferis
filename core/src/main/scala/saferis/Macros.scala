@@ -19,7 +19,6 @@ object Macros:
       }
       .map(name => '{ TableName(${ Expr(name) }) })
       .getOrElse('{ TableName(${ Expr(tpe.typeSymbol.name) }) })
-  end nameOfImpl
 
   private[saferis] inline def projectsColumns[A]: Boolean = ${ projectsColumnsImpl[A] }
 
@@ -100,9 +99,7 @@ object Macros:
                         .asInstanceOf[Decoder[T]]
                     })
               case _: ImplicitSearchFailure => None
-            end match
           else None
-          end if
         }
         .orElse(
           TypeRepr.of[T].widen.asType match
@@ -138,9 +135,7 @@ object Macros:
                         .asInstanceOf[Encoder[T]]
                     })
               case _: ImplicitSearchFailure => None
-            end match
           else None
-          end if
         }
         .orElse(
           TypeRepr.of[T].widen.asType match
@@ -238,7 +233,6 @@ object Macros:
       annot.tpe <:< annotType
     }
     Expr(hasAnnot)
-  end elemHasAnnotation
 
   private def isOptionType[T: Type](using Quotes): Expr[Boolean] =
     import quotes.reflect.*
@@ -330,7 +324,6 @@ object Macros:
           Expr(name)
       }
       .getOrElse(Expr(elemName))
-  end getLabel
 
   private def getDefaultValue[T: Type, A: Type](elemName: String)(using
       Quotes
@@ -373,7 +366,6 @@ object Macros:
                   Expr(None)
             case None =>
               Expr(None)
-          end match
         else Expr(None)
         end if
       else Expr(None)
@@ -387,7 +379,6 @@ object Macros:
       .summon[Table[T]]
       .getOrElse:
         report.errorAndAbort(s"Could not find a Table instance for ${Type.show[T]}")
-  end summonTable
 
   private[saferis] inline def make[A](args: Seq[(String, Any)]): Either[DecodeError, A] = ${ makeImpl[A]('args) }
 
@@ -445,7 +436,6 @@ object Macros:
           .map(_.asInstanceOf[t])
           .toRight(DecodeError.MissingField($typeNameExpr, $name))
       }
-    end read
 
     def chain(rest: List[Symbol], acc: List[Term]): Expr[Either[DecodeError, A]] =
       rest match
@@ -491,7 +481,6 @@ object Macros:
       // Create Column[FieldType] refinement to preserve type information
       val columnType = TypeRepr.of[Column].appliedTo(fieldType)
       Refinement(t, name, columnType)
-  end refinementForLabels
 
   // Simple encoder summon for columnPlaceholdersImpl (used with concrete types)
   private[saferis] def summonEncoder[T: Type](using Quotes): Expr[Encoder[T]] =
@@ -510,7 +499,6 @@ object Macros:
         Expr.summon[zio.json.JsonCodec[T]].map(codec => '{ Encoder.fromJsonCodec[T](using $codec) })
       )
       .getOrElse(report.errorAndAbort(s"Could not find Encoder for ${Type.show[T]}"))
-  end summonEncoder
 
   private[saferis] inline def columnPlaceholders[A](instance: A): List[(String, Placeholder)] = ${
     columnPlaceholdersImpl('instance)
@@ -605,8 +593,6 @@ object Macros:
         report.errorAndAbort(
           s"Expected a simple field selector like _.fieldName, got: ${other.show} (class: ${other.getClass.getName})"
         )
-    end match
-  end findFieldName
 
   private def extractFromBody(using Quotes)(body: quotes.reflect.Term): String =
     import quotes.reflect.*
@@ -618,7 +604,6 @@ object Macros:
         report.errorAndAbort(
           s"Expected a field access like _.fieldName, got: ${other.show} (class: ${other.getClass.getName})"
         )
-  end extractFromBody
 
   /** Extract a field value extraction function from a selector.
     *

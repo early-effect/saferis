@@ -18,4 +18,3 @@ private def showImpl[T: Type](x: Expr[T])(using Quotes): Expr[T] =
   val s    = s"Type: $tp\n\nRepr: $code\n\nTree: $tree"
   report.info(s, Position.ofMacroExpansion)
   x
-end showImpl

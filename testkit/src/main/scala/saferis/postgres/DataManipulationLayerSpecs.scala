@@ -34,7 +34,6 @@ object DataManipulationLayerSpecs:
           sql"select * from test_dml_insert_basic where id = 1".queryOne[TestTable]
       yield assertTrue(insertResult == 1) &&
         assertTrue(queryResult.contains(TestTable(1, "Test User", Some(30))))
-      end for
 
     test("insert with generated primary key"):
       @tableName("test_dml_insert_generated")
@@ -53,7 +52,6 @@ object DataManipulationLayerSpecs:
           insertReturning(GeneratedTable(-1, "Generated Test"))
       yield assertTrue(insertedRecord.name == "Generated Test") &&
         assertTrue(insertedRecord.id > 0)
-      end for
 
     test("insert with optional fields"):
       @tableName("test_dml_insert_optional")
@@ -83,7 +81,6 @@ object DataManipulationLayerSpecs:
         assertTrue(result2 == 1) &&
         assertTrue(query1.contains(OptionalTable(1, "John", Some("john@example.com")))) &&
         assertTrue(query2.contains(OptionalTable(2, "Jane", None)))
-      end for
     // Update operations
     test("update by key"):
       @tableName("test_dml_update_key")
@@ -109,7 +106,6 @@ object DataManipulationLayerSpecs:
           sql"select * from test_dml_update_key where id = 1".queryOne[UpdateTable]
       yield assertTrue(updateResult == 1) &&
         assertTrue(queryResult.contains(UpdateTable(1, "Updated Name", 30)))
-      end for
 
     test("update with custom where clause"):
       @tableName("test_dml_update_where")
@@ -143,7 +139,6 @@ object DataManipulationLayerSpecs:
       yield assertTrue(updateResult == 2) && // Should update 2 records
         assertTrue(countA.map(_.count).contains(2)) &&
         assertTrue(countB.map(_.count).contains(1))
-      end for
 
     test("update returning"):
       @tableName("test_dml_update_returning")
@@ -166,7 +161,6 @@ object DataManipulationLayerSpecs:
           updateReturning(UpdateReturningTable(1, "Updated Test", 2))
       yield assertTrue(updatedRecord.name == "Updated Test") &&
         assertTrue(updatedRecord.version == 2)
-      end for
     // Delete operations
     test("delete by key"):
       @tableName("test_dml_delete_key")
@@ -191,7 +185,6 @@ object DataManipulationLayerSpecs:
           sql"select * from test_dml_delete_key where id = 1".queryOne[DeleteTable]
       yield assertTrue(deleteResult == 1) &&
         assertTrue(queryResult.isEmpty)
-      end for
 
     test("delete with custom where clause"):
       @tableName("test_dml_delete_where")
@@ -221,7 +214,6 @@ object DataManipulationLayerSpecs:
           sql"select count(*) as count from test_dml_delete_where".queryOne[CountResult]
       yield assertTrue(deleteResult == 2) &&
         assertTrue(remainingCount.map(_.count).contains(1))
-      end for
 
     test("delete returning"):
       @tableName("test_dml_delete_returning")
@@ -245,7 +237,6 @@ object DataManipulationLayerSpecs:
           deleteReturning(testRecord)
       yield assertTrue(deletedRecord.name == "Test Record") &&
         assertTrue(deletedRecord.value == 42)
-      end for
 
     test("delete where returning multiple records"):
       @tableName("test_dml_delete_where_returning")
@@ -272,7 +263,6 @@ object DataManipulationLayerSpecs:
           deleteWhereReturning[DeleteWhereReturningTable](sql"category = ${"A"}")
       yield assertTrue(deletedRecords.length == 2) &&
         assertTrue(deletedRecords.forall(_.category == "A"))
-      end for
     // Compound key operations
     test("operations with compound keys"):
       @tableName("test_dml_compound_key")
@@ -311,7 +301,6 @@ object DataManipulationLayerSpecs:
         assertTrue(deleteResult == 1) &&
         assertTrue(queryResult.contains(CompoundKeyTable(1, 2, "2023-01-15"))) &&
         assertTrue(countResult.map(_.count).contains(1))
-      end for
 
   final case class CountResult(count: Long) derives Table
 

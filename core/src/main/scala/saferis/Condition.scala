@@ -17,7 +17,6 @@ final case class BinaryCondition(
       .columnRef(Some(leftAlias), leftColumn.label)
       .append(SqlFragment.text(s" ${operator.sql} "))
       .append(SqlFragment.columnRef(Some(rightAlias), rightColumn.label))
-end BinaryCondition
 
 /** Unary condition: column IS NULL / IS NOT NULL */
 final case class UnaryCondition(
@@ -40,7 +39,6 @@ final case class LiteralCondition(
       .columnRef(Some(alias), column.label)
       .append(SqlFragment.text(s" ${operator.sql} "))
       .append(SqlFragment.param(value))
-end LiteralCondition
 
 /** Condition comparing a column to the EXCLUDED pseudo-table (for upsert WHERE clauses). */
 final case class ExcludedCondition(
@@ -54,7 +52,6 @@ final case class ExcludedCondition(
       .columnRef(Some(alias), column.label)
       .append(SqlFragment.text(s" ${operator.sql} excluded."))
       .append(SqlFragment.ident(excludedColumn.label))
-end ExcludedCondition
 
 object Condition:
   def toSqlFragment(conditions: Seq[Condition]): SqlFragment =
@@ -64,4 +61,3 @@ object Condition:
         .map(_.toFragment)
         .reduce: (left, right) =>
           left.append(SqlFragment.text(" and ")).append(right)
-end Condition

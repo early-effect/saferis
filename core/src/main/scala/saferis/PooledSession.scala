@@ -42,7 +42,6 @@ private final class PooledSession(
         case None =>
           checkout.map: connection =>
             connection.cursor(cmd, read.columns).mapZIO(row => ZIO.fromEither(read.decode(row)))
-  end stream
 
   def transact[R, A](body: ZIO[SqlSession & R, SaferisError, A]): ZIO[R, SaferisError, A] =
     lease match

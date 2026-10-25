@@ -66,7 +66,6 @@ object SchemaIntrospection:
           if options.checkNullability then
             if col.isNullable != dbCol.isNullable then
               issues += SchemaIssue.NullabilityMismatch(tableName, columnLabel, col.isNullable, dbCol.isNullable)
-      end match
     }
 
     val expectedKeys = instance.columns.filter(_.isKey).map(_.label)
@@ -93,7 +92,6 @@ object SchemaIntrospection:
               issues += SchemaIssue.IndexNameMismatch(tableName, expectedName.get, dbIdx.indexName, columnLabels)
           case _ => // OK
       }
-    end if
 
     if options.checkUniqueConstraints then
       instance.uniqueConstraints.foreach { ucSpec =>
@@ -111,9 +109,7 @@ object SchemaIntrospection:
                 columnLabels,
               )
           case _ => ()
-        end match
       }
-    end if
 
     // Check foreign keys
     if options.checkForeignKeys then
@@ -135,9 +131,7 @@ object SchemaIntrospection:
                 toLabels,
               )
           case _ => // OK
-        end match
       }
-    end if
 
     issues.toList
   end compare

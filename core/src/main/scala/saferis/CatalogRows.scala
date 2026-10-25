@@ -151,7 +151,6 @@ private[saferis] object CatalogRows:
       uniqueConstraints = uniqueModels(uniqueRows),
       foreignKeys = foreignKeyModels(fkRows),
     )
-  end table
 
   private def columnModels(rows: Chunk[ColumnRow], keys: Seq[ColumnName]): Seq[DatabaseColumn] =
     val keyNames = keys.toSet
@@ -166,7 +165,6 @@ private[saferis] object CatalogRows:
           defaultValue = row.defaultValue,
           ordinalPosition = row.ordinal,
         )
-  end columnModels
 
   private def grouped[A](rows: Chunk[A])(name: A => String, ordinal: A => Int): Seq[Seq[A]] =
     rows.groupBy(name).values.map(_.toSeq.sortBy(ordinal)).toSeq

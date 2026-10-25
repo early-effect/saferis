@@ -93,7 +93,6 @@ object SchemaIntegrationSpecs:
           indexes.head.indexdef.toLowerCase.contains("where"),
           indexes.head.indexdef.contains("active"),
         )
-        end for
       },
       test("creates unique partial index") {
         val users = Schema[User]
@@ -115,7 +114,6 @@ object SchemaIntegrationSpecs:
           indexes.head.indexdef.toLowerCase.contains("unique"),
           indexes.head.indexdef.toLowerCase.contains("where"),
         )
-        end for
       },
       test("partial index allows duplicate values outside WHERE condition") {
         val users = Schema[User]
@@ -137,7 +135,6 @@ object SchemaIntegrationSpecs:
             sql"INSERT INTO schema_int_users (name, email, status, age) VALUES ('Alice2', 'alice@test.com', 'inactive', 25)".insert
           ).either
         yield assertTrue(result.isRight)
-        end for
       },
       test("partial index enforces uniqueness within WHERE condition") {
         val users = Schema[User]
@@ -158,7 +155,6 @@ object SchemaIntegrationSpecs:
             sql"INSERT INTO schema_int_users (name, email, status, age) VALUES ('Alice2', 'alice@test.com', 'active', 25)".insert
           ).either
         yield assertTrue(result.isLeft)
-        end for
       },
     ),
     // === Compound Index Creation ===
@@ -182,7 +178,6 @@ object SchemaIntegrationSpecs:
           indexes.head.indexdef.contains("name"),
           indexes.head.indexdef.contains("email"),
         )
-        end for
       }
     ),
     // === JSON Data Operations ===
@@ -378,7 +373,6 @@ object SchemaIntegrationSpecs:
           indexes.head.indexdef.contains("jsonb_exists"),
           indexes.head.indexdef.contains("verified"),
         )
-        end for
       },
       test("create partial index on JSON path condition") {
         val profiles = Schema[Profile]
@@ -403,7 +397,6 @@ object SchemaIntegrationSpecs:
           indexes.head.indexdef.contains("->>"),
           indexes.head.indexdef.contains("admin"),
         )
-        end for
       },
     ),
     // === Complex WHERE Conditions ===
@@ -431,7 +424,6 @@ object SchemaIntegrationSpecs:
           indexes.head.indexdef.contains("active"),
           indexes.head.indexdef.contains("18"),
         )
-        end for
       },
       test("partial index with OR condition") {
         val users = Schema[User]
@@ -454,7 +446,6 @@ object SchemaIntegrationSpecs:
           indexes.nonEmpty,
           indexes.head.indexdef.toLowerCase.contains("or"),
         )
-        end for
       },
       test("partial index with grouped conditions") {
         val users = Schema[User]
@@ -477,7 +468,6 @@ object SchemaIntegrationSpecs:
           // Check for parentheses indicating grouped conditions
           indexes.head.indexdef.contains("("),
         )
-        end for
       },
       test("partial index with IN clause") {
         val users = Schema[User]
@@ -498,7 +488,6 @@ object SchemaIntegrationSpecs:
           indexes.nonEmpty,
           indexes.head.indexdef.toLowerCase.contains("in"),
         )
-        end for
       },
     ),
     // === Schema-qualified table names with typed Query DSL ===
@@ -557,7 +546,6 @@ object SchemaIntegrationSpecs:
           countBefore.exists(_.count == 1),
           countAfter.exists(_.count == 0),
         )
-        end for
       }
     ),
     suite("Catalog name lookup")(
@@ -619,7 +607,6 @@ object SchemaIntegrationSpecs:
           found <- (SchemaIntrospection.introspect(schema.tableName))
           predicate = found.toList.flatMap(_.indexes).find(_.indexName == "idx_status_partial").flatMap(_.whereClause)
         yield assertTrue(predicate.exists(text => text.contains("inactive") && !text.contains("'active'")))
-        end for
       },
     ),
   ) @@ TestAspect.sequential

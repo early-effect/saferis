@@ -62,8 +62,6 @@ object SqlState:
       case SqlCondition.Aborted                   => SaferisError.Aborted(detail)
       case SqlCondition.Other if retryable(error) => SaferisError.Retryable(detail)
       case SqlCondition.Other                     => SaferisError.QueryError(detail)
-    end match
-  end classify
 end SqlState
 
 /** What a driver read off a server error, before it becomes a [[SaferisError]]. Not a throwable. */

@@ -121,7 +121,6 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
           // Verify the SQL contains the escaped single quote
           indexes.head.indexdef.contains("user''s_field"),
         )
-        end for
       ,
       test("Schema DSL jsonPath with field containing single quote"):
         val profiles = Schema[Profile]
@@ -144,7 +143,6 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
           // Verify the SQL contains the escaped single quote in the path
           indexes.head.indexdef.contains("user''s_email"),
         )
-        end for
       ,
       test("SQL injection attempt in JSON key is properly escaped"):
         // Attempt SQL injection via JSON key - this should be safely escaped
@@ -304,7 +302,6 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
           results.head.settings.value.theme == "dark",
           results.head.settings.value.notifications == true,
         )
-        end for
       ,
       test("Option[Json[A]] nullable JSON column"):
         @tableName("json_test_optional")
@@ -314,27 +311,24 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
             data: Option[Json[UserData]],
         ) derives Table
 
-        val res =
-          for
-            _ <- (dropTable[OptionalJson](ifExists = true))
-            _ <- (createTable[OptionalJson]())
-            // Insert with JSON data
-            userData = UserData("alice@test.com", true, "admin")
-            _ <- (insert(OptionalJson(0, "Alice", Some(Json(userData)))))
-            // Insert without JSON data (null)
-            _ <- (insert(OptionalJson(0, "Bob", None)))
-            // Query back
-            results <- (Query[OptionalJson].all.query[OptionalJson])
-            alice = results.find(_.name == "Alice")
-            bob   = results.find(_.name == "Bob")
-          yield assertTrue(
-            results.length == 2,
-            alice.exists(_.data.isDefined),
-            alice.flatMap(_.data).exists(_.value.email == "alice@test.com"),
-            bob.exists(_.data.isEmpty),
-          )
-        end res
-        res,
+        for
+          _ <- (dropTable[OptionalJson](ifExists = true))
+          _ <- (createTable[OptionalJson]())
+          // Insert with JSON data
+          userData = UserData("alice@test.com", true, "admin")
+          _ <- (insert(OptionalJson(0, "Alice", Some(Json(userData)))))
+          // Insert without JSON data (null)
+          _ <- (insert(OptionalJson(0, "Bob", None)))
+          // Query back
+          results <- (Query[OptionalJson].all.query[OptionalJson])
+          alice = results.find(_.name == "Alice")
+          bob   = results.find(_.name == "Bob")
+        yield assertTrue(
+          results.length == 2,
+          alice.exists(_.data.isDefined),
+          alice.flatMap(_.data).exists(_.value.email == "alice@test.com"),
+          bob.exists(_.data.isEmpty),
+        ),
     ),
     // === Generic Json[E] Type Derivation Tests ===
     suite("Generic Json[E] table derivation")(
@@ -350,7 +344,7 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
         // Helper to read raw JSON data
         case class RawJsonRow(id: Long, data: String) derives Table
 
-        val t = for
+        for
           _ <- (dropTable[GenericRow[GenericEvent]](ifExists = true))
           _ <- (createTable[GenericRow[GenericEvent]]())
           _ <- (dml.insert(GenericRow(0, Json(GenericEvent("test", 42)))))
@@ -361,28 +355,25 @@ object JsonIntegrationSpecs extends ZIOSpecDefault:
           rows.head.data.contains("test"), // JSON contains "test"
           rows.head.data.contains("42"),   // JSON contains 42
         )
-        t
       ,
       test("Query DSL works with polymorphic given from companion object"):
         // Uses QueryEventRow and QueryTestEvent defined at class level
-        val t =
-          for
-            _ <- (dropTable[QueryEventRow[QueryTestEvent]](ifExists = true))
-            _ <- (createTable[QueryEventRow[QueryTestEvent]]())
-            _ <- (dml.insert(QueryEventRow(0, "first", Json(QueryTestEvent("event1", 10)))))
-            _ <- (dml.insert(QueryEventRow(0, "second", Json(QueryTestEvent("event2", 20)))))
-            // Query DSL should find the Table from companion object's polymorphic given
-            all    <- (Query[QueryEventRow[QueryTestEvent]].all.query[QueryEventRow[QueryTestEvent]])
-            byName <- (
-              Query[QueryEventRow[QueryTestEvent]].where(_.name).eq("first").query[QueryEventRow[QueryTestEvent]]
-            )
-          yield assertTrue(
-            all.length == 2,
-            byName.length == 1,
-            byName.head.name == "first",
-            byName.head.data.value.name == "event1",
+        for
+          _ <- (dropTable[QueryEventRow[QueryTestEvent]](ifExists = true))
+          _ <- (createTable[QueryEventRow[QueryTestEvent]]())
+          _ <- (dml.insert(QueryEventRow(0, "first", Json(QueryTestEvent("event1", 10)))))
+          _ <- (dml.insert(QueryEventRow(0, "second", Json(QueryTestEvent("event2", 20)))))
+          // Query DSL should find the Table from companion object's polymorphic given
+          all    <- (Query[QueryEventRow[QueryTestEvent]].all.query[QueryEventRow[QueryTestEvent]])
+          byName <- (
+            Query[QueryEventRow[QueryTestEvent]].where(_.name).eq("first").query[QueryEventRow[QueryTestEvent]]
           )
-        t,
+        yield assertTrue(
+          all.length == 2,
+          byName.length == 1,
+          byName.head.name == "first",
+          byName.head.data.value.name == "event1",
+        ),
     ),
   ).provideShared(xaLayer) @@ TestAspect.sequential
 

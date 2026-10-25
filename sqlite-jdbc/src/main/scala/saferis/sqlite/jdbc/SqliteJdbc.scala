@@ -99,8 +99,6 @@ private object SqliteAdapter extends StandardJdbcAdapter:
       case "json" | "jsonb" => ref(SqlType.Json, rs.getString(i))(json => SqlValue.Json(JsonText(json)))(rs)
       case "uuid"           => parsed(rs, column, SqlType.Uuid)(t => SqlValue.Uuid(UUID.fromString(t)))
       case _                => byStorageClass(rs, column)
-    end match
-  end read
 
   /** The declared name without its length or precision, `varchar(255)` to `varchar`. */
   private def declared(typeName: String): String =
@@ -117,7 +115,6 @@ private object SqliteAdapter extends StandardJdbcAdapter:
       case Types.BLOB | Types.BINARY  =>
         ref(SqlType.Binary, rs.getBytes(i))(bytes => SqlValue.Binary(Chunk.fromArray(bytes)))(rs)
       case _ => other(rs, column)
-  end byStorageClass
 
   /** Text that must parse. Text that does not is a decode failure naming the column, not a thrown exception. */
   private def parsed(rs: ResultSet, column: JdbcColumn, tpe: SqlType)(
@@ -148,5 +145,4 @@ private object SqliteAdapter extends StandardJdbcAdapter:
           case _                                                           => SqlCondition.Other
       case _ => base.condition
     base.copy(condition = condition)
-  end serverError
 end SqliteAdapter

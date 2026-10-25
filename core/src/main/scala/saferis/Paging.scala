@@ -121,6 +121,7 @@ enum SeekDir:
 
   /** Less than (<) - backward pagination, get items BEFORE cursor */
   case Lt
+end SeekDir
 
 /** Type-safe sort specification using Column[T]
   *
@@ -146,7 +147,6 @@ final case class Sort[T](
       case NullOrder.Last    => " nulls last"
       case NullOrder.Default => ""
     SqlFragment(column).append(SqlFragment.text(s"$orderStr$nullStr"))
-end Sort
 
 /** Type-safe seek specification for cursor-based pagination
   *

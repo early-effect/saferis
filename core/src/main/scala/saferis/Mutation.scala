@@ -90,7 +90,6 @@ final case class Insert[A: Table](
       .append(SqlFragment.text(") values ("))
       .append(body)
       .append(SqlFragment.text(")"))
-  end build
 
   /** Build INSERT with RETURNING clause (for dialects that support it) */
   def returning: SqlFragment =
@@ -267,8 +266,6 @@ final case class UpdateWhereBuilder[A: Table, T](
   protected def addPredicate(predicate: SqlFragment): UpdateReady[A] =
     UpdateReady(builder.tableName, builder.fieldNamesToColumns, builder.setClauses, Vector(predicate))
 
-end UpdateWhereBuilder
-
 // ============================================================================
 // UpdateReadyWhereBuilder (from UpdateReady -> UpdateReady, for chaining)
 // ============================================================================
@@ -286,8 +283,6 @@ final case class UpdateReadyWhereBuilder[A: Table, T](
   protected def whereColumn: Column[T]                               = fromColumn
   protected def addPredicate(predicate: SqlFragment): UpdateReady[A] =
     ready.copy(wherePredicates = ready.wherePredicates :+ predicate)
-
-end UpdateReadyWhereBuilder
 
 // ============================================================================
 // Delete Builder (not yet ready to build)
@@ -428,8 +423,6 @@ final case class DeleteWhereBuilder[A: Table, T](
   protected def addPredicate(predicate: SqlFragment): DeleteReady[A] =
     DeleteReady(builder.tableName, builder.fieldNamesToColumns, Vector(predicate))
 
-end DeleteWhereBuilder
-
 // ============================================================================
 // DeleteReadyWhereBuilder (from DeleteReady -> DeleteReady, for chaining)
 // ============================================================================
@@ -447,5 +440,3 @@ final case class DeleteReadyWhereBuilder[A: Table, T](
   protected def whereColumn: Column[T]                               = fromColumn
   protected def addPredicate(predicate: SqlFragment): DeleteReady[A] =
     ready.copy(wherePredicates = ready.wherePredicates :+ predicate)
-
-end DeleteReadyWhereBuilder

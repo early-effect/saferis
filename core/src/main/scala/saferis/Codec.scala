@@ -90,8 +90,6 @@ object Codec:
             case SqlValue.Text(t)     => label(t)
             case SqlValue.VarChar(t)  => label(t)
             case other                => Left(DecodeError.Mismatch(typeName, other))
-    end new
-  end enumeration
 
   /** A parameterless Scala 3 enum. Case names are the database labels. */
   inline def enumeration[E](typeName: TypeName)(using m: Mirror.SumOf[E]): Codec[E] =

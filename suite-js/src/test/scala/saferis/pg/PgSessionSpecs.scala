@@ -33,7 +33,6 @@ object PgSessionSpecs extends ZIOSpecDefault:
         poolSize = poolSize,
         defaultTimeout = defaultTimeout,
       )
-  end extension
 
   private def session(config: PgConfig): ZLayer[Any, SaferisError, SqlSession] =
     ZLayer.succeed(config) >>> NodeSession.layer
@@ -178,7 +177,6 @@ object PgSessionSpecs extends ZIOSpecDefault:
           seen.headOption.exists(_.contains("generate_series")),
           seen.forall(!_.contains("BEGIN")),
         )
-        end for
       },
       test("take(10) of a million rows reads one cursor batch"):
         val read = RowRead.all: (row: SqlRow) =>
@@ -186,20 +184,18 @@ object PgSessionSpecs extends ZIOSpecDefault:
             .decode(row)
             .left
             .map(err => SaferisError.DecodingError(ColumnName("n"), TypeName("Int"), err))
-        val counted =
-          for
-            reads   <- Ref.make(0)
-            _       <- ZIO.succeed(NodeSession.setOnBatch(reads.update(_ + 1)))
-            command <- sql"select n::int4 from generate_series(1, 1000000) n".toCommand
-            session <- ZIO.service[SqlSession]
-            rows    <- session
-              .stream(command)(read)
-              .take(10)
-              .runCollect
-              .ensuring(ZIO.succeed(NodeSession.setOnBatch(ZIO.unit)))
-            batches <- reads.get
-          yield assertTrue(rows == Chunk.fromIterable(1 to 10), batches >= 1, batches <= 2)
-        counted,
+        for
+          reads   <- Ref.make(0)
+          _       <- ZIO.succeed(NodeSession.setOnBatch(reads.update(_ + 1)))
+          command <- sql"select n::int4 from generate_series(1, 1000000) n".toCommand
+          session <- ZIO.service[SqlSession]
+          rows    <- session
+            .stream(command)(read)
+            .take(10)
+            .runCollect
+            .ensuring(ZIO.succeed(NodeSession.setOnBatch(ZIO.unit)))
+          batches <- reads.get
+        yield assertTrue(rows == Chunk.fromIterable(1 to 10), batches >= 1, batches <= 2),
     )
 
   private val writes =

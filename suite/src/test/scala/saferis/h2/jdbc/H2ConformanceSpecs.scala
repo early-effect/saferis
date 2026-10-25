@@ -61,12 +61,11 @@ object H2ConformanceSpecs extends ZIOSpecDefault:
           Chunk.empty,
           tooWide,
         )
-        val stored = for
+        (for
           _    <- dropTable[Row](ifExists = true)
           _    <- createTable[Row]()
           exit <- insert(row).exit
-        yield exit
-        stored.map { exit =>
+        yield exit).map { exit =>
           assertTrue(
             exit match
               case Exit.Failure(cause) =>

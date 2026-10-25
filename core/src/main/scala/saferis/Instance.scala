@@ -72,7 +72,6 @@ final case class Instance[A](
         SqlFragment.text("select ").append(SelectList.namedColumns(this)).append(SqlFragment.text(" ")).append(body)
       else sql"select * from $this $whereClause"
     TypedFragment(fragment)
-  end applyDynamic
 
   /** Set a user-provided alias on this instance - use via `instance as "alias"` */
   private[saferis] transparent inline def withAlias(inline alias: String) =
@@ -85,7 +84,6 @@ final case class Instance[A](
       indexes = indexes,
       uniqueConstraints = uniqueConstraints,
     ).asInstanceOf[this.type]
-  end withAlias
 
   /** Internal method to set a generated alias on this instance. */
   private[saferis] transparent inline def withGeneratedAlias(alias: Alias) =

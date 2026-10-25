@@ -84,7 +84,6 @@ object TransactorSpecs extends ZIOSpecDefault:
             sql"select * from test_transactor_insert where id = 1".queryOne[InsertTable]
         yield assertTrue(rowsAffected == 1) &&
           assertTrue(result.contains(InsertTable(1, "Test Insert")))
-        end for
 
       test("update operation"):
         @tableName("test_transactor_update")
@@ -103,7 +102,6 @@ object TransactorSpecs extends ZIOSpecDefault:
             sql"select * from test_transactor_update where id = 1".queryOne[UpdateTable]
         yield assertTrue(rowsAffected == 1) &&
           assertTrue(result.contains(UpdateTable(1, "Updated")))
-        end for
 
       test("delete operation"):
         @tableName("test_transactor_delete")
@@ -122,7 +120,6 @@ object TransactorSpecs extends ZIOSpecDefault:
             sql"select * from test_transactor_delete where id = 1".queryOne[DeleteTable]
         yield assertTrue(rowsAffected == 1) &&
           assertTrue(result.isEmpty)
-        end for
 
       test("DDL operations"):
         @tableName("test_transactor_ddl")
@@ -142,7 +139,6 @@ object TransactorSpecs extends ZIOSpecDefault:
         yield assertTrue(createResult >= 0) &&
           assertTrue(queryResult.contains(DDLTable(1, "DDL Test"))) &&
           assertTrue(dropResult >= 0)
-        end for
   end runSuite
 
   val transactionSuite =
@@ -186,7 +182,6 @@ object TransactorSpecs extends ZIOSpecDefault:
             case _                           => false
         yield assertTrue(isSyntaxError) && // the pastrami is a lie
           assertTrue(after == before)
-        end for
 
       test("mixed operations in transaction"):
         @tableName("test_transactor_mixed")
@@ -209,7 +204,6 @@ object TransactorSpecs extends ZIOSpecDefault:
         yield assertTrue(result.size == 2) &&
           assertTrue(result.exists(_.name == "Updated First")) &&
           assertTrue(count.map(_.count).contains(2))
-        end for
 
       test("transaction isolation"):
         @tableName("test_transactor_isolation")
@@ -231,7 +225,6 @@ object TransactorSpecs extends ZIOSpecDefault:
             yield (initial, updated)
         yield assertTrue(result._1.map(_.value).contains(100)) &&
           assertTrue(result._2.map(_.value).contains(200))
-        end for
 
       test("nested transact joins the outer transaction and does not commit early"):
         for
@@ -323,7 +316,6 @@ object TransactorSpecs extends ZIOSpecDefault:
             sql"select count(*) as count from test_transactor_unlimited".queryOne[CountResult]
         yield assertTrue(results.forall(_ == 1)) &&
           assertTrue(count.map(_.count).contains(10))
-        end for
 
   val configuratorTests =
     suiteAll("should apply configurator"):

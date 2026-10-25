@@ -19,4 +19,3 @@ object TimeTzSpecs extends ZIOSpecDefault:
         got <- sql"select clock from timetz_round where id = 1".queryValue[OffsetTime]
       yield assertTrue(got.contains(when))
   ).provideShared(DataSourceProvider.default) @@ TestAspect.sequential
-end TimeTzSpecs

@@ -69,5 +69,3 @@ final case class ForeignKeySpec[From, To](
     SqlText(
       s"${constraintClause}foreign key ($fromColsSql) references ${dialect.escapeIdentifier(toTable)} ($toColsSql)$onDeleteClause$onUpdateClause"
     )
-  end toConstraintSql
-end ForeignKeySpec

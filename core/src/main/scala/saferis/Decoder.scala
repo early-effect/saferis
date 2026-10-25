@@ -117,7 +117,6 @@ object Decoder:
       case SqlValue.VarChar(text)    => Left(DecodeError.InvalidText(bool, text))
       case SqlValue.Text(text)       => Left(DecodeError.InvalidText(bool, text))
       case other                     => Left(DecodeError.Mismatch(bool, other))
-  end boolean
 
   /** A `float8` decodes when it is exactly a `Float`, as every value written from a `Float` is. SQLite stores every
     * `real` as 8 bytes, so this is how a `Float` column reads there. Anything else fails instead of rounding. A
@@ -136,7 +135,6 @@ object Decoder:
       case SqlValue.VarChar(text)                                            => textFloat(value, text)
       case SqlValue.Text(text)                                               => textFloat(value, text)
       case other => Left(DecodeError.Mismatch(float4, other))
-  end float
 
   /** Decimal to binary float is the nearest finite IEEE value. Overflow is loss. An exact decimal is a `BigDecimal`. An
     * integer is a `Double` only when `toDouble` is still that integer.
@@ -153,7 +151,6 @@ object Decoder:
       case SqlValue.VarChar(text)      => textDouble(value, text)
       case SqlValue.Text(text)         => textDouble(value, text)
       case other                       => Left(DecodeError.Mismatch(float8, other))
-  end double
 
   given bigDecimal: Decoder[BigDecimal] with
     def decode(value: SqlValue): Either[DecodeError, BigDecimal] =
@@ -353,7 +350,6 @@ object RowDecoder:
           c <- cell[C](row, 2)
           d <- cell[D](row, 3)
         yield (a, b, c, d)
-  end tuple4
 
   given tuple5[A, B, C, D, E](using
       decoderA: Decoder[A],
@@ -371,7 +367,6 @@ object RowDecoder:
           d <- cell[D](row, 3)
           e <- cell[E](row, 4)
         yield (a, b, c, d, e)
-  end tuple5
 
   given tuple6[A, B, C, D, E, F](using
       decoderA: Decoder[A],
@@ -391,7 +386,6 @@ object RowDecoder:
           e <- cell[E](row, 4)
           f <- cell[F](row, 5)
         yield (a, b, c, d, e, f)
-  end tuple6
 
   given tuple7[A, B, C, D, E, F, G](using
       decoderA: Decoder[A],
@@ -413,7 +407,6 @@ object RowDecoder:
           f <- cell[F](row, 5)
           g <- cell[G](row, 6)
         yield (a, b, c, d, e, f, g)
-  end tuple7
 
   given tuple8[A, B, C, D, E, F, G, H](using
       decoderA: Decoder[A],
@@ -437,7 +430,6 @@ object RowDecoder:
           g <- cell[G](row, 6)
           h <- cell[H](row, 7)
         yield (a, b, c, d, e, f, g, h)
-  end tuple8
 
   given tuple9[A, B, C, D, E, F, G, H, I](using
       decoderA: Decoder[A],
@@ -463,7 +455,6 @@ object RowDecoder:
           h <- cell[H](row, 7)
           i <- cell[I](row, 8)
         yield (a, b, c, d, e, f, g, h, i)
-  end tuple9
 
   given tuple10[A, B, C, D, E, F, G, H, I, J](using
       decoderA: Decoder[A],
@@ -491,7 +482,6 @@ object RowDecoder:
           i <- cell[I](row, 8)
           j <- cell[J](row, 9)
         yield (a, b, c, d, e, f, g, h, i, j)
-  end tuple10
 
   given tuple11[A, B, C, D, E, F, G, H, I, J, K](using
       decoderA: Decoder[A],
@@ -521,7 +511,6 @@ object RowDecoder:
           j <- cell[J](row, 9)
           k <- cell[K](row, 10)
         yield (a, b, c, d, e, f, g, h, i, j, k)
-  end tuple11
 
   given tuple12[A, B, C, D, E, F, G, H, I, J, K, L](using
       decoderA: Decoder[A],
@@ -553,7 +542,6 @@ object RowDecoder:
           k <- cell[K](row, 10)
           l <- cell[L](row, 11)
         yield (a, b, c, d, e, f, g, h, i, j, k, l)
-  end tuple12
 
   given tuple13[A, B, C, D, E, F, G, H, I, J, K, L, M](using
       decoderA: Decoder[A],
@@ -587,7 +575,6 @@ object RowDecoder:
           l <- cell[L](row, 11)
           m <- cell[M](row, 12)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m)
-  end tuple13
 
   given tuple14[A, B, C, D, E, F, G, H, I, J, K, L, M, N](using
       decoderA: Decoder[A],
@@ -623,7 +610,6 @@ object RowDecoder:
           m <- cell[M](row, 12)
           n <- cell[N](row, 13)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n)
-  end tuple14
 
   given tuple15[A, B, C, D, E, F, G, H, I, J, K, L, M, N, O](using
       decoderA: Decoder[A],
@@ -661,7 +647,6 @@ object RowDecoder:
           n <- cell[N](row, 13)
           o <- cell[O](row, 14)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o)
-  end tuple15
 
   given tuple16[A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P](using
       decoderA: Decoder[A],
@@ -701,7 +686,6 @@ object RowDecoder:
           o <- cell[O](row, 14)
           p <- cell[P](row, 15)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p)
-  end tuple16
 
   given tuple17[A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q](using
       decoderA: Decoder[A],
@@ -743,7 +727,6 @@ object RowDecoder:
           p <- cell[P](row, 15)
           q <- cell[Q](row, 16)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q)
-  end tuple17
 
   given tuple18[A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R](using
       decoderA: Decoder[A],
@@ -787,7 +770,6 @@ object RowDecoder:
           q <- cell[Q](row, 16)
           r <- cell[R](row, 17)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r)
-  end tuple18
 
   given tuple19[A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S](using
       decoderA: Decoder[A],
@@ -833,7 +815,6 @@ object RowDecoder:
           r <- cell[R](row, 17)
           s <- cell[S](row, 18)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s)
-  end tuple19
 
   given tuple20[A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T](using
       decoderA: Decoder[A],
@@ -881,7 +862,6 @@ object RowDecoder:
           s <- cell[S](row, 18)
           t <- cell[T](row, 19)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t)
-  end tuple20
 
   given tuple21[A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U](using
       decoderA: Decoder[A],
@@ -931,7 +911,6 @@ object RowDecoder:
           t <- cell[T](row, 19)
           u <- cell[U](row, 20)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u)
-  end tuple21
 
   given tuple22[A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V](using
       decoderA: Decoder[A],
@@ -983,5 +962,4 @@ object RowDecoder:
           u <- cell[U](row, 20)
           v <- cell[V](row, 21)
         yield (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v)
-  end tuple22
 end RowDecoder
