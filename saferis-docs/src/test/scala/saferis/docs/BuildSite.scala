@@ -88,5 +88,4 @@ object BuildSite extends DocsSite:
         SiteError.WriteFailed(index, err)
       }
     promote *> EarlyEffectTheme.writeLogo(out)
-  end afterBuild
 end BuildSite

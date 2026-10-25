@@ -13,6 +13,7 @@ trait SqlName[A]:
 
   /** A dot in a table name separates schema and table. Other names are one identifier. */
   def qualify: Boolean = false
+end SqlName
 
 /** A table as SQL names it: `users`, or `schema.table` when qualified. */
 opaque type TableName <: String = String
@@ -38,7 +39,6 @@ object ColumnName:
       */
     def matchesLabel(other: ColumnName): Boolean = name.equalsIgnoreCase(other)
     def folded: ColumnName                       = name.toLowerCase(java.util.Locale.ROOT)
-end ColumnName
 
 /** A field of a Scala case class. Not a column name: `@label` can make those differ. */
 opaque type FieldName <: String = String

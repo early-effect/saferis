@@ -21,4 +21,3 @@ object PostgresConformance:
       @@ TestAspect.sequential
       @@ TestAspect.withLiveClock
       @@ TestAspect.timeout(30.seconds)
-end PostgresConformance

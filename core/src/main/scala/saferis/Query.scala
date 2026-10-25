@@ -62,6 +62,7 @@ private[saferis] object AliasGenerator:
 
   /** For backwards compatibility with tests - no-op since each query gets fresh generator */
   def reset(): Unit = ()
+end AliasGenerator
 
 // ============================================================================
 // QueryBase - Base trait for all query types
@@ -511,8 +512,6 @@ final case class WhereBuilder1[A: Table, T](
       builder.derivedSource,
     )
 
-end WhereBuilder1
-
 // ============================================================================
 // WhereBuilder1Ready - Type-safe WHERE for chaining on Ready
 // ============================================================================
@@ -528,8 +527,6 @@ final case class WhereBuilder1Ready[A: Table, T](
   protected def addPredicate(predicate: SqlFragment): Query1Ready[A] =
     ready.copy(wherePredicates = ready.wherePredicates :+ predicate)
 
-end WhereBuilder1Ready
-
 // ============================================================================
 // JoinBuilder1 - Building ON clause for first join
 // ============================================================================
@@ -544,7 +541,6 @@ final case class JoinBuilder1[A: Table, B: Table](
     val leftCol   = query.baseInstance.column(selector)
     val leftAlias = query.baseInstance.alias.getOrElse(Alias.unsafe(query.baseInstance.tableName))
     OnBuilder1(query, joinType, leftAlias, leftCol, bInstance.alias.get.asInstanceOf[Alias], bInstance)
-end JoinBuilder1
 
 // ============================================================================
 // OnBuilder1 - Building ON condition for first join
@@ -638,7 +634,6 @@ final case class OnChain1[A: Table, B: Table](
       query.sorts,
       query.derivedSource,
     )
-  end endJoin
 
   // Convenience methods that implicitly finalize
 
@@ -1064,7 +1059,6 @@ final case class OnChain2[A: Table, B: Table, C: Table](
       query.joins :+ JoinClause(cTable.name, rightAlias, joinType, conditionFrag),
       query.sorts,
     )
-  end endJoin
 
   def orderBy(sort: Sort[?]): Query3Builder[A, B, C]      = endJoin.orderBy(sort)
   def limit(n: Int): Query3Ready[A, B, C]                 = endJoin.limit(n)
@@ -1257,7 +1251,6 @@ final case class OnChain3[A: Table, B: Table, C: Table, D: Table](
       query.joins :+ JoinClause(dTable.name, rightAlias, joinType, conditionFrag),
       query.sorts,
     )
-  end endJoin
 
   def orderBy(sort: Sort[?]): Query4Builder[A, B, C, D]      = endJoin.orderBy(sort)
   def limit(n: Int): Query4Ready[A, B, C, D]                 = endJoin.limit(n)
@@ -1486,7 +1479,6 @@ final case class OnChain4[
       query.joins :+ JoinClause(eTable.name, rightAlias, joinType, conditionFrag),
       query.sorts,
     )
-  end endJoin
 
   def orderBy(sort: Sort[?]): Query5Builder[A, B, C, D, E]      = endJoin.orderBy(sort)
   def limit(n: Int): Query5Ready[A, B, C, D, E]                 = endJoin.limit(n)

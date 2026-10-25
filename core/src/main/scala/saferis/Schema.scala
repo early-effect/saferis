@@ -163,7 +163,6 @@ object Schema:
       )(using $table)
       Schema[A](inst)
     }
-  end schemaApplyImpl
 
   // Top-level inline functions that Schema class methods delegate to
 
@@ -365,7 +364,6 @@ object Schema:
         Seq.empty,
       )
     }
-  end withIndexImpl
 
   private def instanceIndexAndImpl[A: Type, T: Type](
       builder: Expr[InstanceIndexBuilder[A]],
@@ -376,7 +374,6 @@ object Schema:
       val b = $builder
       b.copy(columns = b.columns :+ FieldName(${ Expr(columnName) }))
     }
-  end instanceIndexAndImpl
 
   private def instanceIndexWhereImpl[A: Type, T: Type](
       builder: Expr[InstanceIndexBuilder[A]],
@@ -384,7 +381,6 @@ object Schema:
   )(using Quotes): Expr[InstanceWhereColumnBuilder[A, T]] =
     val columnName = extractFieldName(selector)
     '{ InstanceWhereColumnBuilder[A, T]($builder, FieldName(${ Expr(columnName) })) }
-  end instanceIndexWhereImpl
 
   private def instanceWhereAndImpl[A: Type, T: Type](
       builder: Expr[InstanceWhereConditionBuilder[A]],
@@ -396,7 +392,6 @@ object Schema:
       val parent = InstanceIndexBuilder[A](b.instance, b.columns, b.unique, b.indexName, b.conditions)
       InstanceWhereColumnBuilder[A, T](parent, FieldName(${ Expr(columnName) }))
     }
-  end instanceWhereAndImpl
 
   private def instanceWhereOrImpl[A: Type, T: Type](
       builder: Expr[InstanceWhereConditionBuilder[A]],
@@ -408,7 +403,6 @@ object Schema:
       val parent = InstanceIndexBuilder[A](b.instance, b.columns, b.unique, b.indexName, b.conditions)
       InstanceWhereColumnBuilder[A, T](parent, FieldName(${ Expr(columnName) }), "or")
     }
-  end instanceWhereOrImpl
 
   private def withForeignKeyImpl[A: Type, T: Type](
       instance: Expr[Instance[A]],
@@ -416,7 +410,6 @@ object Schema:
   )(using Quotes): Expr[InstanceFKBuilder[A, T]] =
     val columnName = extractFieldName(selector)
     '{ InstanceFKBuilder[A, T]($instance, Seq(FieldName(${ Expr(columnName) }))) }
-  end withForeignKeyImpl
 
   // Chain macros that handle builder-to-instance conversion internally
   private def chainIndexFromBuilderImpl[A: Type, T: Type](
@@ -436,7 +429,6 @@ object Schema:
         Seq.empty,
       )
     }
-  end chainIndexFromBuilderImpl
 
   private def chainFKFromBuilderImpl[A: Type, T: Type](
       builder: Expr[InstanceIndexBuilder[A]],
@@ -448,7 +440,6 @@ object Schema:
       val builtInst = b.toInstance
       InstanceFKBuilder[A, T](builtInst, Seq(FieldName(${ Expr(columnName) })))
     }
-  end chainFKFromBuilderImpl
 
   private def chainIndexFromConditionImpl[A: Type, T: Type](
       builder: Expr[InstanceWhereConditionBuilder[A]],
@@ -467,7 +458,6 @@ object Schema:
         Seq.empty,
       )
     }
-  end chainIndexFromConditionImpl
 
   private def chainFKFromConditionImpl[A: Type, T: Type](
       builder: Expr[InstanceWhereConditionBuilder[A]],
@@ -479,7 +469,6 @@ object Schema:
       val builtInst = b.toInstance
       InstanceFKBuilder[A, T](builtInst, Seq(FieldName(${ Expr(columnName) })))
     }
-  end chainFKFromConditionImpl
 
   // Chain macros for FK config
   private def chainIndexFromFKConfigImpl[A: Type, T: Type](
@@ -499,7 +488,6 @@ object Schema:
         Seq.empty,
       )
     }
-  end chainIndexFromFKConfigImpl
 
   private def chainFKFromFKConfigImpl[A: Type, T: Type](
       builder: Expr[InstanceFKConfigBuilder[A, ?]],
@@ -511,7 +499,6 @@ object Schema:
       val builtInst = b.build
       InstanceFKBuilder[A, T](builtInst, Seq(FieldName(${ Expr(columnName) })))
     }
-  end chainFKFromFKConfigImpl
 
   // Unique constraint macros
   private def withUniqueConstraintImpl[A: Type, T: Type](
@@ -526,7 +513,6 @@ object Schema:
         None,
       )
     }
-  end withUniqueConstraintImpl
 
   private def instanceUniqueAndImpl[A: Type, T: Type](
       builder: Expr[InstanceUniqueBuilder[A]],
@@ -537,7 +523,6 @@ object Schema:
       val b = $builder
       b.copy(columns = b.columns :+ FieldName(${ Expr(columnName) }))
     }
-  end instanceUniqueAndImpl
 
   private def chainIndexFromUniqueImpl[A: Type, T: Type](
       builder: Expr[InstanceUniqueBuilder[A]],
@@ -556,7 +541,6 @@ object Schema:
         Seq.empty,
       )
     }
-  end chainIndexFromUniqueImpl
 
   private def chainFKFromUniqueImpl[A: Type, T: Type](
       builder: Expr[InstanceUniqueBuilder[A]],
@@ -568,7 +552,6 @@ object Schema:
       val builtInst = b.toInstance
       InstanceFKBuilder[A, T](builtInst, Seq(FieldName(${ Expr(columnName) })))
     }
-  end chainFKFromUniqueImpl
 
   private def chainUniqueFromUniqueImpl[A: Type, T: Type](
       builder: Expr[InstanceUniqueBuilder[A]],
@@ -580,7 +563,6 @@ object Schema:
       val builtInst = b.toInstance
       InstanceUniqueBuilder[A](builtInst, Seq(FieldName(${ Expr(columnName) })), None)
     }
-  end chainUniqueFromUniqueImpl
 
   private def instanceFKAndImpl[A: Type, T: Type, T2: Type](
       builder: Expr[InstanceFKBuilder[A, T]],
@@ -591,7 +573,6 @@ object Schema:
       val b = $builder
       InstanceFKBuilder[A, T2](b.instance, b.fromColumns :+ FieldName(${ Expr(columnName) }))
     }
-  end instanceFKAndImpl
 
   // Group WHERE macro implementations
   private def groupWhereImpl[A: Type, T: Type](
@@ -642,7 +623,6 @@ object Schema:
         toTableInstance.columnMap,
       )
     }
-  end instanceFKReferencesImpl
 
   private def instanceFKRefAndImpl[A: Type, To: Type](
       builder: Expr[InstanceFKRefBuilder[A, To, ?]],
@@ -659,7 +639,6 @@ object Schema:
         b.toColumnMap,
       )
     }
-  end instanceFKRefAndImpl
 
 end Schema
 
@@ -723,7 +702,6 @@ final case class InstanceIndexBuilder[A](
       instance.indexes :+ spec,
       instance.uniqueConstraints,
     )
-  end toInstance
 end InstanceIndexBuilder
 
 /** Builder for WHERE column selection on Instance indexes.
@@ -813,7 +791,6 @@ final case class InstanceWhereConditionBuilder[A](
       instance.indexes :+ spec,
       instance.uniqueConstraints,
     )
-  end toInstance
 end InstanceWhereConditionBuilder
 
 object InstanceWhereConditionBuilder:
@@ -830,7 +807,6 @@ object InstanceWhereConditionBuilder:
       conditions,
       operator,
     )
-end InstanceWhereConditionBuilder
 
 /** Builder for foreign keys on Instance with proper type inference.
   */
@@ -901,7 +877,6 @@ final case class InstanceFKConfigBuilder[A, To](
       instance.indexes,
       instance.uniqueConstraints,
     )
-  end build
 
   /** Returns the complete DDL (CREATE TABLE + CREATE INDEX statements) as an SqlFragment. */
   def ddl(ifNotExists: Boolean = true)(using dialect: Dialect): SqlFragment =
@@ -1000,7 +975,6 @@ final case class InstanceUniqueBuilder[A](
       instance.indexes,
       instance.uniqueConstraints :+ spec,
     )
-  end toInstance
 end InstanceUniqueBuilder
 
 // === Grouped WHERE condition builders ===

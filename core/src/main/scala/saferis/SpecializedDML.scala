@@ -22,7 +22,6 @@ object SpecializedDML:
         .append(SqlFragment.text(" returning "))
         .append(table.returningColumnsSql)
     sql.queryOne[A]
-  end insertReturning
 
   /** Update with RETURNING clause - only available for dialects that support it */
   inline def updateReturning[A](entity: A)(using
@@ -40,7 +39,6 @@ object SpecializedDML:
         .append(SqlFragment.text(" returning "))
         .append(table.returningColumnsSql)
     sql.queryOne[A]
-  end updateReturning
 
   /** Delete with RETURNING clause - only available for dialects that support it */
   inline def deleteReturning[A](entity: A)(using
@@ -56,7 +54,6 @@ object SpecializedDML:
         .append(SqlFragment.text(" returning "))
         .append(table.returningColumnsSql)
     sql.queryOne[A]
-  end deleteReturning
 
   /** UPSERT operation - only available for dialects that support it.
     *
@@ -79,7 +76,6 @@ object SpecializedDML:
         .append(SqlFragment.text(s" on conflict ($conflicts) do update set "))
         .append(table.updateSetClause(entity))
     sql.dml
-  end upsert
 
   /** Create index with IF NOT EXISTS - only available for dialects that support it */
   inline def createIndexIfNotExists[A](
@@ -93,7 +89,6 @@ object SpecializedDML:
     val sql =
       SqlFragment.text(dialect.createIndexIfNotExistsSql(indexName, table.name, columnNames, unique))
     sql.dml
-  end createIndexIfNotExists
 
   /** JSON field extraction - only available for dialects that support JSON.
     *

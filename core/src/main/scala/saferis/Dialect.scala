@@ -83,7 +83,6 @@ trait Dialect:
     SqlText(
       s"create index$ifNotExistsClause ${escapeIdentifier(indexName)} on ${escapeIdentifier(tableName)} (${columnNames.map(escapeIdentifier).mkString(", ")})$whereClause"
     )
-  end createIndexSql
 
   /** Returns the SQL for creating a unique index.
     *
@@ -111,7 +110,6 @@ trait Dialect:
     SqlText(
       s"create unique index$ifNotExistsClause ${escapeIdentifier(indexName)} on ${escapeIdentifier(tableName)} (${columnNames.map(escapeIdentifier).mkString(", ")})$whereClause"
     )
-  end createUniqueIndexSql
 
   /** Returns the SQL for dropping an index.
     *

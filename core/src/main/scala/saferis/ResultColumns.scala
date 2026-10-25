@@ -11,6 +11,7 @@ enum ResultColumns:
 
   /** These labels. Matching is the same first-hit, case-insensitive match as [[SqlRow.get]]. */
   case Labels(names: Chunk[ColumnName])
+end ResultColumns
 
 object ResultColumns:
   /** Indexes to materialize, in result order. A later duplicate of a label is not included: [[SqlRow.get]] would not
@@ -29,7 +30,6 @@ object ResultColumns:
               if wantedHit && !already then (taken :+ index, seen :+ label)
               else (taken, seen)
         kept
-end ResultColumns
 
 /** A decode and the columns it will ask for. The two travel together so a driver can skip the rest. */
 final case class RowRead[A](columns: ResultColumns, decode: SqlRow => Either[SaferisError, A])

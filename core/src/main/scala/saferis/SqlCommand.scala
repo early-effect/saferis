@@ -58,7 +58,6 @@ private[saferis] object SqlPieces:
         b += param
     flush()
     b.result()
-  end merge
 
   /** Replace every `Ident` with its quoted text. Already-quoted `Text` is left alone. */
   def quote(pieces: Chunk[SqlPiece], identifierQuote: String): Chunk[SqlPiece] =
@@ -80,7 +79,6 @@ private[saferis] object SqlPieces:
           sb.append(placeholder(n, value.sqlType))
           n + 1
     SqlText(sb.toString)
-  end render
 
   def show(pieces: Chunk[SqlPiece], identifierQuote: String): SqlText =
     val sb = new StringBuilder

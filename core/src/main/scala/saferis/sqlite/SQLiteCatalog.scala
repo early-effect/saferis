@@ -27,7 +27,6 @@ private[saferis] object SQLiteCatalog:
             fkRows     <- run(foreignKeyQuery(table))(readForeignKey)
             indexRows  <- run(indexQuery(table))(readIndex)
           yield Some(CatalogRows.table(stored, columnRows, keyRows, uniqueRows, fkRows, indexRows))
-  end introspect
 
   /** `main` unless the name says `schema.table`. */
   private final case class ParsedName(schema: String, table: String)

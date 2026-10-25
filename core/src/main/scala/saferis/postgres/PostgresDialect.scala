@@ -69,7 +69,6 @@ object PostgresDialect
     SqlText(
       s"insert into ${escapeIdentifier(tableName)} $insertColumns on conflict ($conflicts) do update set $updateColumns"
     )
-  end upsertSql
 
   def upsertDoNothingSql(tableName: TableName, insertColumns: SqlText, conflictColumns: Seq[ColumnName]): SqlText =
     val conflicts = conflictColumns.map(escapeIdentifier).mkString(", ")

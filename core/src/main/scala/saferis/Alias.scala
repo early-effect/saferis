@@ -52,7 +52,6 @@ object Alias:
           "Alias requires a string literal. " +
             "For runtime identifiers, use Placeholder.identifier() or dialect.escapeIdentifier() instead."
         )
-    end match
   end applyImpl
 
   /** Internal constructor that bypasses the literal-only check. Used for values the library knows are safe: generated

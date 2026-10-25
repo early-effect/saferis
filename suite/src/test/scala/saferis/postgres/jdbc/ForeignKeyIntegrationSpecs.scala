@@ -109,7 +109,6 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
           case Left(SaferisError.ForeignKeyViolation(_)) => true
           case _                                         => false
       )
-      end for
     },
     test("FK constraint allows insert when parent exists") {
       val orders = Schema[Order]
@@ -136,7 +135,6 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
         result <-
           (sql"""insert into fk_int_orders ("userId", "productId", amount) values (1, 1, 100.00)""".insert).either
       yield assertTrue(result.isRight)
-      end for
     },
     test("ON DELETE CASCADE deletes child rows") {
       val orders = Schema[Order]
@@ -171,7 +169,6 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
         countBefore.map(_.count).contains(1),
         countAfter.map(_.count).contains(0),
       )
-      end for
     },
     test("ON DELETE SET NULL sets FK column to null") {
       // For SET NULL, the FK column must be nullable. We create the table with FK via SQL
@@ -234,7 +231,6 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
         // Try to delete user (should fail due to RESTRICT)
         result <- (sql"delete from fk_int_users where id = 1".delete).either
       yield assertTrue(result.isLeft)
-      end for
     },
     test("compound FK constraint works correctly") {
       val orderItems = Schema[OrderItem]
@@ -266,7 +262,6 @@ object ForeignKeyIntegrationSpecs extends ZIOSpecDefault:
           case Left(SaferisError.ForeignKeyViolation(_)) => true
           case _                                         => false,
       )
-      end for
     },
   ).provideShared(xaLayer) @@ TestAspect.sequential
 

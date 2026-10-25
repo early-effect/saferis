@@ -20,4 +20,3 @@ object IdentifierConformance:
           got <- sql"select ${identifier(tricky)} from ${identifier(table)} where ${identifier(order)} = ${1}"
             .queryValue[Int]
         yield assertTrue(got.contains(2))
-end IdentifierConformance

@@ -77,8 +77,6 @@ private object MySqlAdapter extends StandardJdbcAdapter:
       case "bigint unsigned"                   =>
         ref(SqlType.Numeric, rs.getBigDecimal(i))(v => SqlValue.Numeric(BigDecimal(v)))(rs)
       case _ => super.read(rs, column)
-    end match
-  end read
 
   /** MySQL reports most integrity failures as SQLSTATE `23000`. The errno says which one. The SQLSTATE stays. */
   override def serverError(e: SQLException): ServerError =
@@ -92,5 +90,4 @@ private object MySqlAdapter extends StandardJdbcAdapter:
       case 3024        => SqlCondition.Canceled
       case _           => base.condition
     base.copy(condition = condition)
-  end serverError
 end MySqlAdapter

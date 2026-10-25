@@ -149,7 +149,6 @@ object DataDefinitionLayer:
         case d: IndexIfNotExistsSupport =>
           d.createIndexIfNotExistsSql(indexName, tableName, keyColumnNames)
         case _ => dialect.createIndexSql(indexName, tableName, keyColumnNames, false)
-  end compoundKeyIndexSql
 
   inline def dropTable[A](ifExists: Boolean = false)(using
       table: Table[A],
@@ -176,7 +175,6 @@ object DataDefinitionLayer:
     val columnType = encoder.columnType
     val sql        = SqlFragment.text(dialect.addColumnSql(tableName, columnName, columnType))
     sql.dml
-  end addColumn
 
   inline def dropColumn[A](columnName: ColumnName)(using
       table: Table[A],
@@ -197,7 +195,6 @@ object DataDefinitionLayer:
       if unique then SqlFragment.text(dialect.createUniqueIndexSql(indexName, tableName, columnNames, where = where))
       else SqlFragment.text(dialect.createIndexSql(indexName, tableName, columnNames, where = where))
     sql.dml
-  end createIndex
 
   /** Returns CREATE INDEX SQL for compound key indexes only. Use Instance-based createTable with @@ index aspects for
     * custom indexes.
@@ -215,7 +212,6 @@ object DataDefinitionLayer:
     val keyColumns       = table.columns.filter(_.isKey)
     val compoundKeyIndex = Option.when(keyColumns.length > 1)(compoundKeyIndexSql(table.name, keyColumns).dml)
     ZIO.collectAll(compoundKeyIndex.toSeq)
-  end createIndexes
 
   inline def dropIndex(indexName: IndexName, ifExists: Boolean = false)(using
       dialect: Dialect

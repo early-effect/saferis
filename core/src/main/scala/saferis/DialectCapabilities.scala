@@ -86,7 +86,6 @@ trait IndexIfNotExistsSupport:
     SqlText(
       s"create ${uniqueClause}index if not exists ${escapeIdentifier(indexName)} on ${escapeIdentifier(tableName)} ($columns)$whereClause"
     )
-  end createIndexIfNotExistsSql
 end IndexIfNotExistsSupport
 
 /** Trait for dialects that support advanced ALTER TABLE operations */
@@ -177,7 +176,6 @@ trait UpsertSupport:
     val baseUpsert  = upsertSql(tableName, insertColumns, conflictColumns, updateColumns)
     val whereClause = conflictWhere.map(w => s" where $w").getOrElse("")
     SqlText(baseUpsert + whereClause)
-  end upsertWithWhereSql
 
   /** Returns SQL for an UPSERT with DO NOTHING (insert only if no conflict).
     *

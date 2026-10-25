@@ -34,7 +34,6 @@ object UpsertSpecs:
         _       <- (ddl.dropTable[LockRow]())
       yield assertTrue(results.size == 1) &&
         assertTrue(results.head.nodeId == "node-1")
-      end for
     ,
     test("basic upsert updates existing row"):
       val now = Instant.now()
@@ -56,7 +55,6 @@ object UpsertSpecs:
         _       <- (ddl.dropTable[LockRow]())
       yield assertTrue(results.size == 1) &&
         assertTrue(results.head.nodeId == "node-2")
-      end for
     ,
     test("conditional upsert only updates when condition met"):
       val now = Instant.now()
@@ -80,7 +78,6 @@ object UpsertSpecs:
         _       <- (ddl.dropTable[LockRow]())
       yield assertTrue(count == 0) && // No rows affected because condition not met
         assertTrue(results.head.nodeId == "node-1")
-      end for
     ,
     test("conditional upsert with OR nodeId = EXCLUDED.nodeId"):
       val now = Instant.now()
@@ -106,7 +103,6 @@ object UpsertSpecs:
         _       <- (ddl.dropTable[LockRow]())
       yield assertTrue(count == 1) && // Updated because same node
         assertTrue(results.head.expiresAt.isAfter(now.plusSeconds(100)))
-      end for
     ,
     test("upsert with returning"):
       val now    = Instant.now()
@@ -124,31 +120,27 @@ object UpsertSpecs:
         _ <- (ddl.dropTable[LockRow]())
       yield assertTrue(result.isDefined) &&
         assertTrue(result.get.instanceId == "instance-1")
-      end for
     ,
     test("doNothing ignores conflict"):
       val now = Instant.now()
-      val res =
-        for
-          _ <- (ddl.createTable[LockRow]())
-          // First insert
-          _ <- (dml.insert(LockRow("instance-1", "node-1", now, now.plusSeconds(60))))
-          // Try to insert with DO NOTHING - should be ignored
-          count <- (
-            Upsert[LockRow]
-              .values(LockRow("instance-1", "node-2", now.plusSeconds(10), now.plusSeconds(120)))
-              .onConflict(_.instanceId)
-              .doNothing
-              .build
-              .dml
-          )
-          // Verify - should still have original values
-          results <- (Query[LockRow].where(_.instanceId).eq("instance-1").query[LockRow])
-          _       <- (ddl.dropTable[LockRow]())
-        yield assertTrue(count == 0) && // No rows affected (conflict ignored)
-          assertTrue(results.head.nodeId == "node-1")
-      end res
-      res,
+      for
+        _ <- (ddl.createTable[LockRow]())
+        // First insert
+        _ <- (dml.insert(LockRow("instance-1", "node-1", now, now.plusSeconds(60))))
+        // Try to insert with DO NOTHING - should be ignored
+        count <- (
+          Upsert[LockRow]
+            .values(LockRow("instance-1", "node-2", now.plusSeconds(10), now.plusSeconds(120)))
+            .onConflict(_.instanceId)
+            .doNothing
+            .build
+            .dml
+        )
+        // Verify - should still have original values
+        results <- (Query[LockRow].where(_.instanceId).eq("instance-1").query[LockRow])
+        _       <- (ddl.dropTable[LockRow]())
+      yield assertTrue(count == 0) && // No rows affected (conflict ignored)
+        assertTrue(results.head.nodeId == "node-1"),
   ) @@ TestAspect.sequential
 
   def conformance = suite("UpsertSpecs")(

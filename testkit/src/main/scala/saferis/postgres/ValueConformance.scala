@@ -75,7 +75,6 @@ object ValueConformance:
           byteHit.contains(1),
           missed.isEmpty,
         )
-        end for
       ,
       test("a listener sees user statements and not transaction control"):
         for

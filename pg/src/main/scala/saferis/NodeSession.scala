@@ -124,7 +124,6 @@ object NodeSession:
         case NonFatal(t) =>
           register(before *> ZIO.fail(AwaitFailure.Thrown(t)))
           Left(ZIO.unit)
-      end try
 
   private def failureMessage(failure: AwaitFailure): String = failure match
     case AwaitFailure.Rejected(error) => PgErrors.from(error).message
@@ -277,7 +276,6 @@ private final class NodeConnection(
             else (),
         )
         Left(ZIO.succeed { cancelled = true })
-  end readBatch
 
   private def cursorRows(
       result: PgResult,

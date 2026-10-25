@@ -76,8 +76,6 @@ trait StandardJdbcAdapter extends JdbcAdapter:
       case Types.TIME_WITH_TIMEZONE =>
         ref(SqlType.TimeTz, rs.getObject(i, classOf[OffsetTime]))(SqlValue.TimeTz(_))(rs)
       case _ => other(rs, column)
-    end match
-  end read
 
   /** A column this adapter does not model: its text, labeled with the driver's type name. */
   protected def other(rs: ResultSet, column: JdbcColumn): Either[SaferisError, SqlValue] =

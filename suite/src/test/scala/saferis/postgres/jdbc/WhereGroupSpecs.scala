@@ -60,7 +60,6 @@ object WhereGroupSpecs extends ZIOSpecDefault:
         _ <- (ddl.dropTable[TestRow]())
       yield assertTrue(results.size == 1) && // Only the pending row (active=true)
         assertTrue(results.head.status == "pending")
-      end for
     ,
     test("Query with mixed type OR condition"):
       val now = Instant.now()
@@ -80,7 +79,6 @@ object WhereGroupSpecs extends ZIOSpecDefault:
         )
         _ <- (ddl.dropTable[TestRow]())
       yield assertTrue(results.size == 2) // unclaimed + expired claim
-      end for
     ,
     test("Update with andWhere updates correct rows"):
       val now = Instant.now()
@@ -108,11 +106,10 @@ object WhereGroupSpecs extends ZIOSpecDefault:
         _         <- (ddl.dropTable[TestRow]())
       yield assertTrue(updated == 1) && // Only one row updated (empty claimedBy)
         assertTrue(remaining.isEmpty)   // The claimable row was claimed
-      end for
     ,
     test("Query with is null in andWhere"):
       val now = Instant.now()
-      val res = for
+      for
         _ <- (ddl.createTable[NullableRow]())
         // Insert test data
         _ <- (dml.insert(NullableRow(-1, Some("active"), Some("node-1"), Some(now.plusSeconds(60)), now, true)))
@@ -127,8 +124,7 @@ object WhereGroupSpecs extends ZIOSpecDefault:
             .query[NullableRow]
         )
         _ <- (ddl.dropTable[NullableRow]())
-      yield assertTrue(results.size == 2)
-      res,
+      yield assertTrue(results.size == 2),
     // status=None row and claimedBy=None rows
   ).provideShared(xaLayer) @@ TestAspect.sequential
 

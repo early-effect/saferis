@@ -154,10 +154,8 @@ object Interpolator:
               val ph  = summonPlaceholder[tp](arg)
               val acc = '{ $builder.addOne($ph) }
               getPlaceHoldersExpr(rest, acc)
-        end if
       case _ =>
         '{ $builder.result() }
-    end match
   end getPlaceHoldersExpr
 
   private def summonPlaceholder[T: Type](arg: Expr[T])(using Quotes): Expr[Placeholder] =
@@ -181,7 +179,5 @@ object Interpolator:
         s"{${t.symbol.name}}"
       case _ =>
         "?"
-    end match
-  end argDisplayString
 
 end Interpolator

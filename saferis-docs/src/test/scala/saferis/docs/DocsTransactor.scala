@@ -21,7 +21,6 @@ object DocsTransactor:
       c.start()
       c
     finally thread.setContextClassLoader(previous)
-  end container
 
   lazy val dataSource: DataSource =
     val ds = PGSimpleDataSource()

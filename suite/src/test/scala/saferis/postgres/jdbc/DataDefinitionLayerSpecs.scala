@@ -56,7 +56,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
             .queryOne[CountResult]
       yield assertTrue(result >= 0) && // DDL operations may return 0 for success
         assertTrue(tableExists.map(_.count).contains(1))
-      end for
 
     test("create table with generated primary key"):
       @tableName("test_ddl_generated")
@@ -73,7 +72,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
             .queryOne[CountResult]
       yield assertTrue(result >= 0) &&
         assertTrue(tableExists.map(_.count).contains(1))
-      end for
 
     test("drop table"):
       @tableName("test_ddl_drop")
@@ -94,7 +92,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           sql"select * from test_ddl_drop".query[DropTable].either
       yield assertTrue(dropResult >= 0) &&
         assertTrue(queryAttempt.isLeft) // Should fail because table was dropped
-      end for
 
     test("truncate table"):
       @tableName("test_ddl_truncate")
@@ -122,7 +119,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
       yield assertTrue(truncateResult >= 0) &&
         assertTrue(beforeTruncate.map(_.count).contains(2)) &&
         assertTrue(afterTruncate.map(_.count).contains(0))
-      end for
 
     test("add column with string type"):
       @tableName("test_ddl_alter_string")
@@ -148,7 +144,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
       yield assertTrue(addResult >= 0) &&
         assertTrue(checkResult.contains(AlterTableString(1, "Test"))) &&
         assertTrue(dropColResult >= 0)
-      end for
 
     test("add column with encoder - integer type"):
       @tableName("test_ddl_alter_int")
@@ -179,7 +174,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         assertTrue(checkResult.contains(AlterTableInt(1, "Test User"))) &&
         assertTrue(scoreResult.map(_.score).contains(85)) &&
         assertTrue(dropColResult >= 0)
-      end for
 
     test("add column with encoder - boolean type"):
       @tableName("test_ddl_alter_bool")
@@ -211,7 +205,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         assertTrue(activeResult.map(_.is_active).contains(true)) &&
         assertTrue(inactiveResult.map(_.is_active).contains(false)) &&
         assertTrue(dropColResult >= 0)
-      end for
 
     test("add column with encoder - double type"):
       @tableName("test_ddl_alter_double")
@@ -238,7 +231,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
       yield assertTrue(addResult >= 0) &&
         assertTrue(priceResult.map(_.price).contains(99.99)) &&
         assertTrue(dropColResult >= 0)
-      end for
 
     test("add column with encoder - optional type"):
       @tableName("test_ddl_alter_optional")
@@ -270,7 +262,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         assertTrue(ageResult.map(_.age).contains(Some(25))) &&
         assertTrue(noAgeResult.map(_.age).contains(None)) &&
         assertTrue(dropColResult >= 0)
-      end for
 
     test("create and drop index"):
       @tableName("test_ddl_index")
@@ -303,7 +294,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         assertTrue(duplicateAttempt.isLeft) && // Should fail due to unique constraint
         assertTrue(dropIndex1Result >= 0) &&
         assertTrue(dropIndex2Result >= 0)
-      end for
 
     test("create table with compound keys"):
       @tableName("test_ddl_compound_key")
@@ -328,7 +318,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
       yield assertTrue(result >= 0) &&
         assertTrue(queryResult.contains(CompoundKeyTable(1, 2, "2023-01-01"))) &&
         assertTrue(duplicateAttempt.isLeft) // Should fail due to primary key constraint
-      end for
 
     test("create table with indexes via createIndex"):
       @tableName("test_ddl_indexed_cols")
@@ -359,7 +348,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         _ <-
           insert(IndexedTable(2, "John", "john2@example.com", "Another John"))
       yield assertTrue(duplicateEmailAttempt.isLeft) // Should fail due to unique constraint
-      end for
 
     test("create table without indexes"):
       @tableName("test_ddl_no_indexes")
@@ -377,7 +365,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           sql"select * from test_ddl_no_indexes where id = 1".queryOne[NoIndexTable]
       yield assertTrue(result >= 0) &&
         assertTrue(queryResult.contains(NoIndexTable(1, "Test")))
-      end for
 
     test("createIndexes function for compound keys"):
       @tableName("test_ddl_create_indexes")
@@ -404,7 +391,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
             .queryOne[CreateIndexesTable]
       yield assertTrue(indexResults.nonEmpty) &&
         assertTrue(queryResult.contains(CreateIndexesTable(1, 2, "John")))
-      end for
 
     test("createIndexesSql function for compound keys"):
       @tableName("test_ddl_indexes_sql")
@@ -434,7 +420,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
       yield assertTrue(indexSql.nonEmpty) &&
         assertTrue(indexSql.contains("compound_key")) && // Should have compound key index
         assertTrue(queryResult.contains(IndexesSqlTable(1, 2, "John")))
-      end for
 
     test("table with compound key and generated column"):
       @tableName("test_ddl_compound_generated")
@@ -464,7 +449,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         assertTrue(duplicateAttempt match
           case Left(_: SaferisError.UniqueViolation) => true
           case _                                     => false)
-      end for
 
     test("create table with unique constraint columns"):
       @tableName("test_ddl_unique_constraints")
@@ -503,7 +487,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           insert(UniqueConstraintTable(4, "Alice", "alice@example.com", "alice_unique", "Alice user"))
       yield assertTrue(duplicateUsernameAttempt.isLeft) && // Should fail due to unique constraint
         assertTrue(duplicateEmailAttempt.isLeft)           // Should fail due to unique index
-      end for
 
     test("verify encoder method infers correct PostgreSQL types"):
       @tableName("test_ddl_encoder_types")
@@ -533,7 +516,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         result <-
           sql"select id, name from test_ddl_encoder_types where id = 1".queryOne[EncoderTestTable]
       yield assertTrue(result.contains(EncoderTestTable(1, "test")))
-      end for
 
     test("create table with UUID primary key"):
       @tableName("test_ddl_uuid_key")
@@ -555,7 +537,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
       yield assertTrue(result >= 0) &&
         assertTrue(tableExists.map(_.count).contains(1)) &&
         assertTrue(fetched.contains(UuidKeyTable(uuidVal, "Test Name")))
-      end for
 
     test("compound unique constraints with named groups"):
       @tableName("test_ddl_compound_unique")
@@ -596,7 +577,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
       yield assertTrue(result >= 0) &&
         assertTrue(duplicateCompoundAttempt.isLeft) && // Should fail due to compound unique constraint
         assertTrue(duplicateSingleAttempt.isLeft)      // Should fail due to single-column unique constraint
-      end for
 
     test("default values from case class constructor are used in DDL"):
       @tableName("test_ddl_defaults")
@@ -653,7 +633,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         assertTrue(statusResult.map(_.status).contains("pending")) &&
         assertTrue(retryResult.map(_.retryCount).contains(0)) &&
         assertTrue(activeResult.map(_.isActive).contains(true))
-      end for
 
     test("partial indexes with WHERE clause"):
       @tableName("test_ddl_partial_index")
@@ -687,7 +666,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         _ <-
           dropIndex(IndexName("idx_pending_retry"))
       yield assertTrue(count.map(_.count).contains(2))
-      end for
 
     test("Schema-based compound indexes"):
       import saferis.Schema.*
@@ -719,7 +697,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
       yield assertTrue(result >= 0) &&
         assertTrue(duplicateAttempt.isLeft) && // Should fail due to compound unique index
         assertTrue(count.map(_.count).contains(1))
-      end for
 
     test("non-Option fields are NOT NULL, Option fields are nullable"):
       @tableName("test_ddl_not_null")
@@ -765,7 +742,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
         assertTrue(ageCol.isNullable) &&
         assertTrue(fetched.isDefined) &&
         assertTrue(missingNotNullAttempt.isLeft) // Should fail due to NOT NULL constraint
-      end for
 
     test("Schema-based partial indexes with WHERE clause"):
       import saferis.Schema.*
@@ -792,7 +768,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
           sql"select count(*) as count from test_ddl_partial_index_aspect".queryOne[CountResult]
       yield assertTrue(result >= 0) &&
         assertTrue(count.map(_.count).contains(2))
-      end for
 
     test("Schema-based partial unique indexes"):
       import saferis.Schema.*
@@ -827,7 +802,6 @@ object DataDefinitionLayerSpecs extends ZIOSpecDefault:
       yield assertTrue(result >= 0) &&
         assertTrue(count.map(_.count).contains(3)) && // 3 rows inserted before the duplicate attempt
         assertTrue(duplicateActiveAttempt.isLeft)     // Should fail due to partial unique constraint
-      end for
 
   final case class CountResult(count: Long) derives Table
 

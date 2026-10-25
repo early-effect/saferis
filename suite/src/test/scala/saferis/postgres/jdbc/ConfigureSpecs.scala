@@ -41,4 +41,3 @@ object ConfigureSpecs extends ZIOSpecDefault:
                     case _                             => false
                 case _ => false,
     ) @@ TestAspect.sequential @@ TestAspect.withLiveClock @@ TestAspect.timeout(30.seconds)
-end ConfigureSpecs

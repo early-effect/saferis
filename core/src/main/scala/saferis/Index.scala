@@ -31,4 +31,3 @@ final case class IndexSpec[A](
     val indexName    = name.getOrElse(IndexName.default(tableName, columnLabels))
     if unique then dialect.createUniqueIndexSql(indexName, tableName, columnLabels, false, where)
     else dialect.createIndexSql(indexName, tableName, columnLabels, false, where)
-end IndexSpec

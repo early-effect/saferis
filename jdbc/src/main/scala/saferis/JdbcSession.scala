@@ -278,7 +278,6 @@ private object JdbcReads:
           typeName = TypeName(Option(meta.getColumnTypeName(index)).getOrElse("").toLowerCase(Locale.ROOT)),
           jdbcType = meta.getColumnType(index),
         )
-  end columns
 
   def materialize(
       adapter: JdbcAdapter,
@@ -293,7 +292,6 @@ private object JdbcReads:
         case Left(err)  => failed = Some(err)
         case Right(row) => rows += row
     failed.fold[Either[SaferisError, Chunk[SqlRow]]](Right(rows.result()))(Left(_))
-  end materialize
 
   def readRow(
       adapter: JdbcAdapter,
@@ -307,5 +305,4 @@ private object JdbcReads:
         case (Left(err), _)       => Left(err)
         case (Right(acc), column) => adapter.read(rs, column).map(acc :+ _)
       .map(values => SqlRow(chosen.map(_.label), values))
-  end readRow
 end JdbcReads

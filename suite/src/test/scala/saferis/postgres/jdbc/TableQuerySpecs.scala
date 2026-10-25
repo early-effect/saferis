@@ -19,4 +19,3 @@ object TableQuerySpecs extends ZIOSpecDefault:
             .query[Generated]
       yield assertTrue(a.id == 5) && assertTrue(b.size == 5)
   val spec = suite("Tables")(queries).provideShared(xaLayer)
-end TableQuerySpecs

@@ -54,4 +54,3 @@ extension [A](instance: Instance[A])
     */
   transparent inline infix def as(inline alias: String) =
     instance.withAlias(alias)
-end extension

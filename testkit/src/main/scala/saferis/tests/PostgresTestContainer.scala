@@ -19,3 +19,4 @@ object PostgresTestContainer:
 
   val live: ZLayer[Any, Throwable, PostgresTestContainer] =
     PostgresTestContainerPlatform.live
+end PostgresTestContainer

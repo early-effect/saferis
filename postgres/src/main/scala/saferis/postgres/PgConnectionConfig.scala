@@ -39,6 +39,7 @@ enum SslMode:
 
   /** Trust the CA and check the server hostname. */
   case VerifyFull(ca: Pem)
+end SslMode
 
 /** Host, credentials, TLS, and how long `connect` may wait. Drivers add their own pool settings around this. */
 final case class PgConnectionConfig(
@@ -63,7 +64,6 @@ final case class PgConnectionConfig(
     val chosen  = parameters.filterNot((name, _) => names.contains(name.toLowerCase(java.util.Locale.ROOT)))
     val ordered = chosen.toSeq.sortBy(_._1) ++ required.toSeq.sortBy(_._1)
     ordered.map((name, value) => s"-c ${PgConnectionConfig.escapeOption(s"$name=$value")}").mkString(" ")
-end PgConnectionConfig
 
 object PgConnectionConfig:
   /** The server splits `options` on whitespace. A backslash escapes the next character, so both are escaped. */

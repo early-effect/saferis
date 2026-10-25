@@ -23,4 +23,3 @@ final case class UniqueConstraintSpec[A](
     val name         = constraintName.getOrElse(ConstraintName(s"uq_${columnLabels.mkString("_")}"))
     val quotedCols   = columnLabels.map(dialect.escapeIdentifier).mkString(", ")
     SqlText(s"constraint ${dialect.escapeIdentifier(name)} unique ($quotedCols)")
-end UniqueConstraintSpec

@@ -54,7 +54,6 @@ private[pg] object PgWire:
       allowExitOnIdle = true,
       types = rawTypes,
     )
-  end poolConfig
 
   /** `PgText` decodes `DateStyle=ISO` text. A user parameter cannot change it. */
   private val Required: Map[String, String] = Map("DateStyle" -> "ISO")
@@ -148,7 +147,6 @@ private[pg] object PgWire:
       val grid   = result.rows
       if grid == null || js.isUndefined(grid) then Right(Chunk.empty)
       else readGrid(labels, oids, grid, columns)
-  end readFields
 
   private def readGrid(
       labels: Chunk[ColumnName],
@@ -165,7 +163,6 @@ private[pg] object PgWire:
         case Right(row) => rows += row
       index += 1
     failed.fold[Either[SaferisError, Chunk[SqlRow]]](Right(rows.result()))(Left(_))
-  end readGrid
 
   private def readRow(
       labels: Chunk[ColumnName],

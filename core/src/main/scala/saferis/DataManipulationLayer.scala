@@ -21,7 +21,6 @@ object DataManipulationLayer:
       o <- sql.queryOne[A]
       a <- ZIO.fromOption(o).orElseFail(SaferisError.ReturningOperationFailed("insert", table.name))
     yield a
-  end insertReturning
 
   inline def update[A](a: A)(using
       table: Table[A]
@@ -45,7 +44,6 @@ object DataManipulationLayer:
       o <- sql.queryOne[A]
       a <- ZIO.fromOption(o).orElseFail(SaferisError.ReturningOperationFailed("update", table.name))
     yield a
-  end updateReturning
 
   inline def updateWhereReturning[A](a: A, whereClause: SqlFragment)(using
       table: Table[A]
@@ -57,7 +55,6 @@ object DataManipulationLayer:
       o <- sql.queryOne[A]
       a <- ZIO.fromOption(o).orElseFail(SaferisError.ReturningOperationFailed("update", table.name))
     yield a
-  end updateWhereReturning
 
   inline def delete[A](a: A)(using
       table: Table[A]
@@ -81,7 +78,6 @@ object DataManipulationLayer:
       o <- sql.queryOne[A]
       a <- ZIO.fromOption(o).orElseFail(SaferisError.ReturningOperationFailed("delete", table.name))
     yield a
-  end deleteReturning
 
   inline def deleteWhereReturning[A](whereClause: SqlFragment)(using
       table: Table[A]
