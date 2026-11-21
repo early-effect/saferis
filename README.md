@@ -110,5 +110,5 @@ The documentation is built with [Specular](https://github.com/early-effect/specu
 ## Development
 
 ```bash
-./scripts/install-git-hooks  # once per clone: pre-commit runs scalafmtCheckAll
+./scripts/install-git-hooks  # once per clone: pre-commit runs scalafmtCheckAll, commit-msg rejects agent attribution
 ```
